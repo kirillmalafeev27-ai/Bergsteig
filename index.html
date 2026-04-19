@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Bergsteig — Prototype</title>
+  <link rel="stylesheet" href="styles.css" />
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="app">
+    <canvas id="scene"></canvas>
+
+    <div id="snow-overlay"></div>
+
+    <div id="hud">
+      <div id="altitude">Высота: <span data-altitude>0</span> м</div>
+      <div id="lane-indicator">
+        <div class="lane" data-lane="0"></div>
+        <div class="lane" data-lane="1"></div>
+        <div class="lane" data-lane="2"></div>
+        <div id="player-marker"></div>
+      </div>
+      <div id="bonuses">
+        <div class="bonus" data-bonus="clear">
+          <span class="key">Space</span>
+          <span class="label">Очистить камеру</span>
+          <span class="cd" data-cd>готово</span>
+        </div>
+        <div class="bonus" data-bonus="snowwall">
+          <span class="key">F</span>
+          <span class="label">Стена снега</span>
+          <span class="cd" data-cd>готово</span>
+        </div>
+      </div>
+      <div id="snow-meter">
+        <div class="label">Снег на камере</div>
+        <div class="bar"><div class="fill" data-snow-fill></div></div>
+      </div>
+    </div>
+
+    <div id="question-panel" class="hidden">
+      <div id="question-timer"><div data-timer-fill></div></div>
+      <div id="question-text" data-question-text></div>
+      <div id="answers">
+        <button data-answer="0"></button>
+        <button data-answer="1"></button>
+        <button data-answer="2"></button>
+      </div>
+    </div>
+
+    <div id="overlay-screen" class="hidden">
+      <h1 data-overlay-title>Bergsteig</h1>
+      <p data-overlay-body></p>
+      <button data-overlay-action>Начать восхождение</button>
+    </div>
+
+    <div id="toast" class="hidden" data-toast></div>
+  </div>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>

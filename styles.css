@@ -1,0 +1,102 @@
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body { width: 100%; height: 100%; overflow: hidden; background: #0a0e14; color: #e6edf3; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+
+#app { position: relative; width: 100vw; height: 100vh; }
+
+#scene { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+
+/* Snow-on-camera effect: overlay that lerps opacity with game state */
+#snow-overlay {
+  position: absolute; inset: 0; pointer-events: none;
+  background:
+    radial-gradient(circle at 20% 30%, rgba(255,255,255,0.35) 0%, transparent 8%),
+    radial-gradient(circle at 70% 60%, rgba(255,255,255,0.30) 0%, transparent 10%),
+    radial-gradient(circle at 45% 80%, rgba(255,255,255,0.28) 0%, transparent 7%),
+    radial-gradient(circle at 85% 20%, rgba(255,255,255,0.32) 0%, transparent 9%),
+    radial-gradient(circle at 10% 70%, rgba(255,255,255,0.26) 0%, transparent 6%),
+    radial-gradient(circle at 55% 15%, rgba(255,255,255,0.30) 0%, transparent 8%),
+    radial-gradient(circle at 30% 55%, rgba(255,255,255,0.24) 0%, transparent 5%);
+  mix-blend-mode: screen;
+  opacity: 0;
+  filter: blur(0.6px);
+  transition: none;
+}
+
+/* HUD */
+#hud { position: absolute; inset: 0; pointer-events: none; padding: 20px; font-size: 14px; }
+
+#altitude { position: absolute; top: 20px; left: 20px; background: rgba(0,0,0,0.45); padding: 10px 14px; border-radius: 8px; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+#lane-indicator {
+  position: absolute; top: 20px; right: 20px;
+  display: flex; gap: 6px;
+  background: rgba(0,0,0,0.45); padding: 10px; border-radius: 8px;
+  align-items: end;
+}
+#lane-indicator .lane { width: 22px; height: 40px; background: rgba(255,255,255,0.15); border-radius: 4px; }
+#lane-indicator #player-marker {
+  position: absolute;
+  bottom: 8px;
+  width: 14px; height: 14px; border-radius: 50%;
+  background: #ffcc4d; box-shadow: 0 0 10px #ffcc4d;
+  transition: left 0.05s linear;
+  pointer-events: none;
+}
+
+#bonuses { position: absolute; bottom: 20px; left: 20px; display: flex; gap: 10px; }
+#bonuses .bonus { background: rgba(0,0,0,0.45); padding: 8px 12px; border-radius: 8px; display: flex; flex-direction: column; gap: 3px; min-width: 120px; }
+#bonuses .bonus .key { font-weight: 700; color: #8bb4ff; font-size: 11px; }
+#bonuses .bonus .label { font-size: 12px; }
+#bonuses .bonus .cd { font-size: 11px; color: #7ee07e; }
+#bonuses .bonus.cooldown .cd { color: #ff9b5c; }
+
+#snow-meter { position: absolute; bottom: 20px; right: 20px; width: 220px; background: rgba(0,0,0,0.45); padding: 10px; border-radius: 8px; }
+#snow-meter .label { font-size: 11px; margin-bottom: 4px; opacity: 0.8; }
+#snow-meter .bar { height: 8px; background: rgba(255,255,255,0.15); border-radius: 4px; overflow: hidden; }
+#snow-meter .bar .fill { height: 100%; width: 0%; background: linear-gradient(90deg, #7ee07e, #ffcc4d, #ff6b6b); transition: width 0.1s linear; }
+
+/* Question panel */
+#question-panel {
+  position: absolute; bottom: 60px; left: 50%; transform: translateX(-50%);
+  width: min(640px, 92vw);
+  background: rgba(10,14,20,0.85); backdrop-filter: blur(8px);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 12px; padding: 16px 18px; pointer-events: auto;
+}
+#question-panel.hidden { display: none; }
+#question-timer { height: 3px; background: rgba(255,255,255,0.12); border-radius: 2px; overflow: hidden; margin-bottom: 10px; }
+#question-timer div { height: 100%; width: 100%; background: linear-gradient(90deg, #7ee07e, #ffcc4d, #ff6b6b); transition: width 0.1s linear; }
+#question-text { font-size: 18px; font-weight: 600; margin-bottom: 12px; }
+#answers { display: flex; gap: 8px; }
+#answers button {
+  flex: 1; padding: 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.18);
+  background: rgba(255,255,255,0.06); color: #e6edf3;
+  font-size: 15px; font-weight: 600; cursor: pointer; pointer-events: auto;
+  transition: background 0.12s, transform 0.08s;
+}
+#answers button:hover { background: rgba(139,180,255,0.18); }
+#answers button:active { transform: scale(0.97); }
+#answers button.correct { background: rgba(126,224,126,0.35); border-color: #7ee07e; }
+#answers button.wrong { background: rgba(255,107,107,0.35); border-color: #ff6b6b; }
+
+/* Overlay (start / game over) */
+#overlay-screen {
+  position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  background: rgba(5, 7, 12, 0.82); backdrop-filter: blur(6px); gap: 18px; padding: 40px;
+  pointer-events: auto; text-align: center;
+}
+#overlay-screen.hidden { display: none; }
+#overlay-screen h1 { font-size: 48px; letter-spacing: 2px; }
+#overlay-screen p { max-width: 560px; line-height: 1.5; opacity: 0.85; }
+#overlay-screen button { padding: 14px 28px; font-size: 16px; font-weight: 700; border-radius: 8px; border: none; background: #ffcc4d; color: #0a0e14; cursor: pointer; }
+#overlay-screen button:hover { background: #ffd970; }
+
+/* Toast */
+#toast {
+  position: absolute; top: 80px; left: 50%; transform: translateX(-50%);
+  background: rgba(10,14,20,0.9); border: 1px solid rgba(255,255,255,0.18);
+  padding: 10px 18px; border-radius: 8px; font-weight: 600;
+  transition: opacity 0.3s;
+}
+#toast.hidden { opacity: 0; pointer-events: none; }
