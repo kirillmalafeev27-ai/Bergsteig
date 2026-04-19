@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: bergsteig
+    runtime: static
+    buildCommand: ""
+    staticPublishPath: ./
+    pullRequestPreviewsEnabled: false
+    headers:
+      - path: /*
+        name: Cache-Control
+        value: public, max-age=0, must-revalidate
+      - path: /src/*
+        name: Content-Type
+        value: application/javascript; charset=utf-8
