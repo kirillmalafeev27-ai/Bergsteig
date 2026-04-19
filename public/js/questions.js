@@ -95,7 +95,7 @@ const BONUS_SLOTS = [
     bonusLabel: 'Zusatzschub',
     successCooldownMs: 18000,
     wrongCooldownMs: 3000,
-    help: 'Correct answer grants +2 extra ascent segments on top of the normal climb gain.'
+    help: 'Correct answer adds one extra climb tick on top of the base ascent tick.'
   },
   {
     id: 'step',
@@ -111,7 +111,7 @@ const BONUS_SLOTS = [
     bonusLabel: 'Kraftzug',
     successCooldownMs: 16000,
     wrongCooldownMs: 4000,
-    help: 'A strong swing reaches any lane and hard-evades avalanches, but causes longer swing-back.'
+    help: 'A strong swing reaches any lane and can break onto a side ledge to evade avalanches, but causes a long swing-back.'
   },
   {
     id: 'shield',
@@ -125,9 +125,9 @@ const BONUS_SLOTS = [
     id: 'clear',
     bonus: 'clear',
     bonusLabel: 'Klare Sicht',
-    successCooldownMs: 28000,
+    successCooldownMs: 45000,
     wrongCooldownMs: 2500,
-    help: 'Clears the camera lens and slows down fresh snow or ash buildup for a short time.'
+    help: 'Instantly clears the camera lens. Volcanic sections recharge it faster than snow levels.'
   }
 ];
 

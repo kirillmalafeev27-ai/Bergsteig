@@ -7,6 +7,8 @@ class Game {
     this.lastFrameAt = 0;
     this.pendingTimers = new Set();
     this.isActive = false;
+    this.uiDirty = true;
+    this.nextUiRefreshAt = 0;
 
     this._tick = this._tick.bind(this);
     this._handleKeyDown = this._handleKeyDown.bind(this);
@@ -50,12 +52,29 @@ class Game {
 
   _bindUi() {
     this.ui.laneButtons.forEach((button) => {
-      button.addEventListener('click', () => {
-        this.selectLane(Number(button.dataset.lane));
-      });
+      const lane = Number(button.dataset.lane);
+      this._bindFastPress(button, () => this.selectLane(lane));
     });
 
     document.addEventListener('keydown', this._handleKeyDown);
+  }
+
+  _bindFastPress(node, callback) {
+    node.addEventListener('pointerdown', (event) => {
+      if (event.button !== undefined && event.button !== 0) {
+        return;
+      }
+      event.preventDefault();
+      callback();
+    });
+
+    node.addEventListener('click', (event) => {
+      if (typeof event.detail === 'number' && event.detail > 0) {
+        return;
+      }
+      event.preventDefault();
+      callback();
+    });
   }
 
   async init(settings, callbacks = {}) {
@@ -84,7 +103,6 @@ class Game {
     this.desiredLane = 1;
     this.lateralOffset = LANE_WORLD_X[this.currentLane];
     this.lateralVelocity = 0;
-    this.motionProfile = { omega: 8.5, zeta: 0.6 };
     this.cameraObscurity = 6;
     this.clearViewUntil = 0;
     this.shieldCharges = 0;
@@ -92,14 +110,19 @@ class Game {
     this.currentHazard = null;
     this.currentHazardSignature = '';
     this.hazardElapsedMs = 0;
+    this.movementStartedAt = 0;
     this.movementDurationMs = 0;
     this.waveResolved = [];
     this.currentAction = null;
     this.currentQuestion = null;
     this.currentSlotId = null;
     this.currentTurnCorrect = false;
-    this.pendingSetback = 0;
+    this.pendingHazardSetback = 0;
+    this.pendingWrongAnswerSetback = 0;
     this.pendingDeath = null;
+    this.deathStartedAt = 0;
+    this.swingState = null;
+    this.questionLocked = false;
     this.state = 'boot';
 
     this.stats = {
@@ -114,11 +137,12 @@ class Game {
     });
 
     this._buildSlotButtons();
-    this._updateUi();
     this._showQuestion(null);
+    this._markUiDirty();
+    this._refreshUiIfNeeded(performance.now(), true);
 
     await Promise.allSettled([this.questionManager.prefetchAll()]);
-    this._queueMessage('The rope tightens. Read the first hazard.');
+    this._queueMessage('Each correct answer drives one climb tick. Read the first hazard.');
     this._prepareNextTurn();
     this.loopHandle = requestAnimationFrame(this._tick);
   }
@@ -126,6 +150,9 @@ class Game {
   destroy() {
     this.isActive = false;
     this.questionLocked = false;
+    this.swingState = null;
+    this.currentHazard = null;
+    this.currentHazardSignature = '';
 
     if (this.loopHandle) {
       cancelAnimationFrame(this.loopHandle);
@@ -145,6 +172,7 @@ class Game {
     this._showQuestion(null);
     this.ui.messageBanner.classList.add('hidden');
     this.ui.checkpointBanner.classList.add('hidden');
+    this._markUiDirty();
   }
 
   _setTimer(callback, delayMs) {
@@ -165,7 +193,9 @@ class Game {
     }
     this.messageTimer = this._setTimer(() => {
       this.ui.messageBanner.classList.add('hidden');
+      this._markUiDirty();
     }, durationMs);
+    this._markUiDirty();
   }
 
   _showCheckpoint(text) {
@@ -177,25 +207,54 @@ class Game {
     }
     this.checkpointTimer = this._setTimer(() => {
       this.ui.checkpointBanner.classList.add('hidden');
+      this._markUiDirty();
     }, 1500);
+    this._markUiDirty();
+  }
+
+  _markUiDirty() {
+    this.uiDirty = true;
+  }
+
+  _refreshUiIfNeeded(timestamp = performance.now(), force = false) {
+    if (!force && !this.uiDirty && timestamp < this.nextUiRefreshAt) {
+      return;
+    }
+    this._updateUi(timestamp);
+    this.uiDirty = false;
+    this.nextUiRefreshAt = timestamp + UI_REFRESH_MS;
   }
 
   _buildSlotButtons() {
     this.ui.slotBar.innerHTML = '';
     this.slotButtonNodes = (this.settings.slotConfigs || []).map((slotConfig, index) => {
       const button = document.createElement('button');
+      button.type = 'button';
       button.className = 'slot-btn';
-      button.addEventListener('click', () => {
+
+      const keyNode = document.createElement('div');
+      keyNode.className = 'slot-key';
+      keyNode.textContent = `${index + 1}`;
+
+      const bonusNode = document.createElement('div');
+      bonusNode.className = 'slot-bonus-name';
+
+      const topicNode = document.createElement('div');
+      topicNode.className = 'slot-topic-name';
+      topicNode.textContent = slotConfig.grammarTopic;
+
+      button.append(keyNode, bonusNode, topicNode);
+      this._bindFastPress(button, () => {
         this.selectSlot(slotConfig.slotDef.id);
       });
 
-      button.innerHTML = `
-        <div class="slot-key">${index + 1}</div>
-        <div class="slot-bonus-name">${slotConfig.slotDef.bonusLabel}</div>
-        <div class="slot-topic-name">${slotConfig.grammarTopic}</div>
-      `;
       this.ui.slotBar.appendChild(button);
-      return { button, slotConfig };
+      return {
+        button,
+        bonusNode,
+        topicNode,
+        slotConfig
+      };
     });
   }
 
@@ -219,14 +278,19 @@ class Game {
     this.currentSlotId = null;
     this.currentAction = null;
     this.currentTurnCorrect = false;
-    this.pendingSetback = 0;
+    this.pendingHazardSetback = 0;
+    this.pendingWrongAnswerSetback = 0;
     this.pendingDeath = null;
     this.hazardElapsedMs = 0;
+    this.movementStartedAt = 0;
     this.movementDurationMs = 0;
     this.waveResolved = this.currentHazard.waves.map(() => false);
+    this.swingState = null;
+    this.questionLocked = false;
     this.state = 'telegraph';
-    this.motionProfile = { omega: 8.5, zeta: 0.6 };
-    this._updateUi();
+    this._showQuestion(null);
+    this._markUiDirty();
+    this._refreshUiIfNeeded(performance.now(), true);
   }
 
   selectLane(laneIndex) {
@@ -234,7 +298,8 @@ class Game {
       return;
     }
     this.selectedLane = clamp(laneIndex, 0, 2);
-    this._updateUi();
+    this._markUiDirty();
+    this._refreshUiIfNeeded(performance.now(), true);
   }
 
   selectSlot(slotId) {
@@ -257,7 +322,8 @@ class Game {
     this.currentSlotId = slotId;
     this.state = 'question';
     this._showQuestion(question);
-    this._updateUi();
+    this._markUiDirty();
+    this._refreshUiIfNeeded(performance.now(), true);
   }
 
   answerQuestion(optionIndex) {
@@ -288,15 +354,26 @@ class Game {
       }
     });
 
-    this.ui.questionFeedback.textContent = isCorrect
-      ? `${slotDef.bonusLabel} activated.`
-      : `Wrong answer. ${slotDef.bonusLabel} does not trigger.`;
+    this.ui.questionFeedback.textContent = this._buildAnswerFeedback(slotDef, isCorrect);
+    this._markUiDirty();
 
-    const delay = isCorrect ? 820 : 1000;
+    const delay = isCorrect ? 620 : 760;
     this._setTimer(() => {
       this.questionLocked = false;
       this._finishQuestion(isCorrect);
     }, delay);
+  }
+
+  _buildAnswerFeedback(slotDef, isCorrect) {
+    if (isCorrect) {
+      return `${slotDef.bonusLabel} triggered. +1 climb tick is locked in.`;
+    }
+
+    if (this.currentLevel?.wrongAnswerSetback) {
+      return 'Wrong answer. No climb tick, and this level also drags you back by 1.';
+    }
+
+    return 'Wrong answer. No climb tick this window.';
   }
 
   _finishQuestion(isCorrect) {
@@ -319,11 +396,16 @@ class Game {
       slotDef,
       targetLane: this.currentLane,
       extraSegments: 0,
-      hardEvade: false,
+      swingMode: 'none',
+      swingDurationMs: 0,
+      swingLambda: 0,
+      swingOmega: 0,
+      swingImpulse: 0,
+      emergencyEvade: false,
+      ledgeSide: 0,
       activateShield: false,
       clearView: false,
-      profile: { omega: 8.5, zeta: 0.58 },
-      impulse: 0
+      cooldownMs: slotDef.successCooldownMs || 0
     };
 
     if (slotDef.id === 'extraMove') {
@@ -333,16 +415,23 @@ class Game {
 
     if (slotDef.id === 'step') {
       action.targetLane = this._resolveStepTarget();
-      action.profile = { omega: 8.5, zeta: 0.58 };
-      action.impulse = this._laneImpulse(action.targetLane, 0.55);
+      action.swingMode = 'weak';
+      action.swingDurationMs = WEAK_SWING_DURATION_MS;
+      action.swingLambda = 2.8;
+      action.swingOmega = 7.4;
+      action.swingImpulse = this._laneDirection(action.targetLane) * 0.44;
       return action;
     }
 
     if (slotDef.id === 'surge') {
       action.targetLane = this._resolveSurgeTarget();
-      action.profile = { omega: 7.2, zeta: 0.34 };
-      action.impulse = this._laneImpulse(action.targetLane, 1.25);
-      action.hardEvade = true;
+      action.swingMode = 'strong';
+      action.swingDurationMs = STRONG_SWING_DURATION_MS;
+      action.swingLambda = 1.02;
+      action.swingOmega = 8.6;
+      action.swingImpulse = this._laneDirection(action.targetLane) * 1.48;
+      action.emergencyEvade = this.currentHazard?.type === 'avalanche';
+      action.ledgeSide = this._resolveLedgeSide(action.targetLane);
       return action;
     }
 
@@ -353,10 +442,17 @@ class Game {
 
     if (slotDef.id === 'clear') {
       action.clearView = true;
+      action.cooldownMs = this._getClearViewCooldownMs();
       return action;
     }
 
     return action;
+  }
+
+  _getClearViewCooldownMs() {
+    return (this.currentLevel?.ashStrength || 0) >= 0.35
+      ? CLEAR_VIEW_VOLCANO_COOLDOWN_MS
+      : CLEAR_VIEW_COOLDOWN_MS;
   }
 
   _resolveStepTarget() {
@@ -390,50 +486,249 @@ class Game {
       return this.currentHazard.preferredSafeLane;
     }
 
-    return this.currentLane === 0 ? 2 : 0;
+    return this.currentLane === 2 ? 0 : 2;
   }
 
-  _laneImpulse(targetLane, strength) {
-    const targetWorldX = LANE_WORLD_X[targetLane];
-    const direction = Math.sign(targetWorldX - this.lateralOffset) || 1;
-    return direction * strength;
+  _laneDirection(targetLane, fallback = 1) {
+    const safeLane = clamp(targetLane, 0, 2);
+    const targetX = LANE_WORLD_X[safeLane];
+    return Math.sign(targetX - this.lateralOffset)
+      || Math.sign(safeLane - this.currentLane)
+      || fallback;
+  }
+
+  _resolveLedgeSide(targetLane) {
+    const direction = this._laneDirection(targetLane, targetLane >= this.currentLane ? 1 : -1);
+    return direction || 1;
+  }
+
+  _buildSwingState(action, startedAt) {
+    const startX = this.lateralOffset;
+    const settleX = LANE_WORLD_X[action?.targetLane ?? this.currentLane];
+
+    if (!action || action.swingMode === 'none') {
+      return {
+        type: 'hold',
+        startedAt,
+        settleX,
+        totalDurationMs: 0,
+        direction: 0
+      };
+    }
+
+    if (action.swingMode === 'weak') {
+      return {
+        type: 'damped',
+        mode: 'weak',
+        startedAt,
+        startX,
+        settleX,
+        impulse: action.swingImpulse,
+        lambda: action.swingLambda,
+        omega: action.swingOmega,
+        totalDurationMs: action.swingDurationMs,
+        direction: this._laneDirection(action.targetLane)
+      };
+    }
+
+    if (action.swingMode === 'strong' && action.emergencyEvade) {
+      const impactMs = this.currentHazard?.waves?.[0]?.impactMs || 1500;
+      const ledgeEnterDurationMs = 180;
+      const ledgeHoldStartMs = Math.max(260, impactMs - Math.floor(EMERGENCY_LEDGE_HOLD_MS * 0.5));
+      const ledgeStartMs = Math.max(140, ledgeHoldStartMs - ledgeEnterDurationMs);
+      const ledgeHoldEndMs = ledgeHoldStartMs + EMERGENCY_LEDGE_HOLD_MS;
+      const ledgeDirection = action.ledgeSide || 1;
+      return {
+        type: 'ledge',
+        mode: 'strong',
+        startedAt,
+        startX,
+        settleX,
+        ledgeX: ledgeDirection * OFFSCREEN_LEDGE_X,
+        ledgeDirection,
+        ledgeStartMs,
+        ledgeEnterDurationMs,
+        ledgeHoldStartMs,
+        ledgeHoldEndMs,
+        preloadX: startX + (ledgeDirection * 0.22),
+        returnLambda: action.swingLambda,
+        returnOmega: action.swingOmega,
+        returnImpulse: -ledgeDirection * Math.abs(action.swingImpulse),
+        returnDurationMs: action.swingDurationMs,
+        totalDurationMs: ledgeHoldEndMs + action.swingDurationMs,
+        direction: ledgeDirection
+      };
+    }
+
+    return {
+      type: 'damped',
+      mode: 'strong',
+      startedAt,
+      startX,
+      settleX,
+      impulse: action.swingImpulse,
+      lambda: action.swingLambda,
+      omega: action.swingOmega,
+      totalDurationMs: action.swingDurationMs,
+      direction: this._laneDirection(action.targetLane)
+    };
+  }
+
+  _sampleSwingOffset(elapsedMs) {
+    if (!this.swingState) {
+      return LANE_WORLD_X[this.currentLane];
+    }
+
+    if (this.swingState.type === 'hold') {
+      return this.swingState.settleX;
+    }
+
+    if (this.swingState.type === 'damped') {
+      return this._sampleDampedSwing(
+        this.swingState.startX,
+        this.swingState.settleX,
+        this.swingState.impulse,
+        this.swingState.lambda,
+        this.swingState.omega,
+        elapsedMs,
+        this.swingState.totalDurationMs
+      );
+    }
+
+    if (elapsedMs < this.swingState.ledgeStartMs) {
+      const progress = clamp(elapsedMs / Math.max(this.swingState.ledgeStartMs, 1), 0, 1);
+      return lerp(this.swingState.startX, this.swingState.preloadX, this._easeInOutSine(progress));
+    }
+
+    if (elapsedMs < this.swingState.ledgeHoldStartMs) {
+      const progress = clamp(
+        (elapsedMs - this.swingState.ledgeStartMs) / Math.max(this.swingState.ledgeEnterDurationMs, 1),
+        0,
+        1
+      );
+      return lerp(this.swingState.preloadX, this.swingState.ledgeX, this._easeOutCubic(progress));
+    }
+
+    if (elapsedMs <= this.swingState.ledgeHoldEndMs) {
+      return this.swingState.ledgeX;
+    }
+
+    return this._sampleDampedSwing(
+      this.swingState.ledgeX,
+      this.swingState.settleX,
+      this.swingState.returnImpulse,
+      this.swingState.returnLambda,
+      this.swingState.returnOmega,
+      elapsedMs - this.swingState.ledgeHoldEndMs,
+      this.swingState.returnDurationMs
+    );
+  }
+
+  _sampleDampedSwing(startX, settleX, impulse, lambda, omega, elapsedMs, durationMs) {
+    const cappedMs = clamp(elapsedMs, 0, durationMs);
+    const time = cappedMs / 1000;
+    const decay = Math.exp(-lambda * time);
+    return settleX
+      + ((startX - settleX) * decay * Math.cos(omega * time))
+      + (impulse * decay * Math.sin(omega * time));
+  }
+
+  _easeOutCubic(value) {
+    return 1 - Math.pow(1 - value, 3);
+  }
+
+  _easeInOutSine(value) {
+    return -(Math.cos(Math.PI * value) - 1) / 2;
+  }
+
+  _isEmergencySafe() {
+    return Boolean(
+      this.swingState &&
+      this.swingState.type === 'ledge' &&
+      this.hazardElapsedMs >= this.swingState.ledgeHoldStartMs &&
+      this.hazardElapsedMs <= this.swingState.ledgeHoldEndMs
+    );
   }
 
   _startMovement(action, isCorrect) {
+    const now = performance.now();
+
     this.currentAction = action;
     this.currentTurnCorrect = isCorrect;
     this.state = 'movement';
     this.hazardElapsedMs = 0;
-    this.pendingSetback = 0;
+    this.movementStartedAt = now;
+    this.pendingHazardSetback = 0;
+    this.pendingWrongAnswerSetback = isCorrect
+      ? 0
+      : (this.currentLevel?.wrongAnswerSetback ?? WRONG_ANSWER_SETBACK_SEGMENTS);
     this.pendingDeath = null;
     this.waveResolved = this.currentHazard.waves.map(() => false);
-    this.movementDurationMs = this.currentHazard.waves[this.currentHazard.waves.length - 1].impactMs
-      + this.currentHazard.safeWindowMs
-      + 620;
+    this.swingState = this._buildSwingState(action, now);
+    this.movementDurationMs = Math.max(
+      this.currentHazard.waves[this.currentHazard.waves.length - 1].impactMs
+        + this.currentHazard.safeWindowMs
+        + MOVEMENT_END_BUFFER_MS,
+      this.swingState?.totalDurationMs || 0,
+      this.currentHazard.type === 'avalanche' ? 1900 : 1500
+    );
 
     if (action) {
-      this.slotCooldowns[action.slotId] = Math.max(this.slotCooldowns[action.slotId] || 0, action.slotDef.successCooldownMs || 0);
+      this.slotCooldowns[action.slotId] = Math.max(
+        this.slotCooldowns[action.slotId] || 0,
+        action.cooldownMs || action.slotDef.successCooldownMs || 0
+      );
+
       if (action.activateShield) {
         this.shieldCharges = 1;
-        this.shieldExpiresAt = performance.now() + SHIELD_DURATION_MS;
+        this.shieldExpiresAt = now + SHIELD_DURATION_MS;
       }
+
       if (action.clearView) {
-        this.cameraObscurity = clamp(this.cameraObscurity - CLEAR_VIEW_RECOVERY, 0, 100);
-        this.clearViewUntil = performance.now() + CLEAR_VIEW_BUFF_MS;
+        this.cameraObscurity = 0;
+        this.clearViewUntil = now + CLEAR_VIEW_BUFF_MS;
       }
-      if (action.slotId === 'step' || action.slotId === 'surge') {
-        this.desiredLane = action.targetLane;
-        this.motionProfile = action.profile;
-        this.lateralVelocity += action.impulse;
-      }
-      this._queueMessage(`${action.slotDef.bonusLabel} is in play.`);
+
+      this.desiredLane = action.targetLane;
+      this._queueMessage(this._buildActionMessage(action));
     } else {
       this.desiredLane = this.currentLane;
-      this.motionProfile = { omega: 8.5, zeta: 0.64 };
-      this._queueMessage('No bonus. The mountain still moves.');
+      this._queueMessage(
+        this.pendingWrongAnswerSetback > 0
+          ? 'Wrong answer. No climb tick, and the rope starts to slip.'
+          : 'Wrong answer. No climb tick. The hazard still plays.'
+      );
     }
 
-    this._updateUi();
+    this._markUiDirty();
+    this._refreshUiIfNeeded(now, true);
+  }
+
+  _buildActionMessage(action) {
+    if (action.slotId === 'extraMove') {
+      const totalTicks = BASE_ASCENT_SEGMENTS + action.extraSegments;
+      return `Correct answer: +${totalTicks} climb ticks.`;
+    }
+
+    if (action.slotId === 'step') {
+      return 'Weak swing engaged. One clean lane change, fast recovery.';
+    }
+
+    if (action.slotId === 'surge') {
+      return action.emergencyEvade
+        ? 'Strong swing: breaking onto the side ledge before the avalanche hits.'
+        : 'Strong swing engaged. Big reach now, long recoil afterward.';
+    }
+
+    if (action.slotId === 'shield') {
+      return 'Snow shield armed for the next avalanche.';
+    }
+
+    if (action.slotId === 'clear') {
+      return 'Lens cleared to zero. Fresh snow or ash starts building again immediately.';
+    }
+
+    return `${action.slotDef.bonusLabel} is in play.`;
   }
 
   _tick(timestamp) {
@@ -445,8 +740,12 @@ class Game {
     this.lastFrameAt = timestamp;
     const deltaSeconds = deltaMs / 1000;
 
-    this._updateMotion(deltaSeconds);
-    this._updateVisibility(deltaSeconds, timestamp);
+    if (this.state === 'movement') {
+      this.hazardElapsedMs += deltaMs;
+    }
+
+    this._updateMotion(deltaMs);
+    this._updateVisibility(timestamp);
 
     if (this.state === 'movement') {
       this._updateMovement(deltaMs, timestamp);
@@ -454,45 +753,46 @@ class Game {
 
     this.visualProgressUnits = lerp(this.visualProgressUnits, this.completedSegments, clamp(deltaMs / 180, 0, 1));
     this.renderer.render(this._buildSnapshot(timestamp), deltaSeconds);
-    this._updateUi();
+    this._refreshUiIfNeeded(timestamp);
 
     if (this.isActive) {
       this.loopHandle = requestAnimationFrame(this._tick);
     }
   }
 
-  _updateMotion(deltaSeconds) {
-    const targetX = LANE_WORLD_X[this.desiredLane];
-    const omega = this.motionProfile.omega;
-    const zeta = this.motionProfile.zeta;
-    const displacement = this.lateralOffset - targetX;
-    const acceleration = -((omega * omega) * displacement) - ((2 * zeta * omega) * this.lateralVelocity);
+  _updateMotion(deltaMs) {
+    const previousOffset = this.lateralOffset;
 
-    this.lateralVelocity += acceleration * deltaSeconds;
-    this.lateralOffset += this.lateralVelocity * deltaSeconds;
-
-    if (Math.abs(this.lateralVelocity) < 0.001 && Math.abs(displacement) < 0.002) {
-      this.lateralOffset = targetX;
-      this.lateralVelocity = 0;
+    if (this.state === 'movement') {
+      this.lateralOffset = this._sampleSwingOffset(this.hazardElapsedMs);
+    } else {
+      const settleX = LANE_WORLD_X[this.currentLane];
+      this.lateralOffset = lerp(this.lateralOffset, settleX, clamp((deltaMs / 1000) * 8, 0, 1));
+      if (Math.abs(this.lateralOffset - settleX) < 0.0005) {
+        this.lateralOffset = settleX;
+      }
     }
+
+    this.lateralVelocity = deltaMs > 0
+      ? (this.lateralOffset - previousOffset) / (deltaMs / 1000)
+      : 0;
   }
 
-  _updateVisibility(deltaSeconds, timestamp) {
-    const passiveRecovery = this.clearViewUntil > timestamp ? 2.0 : 0.45;
-    this.cameraObscurity = clamp(this.cameraObscurity - (passiveRecovery * deltaSeconds), 0, 100);
-
+  _updateVisibility(timestamp) {
     if (this.shieldCharges > 0 && this.shieldExpiresAt <= timestamp) {
       this.shieldCharges = 0;
+      this._markUiDirty();
     }
   }
 
   _updateMovement(deltaMs, timestamp) {
-    this.hazardElapsedMs += deltaMs;
+    const buildupMultiplier = this.shieldCharges > 0 && this.shieldExpiresAt > timestamp ? 0.78 : 1;
     this.cameraObscurity = clamp(
-      this.cameraObscurity + (this.currentHazard.passiveObscurityPerSecond * (deltaMs / 1000) * (this.clearViewUntil > timestamp ? 0.45 : 1)),
+      this.cameraObscurity + (this.currentHazard.passiveObscurityPerSecond * (deltaMs / 1000) * buildupMultiplier),
       0,
       100
     );
+    this._markUiDirty();
 
     this.currentHazard.waves.forEach((wave, index) => {
       if (this.waveResolved[index]) {
@@ -504,7 +804,7 @@ class Game {
         if (inWindow && this._isTouchingHazardLane(wave)) {
           this.pendingDeath = {
             title: 'Hit by rockfall',
-            message: 'A rolling stone caught the climber on the rope.'
+            message: 'A rolling stone caught the climber during the swing-back.'
           };
           this.waveResolved[index] = true;
           return;
@@ -520,7 +820,7 @@ class Game {
         return;
       }
 
-      let avoided = Boolean(this.currentAction?.hardEvade);
+      let avoided = this._isEmergencySafe();
       if (!avoided && this.shieldCharges > 0 && this.shieldExpiresAt > timestamp) {
         avoided = true;
         this.shieldCharges = 0;
@@ -528,14 +828,16 @@ class Game {
 
       this.cameraObscurity = clamp(this.cameraObscurity + (avoided ? 8 : 18), 0, 100);
       if (!avoided) {
-        this.pendingSetback = AVALANCHE_SETBACK_SEGMENTS;
+        this.pendingHazardSetback = Math.max(this.pendingHazardSetback, AVALANCHE_SETBACK_SEGMENTS);
       }
       this.waveResolved[index] = true;
     });
 
     if (this.pendingDeath) {
       this.state = 'dead';
-      this._setTimer(() => this._finishLose(), 1100);
+      this.deathStartedAt = timestamp;
+      this._markUiDirty();
+      this._setTimer(() => this._finishLose(), 1400);
       return;
     }
 
@@ -556,25 +858,49 @@ class Game {
       this.currentLevelProgress += gained;
       this.completedSegments += gained;
       this.stats.survivedTurns += 1;
-      this._queueMessage(`Climb gained: +${gained} segment${gained > 1 ? 's' : ''}.`);
+      this._queueMessage(`Climb tick resolved: +${gained}.`);
     } else {
-      this._queueMessage('The hazard passes, but the climb does not advance.');
+      this._queueMessage('No correct answer: the mountain moves, you do not.');
     }
 
-    if (this.pendingSetback > 0) {
-      const actualSetback = Math.min(this.pendingSetback, this.currentLevelProgress);
+    if (this.pendingWrongAnswerSetback > 0) {
+      const actualSetback = Math.min(this.pendingWrongAnswerSetback, this.currentLevelProgress);
       this.currentLevelProgress -= actualSetback;
       this.completedSegments = Math.max(0, this.completedSegments - actualSetback);
-      this._queueMessage('Avalanche impact: -3 segments.', 2200);
+      if (actualSetback > 0) {
+        this._queueMessage(`Wrong-answer penalty: -${actualSetback}.`, 2200);
+      }
     }
 
-    this.currentLane = this._nearestLane();
+    if (this.pendingHazardSetback > 0) {
+      const actualSetback = Math.min(this.pendingHazardSetback, this.currentLevelProgress);
+      this.currentLevelProgress -= actualSetback;
+      this.completedSegments = Math.max(0, this.completedSegments - actualSetback);
+      if (actualSetback > 0) {
+        this._queueMessage(`Avalanche impact: -${actualSetback}.`, 2200);
+      }
+    }
+
+    if (typeof this.currentAction?.targetLane === 'number') {
+      this.currentLane = clamp(this.currentAction.targetLane, 0, 2);
+    } else {
+      this.currentLane = this._nearestLane();
+    }
+
     this.selectedLane = this.currentLane;
     this.desiredLane = this.currentLane;
+    this.lateralOffset = LANE_WORLD_X[this.currentLane];
+    this.lateralVelocity = 0;
     this.currentQuestion = null;
     this.currentSlotId = null;
     this.currentAction = null;
     this.currentTurnCorrect = false;
+    this.swingState = null;
+    this.pendingWrongAnswerSetback = 0;
+    this.pendingHazardSetback = 0;
+    this.hazardElapsedMs = 0;
+    this.movementStartedAt = 0;
+    this.movementDurationMs = 0;
 
     if (this.currentLevelProgress >= this.currentLevel.segmentGoal) {
       this._advanceLevel();
@@ -601,6 +927,7 @@ class Game {
     Object.keys(this.slotCooldowns).forEach((slotId) => {
       this.slotCooldowns[slotId] = Math.max(0, this.slotCooldowns[slotId] - deltaMs);
     });
+    this._markUiDirty();
   }
 
   _advanceLevel() {
@@ -611,6 +938,9 @@ class Game {
 
     this.state = 'checkpoint';
     this._showCheckpoint(`${this.currentLevel.name} cleared.`);
+    this._markUiDirty();
+    this._refreshUiIfNeeded(performance.now(), true);
+
     this._setTimer(() => {
       this.currentLevelIndex += 1;
       this.currentLevel = this.levelBlueprints[this.currentLevelIndex];
@@ -678,15 +1008,22 @@ class Game {
       hazardSignature: this.currentHazardSignature,
       hazardElapsedMs: this.hazardElapsedMs,
       movementDurationMs: this.movementDurationMs,
+      movementProgress: this.movementDurationMs ? clamp(this.hazardElapsedMs / this.movementDurationMs, 0, 1) : 0,
       visualProgressUnits: this.visualProgressUnits,
       completedSegments: this.completedSegments,
       totalGoalSegments: this.totalGoalSegments,
       cameraObscurity: this.cameraObscurity,
+      visibilityClarity: getVisibilityClarity(this.cameraObscurity),
       biomeMix: this.currentLevel?.biomeMix || 0,
       stormStrength: this.currentLevel?.stormStrength || 0,
       ashStrength: this.currentLevel?.ashStrength || 0,
       shieldActive: this.shieldCharges > 0 && this.shieldExpiresAt > timestamp,
-      clearViewActive: this.clearViewUntil > timestamp
+      clearViewActive: this.clearViewUntil > timestamp,
+      swingMode: this.currentAction?.swingMode || 'none',
+      swingIntensity: this.currentAction?.swingMode === 'strong' ? 1 : this.currentAction?.swingMode === 'weak' ? 0.45 : 0,
+      emergencyLedgeActive: this._isEmergencySafe(),
+      ledgeSide: this.swingState?.direction || 0,
+      deathElapsedMs: this.state === 'dead' ? Math.max(0, timestamp - this.deathStartedAt) : 0
     };
   }
 
@@ -695,6 +1032,7 @@ class Game {
       this.ui.questionPanel.classList.add('hidden');
       this.ui.questionFeedback.textContent = '';
       this.ui.questionOptions.innerHTML = '';
+      this._markUiDirty();
       return;
     }
 
@@ -709,14 +1047,17 @@ class Game {
 
     question.options.options.forEach((option, index) => {
       const button = document.createElement('button');
+      button.type = 'button';
       button.className = 'question-option';
       button.innerHTML = `<strong>${index + 1}.</strong> ${option}`;
-      button.addEventListener('click', () => this.answerQuestion(index));
+      this._bindFastPress(button, () => this.answerQuestion(index));
       this.ui.questionOptions.appendChild(button);
     });
+
+    this._markUiDirty();
   }
 
-  _updateUi() {
+  _updateUi(timestamp = performance.now()) {
     if (!this.currentLevel) {
       return;
     }
@@ -724,13 +1065,15 @@ class Game {
     const accuracy = this.stats.answered
       ? Math.round((this.stats.correct / this.stats.answered) * 100)
       : 0;
+    const clarityPercent = Math.round(getVisibilityClarity(this.cameraObscurity) * 100);
+    const snowRatio = clamp(this.cameraObscurity / 100, 0, 1);
 
     this.ui.levelName.textContent = this.currentLevel.name;
     this.ui.runNameDisplay.textContent = this.settings.runName || 'Untitled Ascent';
     this.ui.lexicalTopicDisplay.textContent = this.settings.lexicalTopic || 'Theme';
     this.ui.altitudeDisplay.textContent = `${Math.round((this.completedSegments / Math.max(1, this.totalGoalSegments)) * 100)}%`;
     this.ui.progressDisplay.textContent = `${clamp(this.currentLevelProgress, 0, this.currentLevel.segmentGoal)} / ${this.currentLevel.segmentGoal}`;
-    this.ui.visibilityDisplay.textContent = describeVisibility(this.cameraObscurity);
+    this.ui.visibilityDisplay.textContent = `${describeVisibility(this.cameraObscurity)} ${clarityPercent}%`;
     this.ui.accuracyDisplay.textContent = `${accuracy}%`;
 
     this.ui.hazardTitle.textContent = this.currentHazard?.name || 'No hazard';
@@ -751,12 +1094,23 @@ class Game {
       `Current lane: ${laneName(this.currentLane)}`,
       `Target lane: ${laneName(this.selectedLane)}`
     ];
+
+    if (this.state === 'movement') {
+      effects.push(`Live window: ${(Math.max(0, this.movementDurationMs - this.hazardElapsedMs) / 1000).toFixed(1)}s`);
+    }
+    if (this.currentAction?.swingMode === 'weak') {
+      effects.push('Weak swing settling');
+    }
+    if (this.currentAction?.swingMode === 'strong') {
+      effects.push(this._isEmergencySafe() ? 'Emergency ledge active' : 'Strong swing recoil');
+    }
     if (this.shieldCharges > 0) {
-      effects.push('Snow shield active');
+      effects.push('Snow shield ready');
     }
-    if (this.clearViewUntil > performance.now()) {
-      effects.push('Lens cleaning active');
+    if (this.currentAction?.clearView) {
+      effects.push('Lens wiped clean');
     }
+
     effects.forEach((effect) => {
       const chip = document.createElement('div');
       chip.className = 'effect-chip';
@@ -778,21 +1132,23 @@ class Game {
       button.disabled = this.state !== 'telegraph';
     });
 
-    this.slotButtonNodes.forEach((entry, index) => {
-      const { button, slotConfig } = entry;
+    this.slotButtonNodes.forEach((entry) => {
+      const { button, bonusNode, slotConfig } = entry;
       const cooldown = this.slotCooldowns[slotConfig.slotDef.id] || 0;
       const coolingSuffix = cooldown > 0 ? ` (${formatCooldown(cooldown)})` : '';
       button.classList.toggle('active', this.currentSlotId === slotConfig.slotDef.id);
       button.disabled = this.state !== 'telegraph' || cooldown > 0;
-      button.innerHTML = `
-        <div class="slot-key">${index + 1}</div>
-        <div class="slot-bonus-name">${slotConfig.slotDef.bonusLabel}${coolingSuffix}</div>
-        <div class="slot-topic-name">${slotConfig.grammarTopic}</div>
-      `;
+      bonusNode.textContent = `${slotConfig.slotDef.bonusLabel}${coolingSuffix}`;
     });
 
-    this.ui.lensOverlay.style.opacity = String(clamp(this.cameraObscurity / 100, 0, 0.88));
-    this.ui.stormOverlay.style.opacity = String(clamp((this.currentLevel.stormStrength * 0.45) + (this.cameraObscurity / 180), 0.12, 0.86));
+    this.ui.lensOverlay.style.opacity = String(clamp(Math.pow(snowRatio, 2.15) * 0.9, 0, 0.9));
+    this.ui.stormOverlay.style.opacity = String(
+      clamp((this.currentLevel.stormStrength * 0.42) + (Math.pow(snowRatio, 1.35) * 0.28), 0.12, 0.86)
+    );
+
+    if (this.state === 'telegraph') {
+      this.nextUiRefreshAt = timestamp;
+    }
   }
 
   _handleKeyDown(event) {

@@ -2,12 +2,21 @@ const LANE_IDS = ['Left', 'Center', 'Right'];
 const LANE_WORLD_X = [-1.22, 0, 1.22];
 
 const BASE_ASCENT_SEGMENTS = 1;
-const EXTRA_MOVE_SEGMENTS = 2;
+const EXTRA_MOVE_SEGMENTS = 1;
 const AVALANCHE_SETBACK_SEGMENTS = 3;
-const CLEAR_VIEW_RECOVERY = 45;
-const CLEAR_VIEW_BUFF_MS = 8000;
+const WRONG_ANSWER_SETBACK_SEGMENTS = 1;
+const CLEAR_VIEW_RECOVERY = 100;
+const CLEAR_VIEW_BUFF_MS = 0;
+const CLEAR_VIEW_COOLDOWN_MS = 45000;
+const CLEAR_VIEW_VOLCANO_COOLDOWN_MS = 30000;
 const SHIELD_DURATION_MS = 180000;
 const ROCK_HIT_RADIUS = 0.44;
+const MOVEMENT_END_BUFFER_MS = 320;
+const UI_REFRESH_MS = 100;
+const OFFSCREEN_LEDGE_X = 2.72;
+const EMERGENCY_LEDGE_HOLD_MS = 800;
+const WEAK_SWING_DURATION_MS = 1500;
+const STRONG_SWING_DURATION_MS = 3500;
 
 const GAME_LEVELS = [
   {
@@ -15,13 +24,14 @@ const GAME_LEVELS = [
     name: 'Level 1: Entry Slope',
     subtitle: 'Blue snow and long telegraphs',
     segmentGoalRange: [3, 4],
-    rockTelegraphMsRange: [2000, 2400],
-    safeWindowMsRange: [1800, 2200],
-    passiveObscurityPerSecondRange: [0.4, 0.8],
+    rockTelegraphMsRange: [1300, 1500],
+    safeWindowMsRange: [350, 500],
+    passiveObscurityPerSecondRange: [1.6, 2.0],
     singleChance: 0.9,
     doubleChance: 0.0,
     returnPunishChance: 0.05,
     avalancheChance: 0,
+    wrongAnswerSetback: 0,
     stormStrength: 0.22,
     ashStrength: 0,
     biomeMix: 0
@@ -31,13 +41,14 @@ const GAME_LEVELS = [
     name: 'Level 2: Narrow Ridge',
     subtitle: 'Tighter reads and first camera dirt',
     segmentGoalRange: [4, 4],
-    rockTelegraphMsRange: [1700, 2000],
-    safeWindowMsRange: [1400, 1800],
-    passiveObscurityPerSecondRange: [1.2, 1.8],
+    rockTelegraphMsRange: [1200, 1450],
+    safeWindowMsRange: [320, 460],
+    passiveObscurityPerSecondRange: [1.8, 2.2],
     singleChance: 0.62,
     doubleChance: 0.28,
     returnPunishChance: 0.12,
     avalancheChance: 0,
+    wrongAnswerSetback: 0,
     stormStrength: 0.42,
     ashStrength: 0.04,
     biomeMix: 0.2
@@ -47,14 +58,15 @@ const GAME_LEVELS = [
     name: 'Level 3: Storm Belt',
     subtitle: 'Avalanches and white blindness',
     segmentGoalRange: [4, 5],
-    rockTelegraphMsRange: [1400, 1800],
-    safeWindowMsRange: [1100, 1400],
-    passiveObscurityPerSecondRange: [2.0, 3.0],
+    rockTelegraphMsRange: [1120, 1320],
+    safeWindowMsRange: [280, 420],
+    passiveObscurityPerSecondRange: [2.0, 2.4],
     singleChance: 0.42,
     doubleChance: 0.34,
     returnPunishChance: 0.22,
     avalancheChance: 0.18,
-    avalancheTelegraphMsRange: [2300, 2600],
+    avalancheTelegraphMsRange: [1600, 1850],
+    wrongAnswerSetback: 1,
     stormStrength: 0.72,
     ashStrength: 0.08,
     biomeMix: 0.52
@@ -64,14 +76,15 @@ const GAME_LEVELS = [
     name: 'Level 4: Volcanic Push',
     subtitle: 'Ash, late reads, and summit pressure',
     segmentGoalRange: [4, 5],
-    rockTelegraphMsRange: [1150, 1450],
-    safeWindowMsRange: [900, 1200],
-    passiveObscurityPerSecondRange: [2.8, 4.0],
+    rockTelegraphMsRange: [980, 1160],
+    safeWindowMsRange: [240, 340],
+    passiveObscurityPerSecondRange: [2.8, 3.2],
     singleChance: 0.26,
     doubleChance: 0.42,
     returnPunishChance: 0.3,
     avalancheChance: 0.26,
-    avalancheTelegraphMsRange: [1800, 2200],
+    avalancheTelegraphMsRange: [1450, 1700],
+    wrongAnswerSetback: 1,
     stormStrength: 0.88,
     ashStrength: 0.52,
     biomeMix: 1
@@ -131,7 +144,7 @@ function buildAvalanche(level) {
   return {
     type: 'avalanche',
     name: 'Avalanche',
-    description: 'A full snow wall covers all lanes. Only a strong swing or a snow shield can save the climber.',
+    description: 'A full snow wall covers all lanes. Only a strong swing onto the side ledge or a snow shield can save the climber.',
     telegraphMs,
     safeWindowMs,
     passiveObscurityPerSecond: pickRange(level.passiveObscurityPerSecondRange),
@@ -179,8 +192,8 @@ function buildRockHazard(level, state) {
     description: kind === 'double'
       ? 'Two lanes are unsafe. Read the only clean route before the stone line reaches you.'
       : kind === 'return'
-        ? 'A late stone punishes the return swing. Over-committing can still get you killed.'
-        : 'One lane is under direct rockfall. A clean sidestep is enough if you read it early.',
+        ? 'A late stone punishes the return swing. A long recoil can still get you killed.'
+        : 'One lane is under direct rockfall. A clean weak swing is enough if you read it early.',
     telegraphMs,
     safeWindowMs,
     passiveObscurityPerSecond: pickRange(level.passiveObscurityPerSecondRange),
@@ -216,4 +229,9 @@ function describeVisibility(value) {
 function formatCooldown(ms) {
   const seconds = Math.ceil(Math.max(0, ms) / 1000);
   return `${seconds}s`;
+}
+
+function getVisibilityClarity(value) {
+  const snow = clamp(value / 100, 0, 1);
+  return Math.pow(1 - snow, 2);
 }

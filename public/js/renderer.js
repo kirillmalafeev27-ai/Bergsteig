@@ -25,7 +25,7 @@ class AscentRenderer {
     this.nextFootprintIndex = 0;
     this.footprints = [];
     this.cameraTarget = new THREE.Vector3(0, 0, 0);
-    this.cameraPosition = new THREE.Vector3(2.4, 2.4, -7);
+    this.cameraPosition = new THREE.Vector3(2.8, 2.15, -8.2);
     this.playerWorldPosition = new THREE.Vector3();
     this.anchorPosition = new THREE.Vector3();
 
@@ -372,7 +372,7 @@ class AscentRenderer {
     return position;
   }
 
-  _dropFootprint(pathPosition, lateralOffset, progressUnits) {
+  _dropFootprint(pathPosition, lateralOffset, progressUnits, biomeMix) {
     const footprint = this.footprints[this.nextFootprintIndex];
     this.nextFootprintIndex = (this.nextFootprintIndex + 1) % this.footprints.length;
 
@@ -385,19 +385,30 @@ class AscentRenderer {
     );
     footprint.rotation.x = -0.58;
     footprint.rotation.y = randomBetween(-0.25, 0.25);
-    footprint.material.opacity = 0.3 + (Math.sin(progressUnits) * 0.05);
+    footprint.scale.set(lerp(1, 0.72, biomeMix), 1, lerp(1, 0.7, biomeMix));
+    footprint.material.opacity = lerp(0.32, 0.15, biomeMix) + (Math.sin(progressUnits) * 0.04);
   }
 
-  _updateRope(playerPosition) {
+  _updateRope(playerPosition, snapshot) {
     const anchorBase = this._pathPosition(Math.max(0, (playerPosition.z + 24) / 5.4 + 2.4), 0);
     this.anchorPosition.set(anchorBase.x, anchorBase.y + 4.4, anchorBase.z + 7.2);
 
+    const swingSag = (snapshot.swingIntensity || 0) * 0.42;
+    const deathSag = snapshot.state === 'dead' ? Math.min(2.4, (snapshot.deathElapsedMs || 0) / 1000 * 1.5) : 0;
+    const sagAmount = 1.15 + swingSag + deathSag;
     const points = [];
-    const handPosition = playerPosition.clone().add(new THREE.Vector3(0, 1.5, 0.12));
+    const handPosition = playerPosition.clone().add(new THREE.Vector3(
+      (snapshot.lateralVelocity || 0) * 0.02 + ((snapshot.emergencyLedgeActive ? snapshot.ledgeSide : 0) * 0.18),
+      1.5,
+      0.12
+    ));
     for (let index = 0; index < 6; index += 1) {
       const t = index / 5;
       const point = new THREE.Vector3().lerpVectors(this.anchorPosition, handPosition, t);
-      point.y -= Math.sin(t * Math.PI) * 1.15;
+      point.y -= Math.sin(t * Math.PI) * sagAmount;
+      if (snapshot.state === 'dead') {
+        point.z -= Math.sin(t * Math.PI) * 0.65;
+      }
       points.push(point);
     }
     this.ropeGeometry.setFromPoints(points);
@@ -427,6 +438,10 @@ class AscentRenderer {
   render(snapshot, deltaSeconds) {
     const time = this.clock.getElapsedTime();
     const biomeMix = snapshot.biomeMix || 0;
+    const swingIntensity = snapshot.swingIntensity || 0;
+    const emergencyLedgeActive = Boolean(snapshot.emergencyLedgeActive);
+    const visibilityLoss = 1 - (snapshot.visibilityClarity || 1);
+    const deathSeconds = (snapshot.deathElapsedMs || 0) / 1000;
     const fogNear = lerp(20, 14, snapshot.stormStrength || 0);
     const fogFar = lerp(92, 54, clamp((snapshot.stormStrength || 0) * 0.7 + (snapshot.ashStrength || 0), 0, 1));
 
@@ -453,19 +468,41 @@ class AscentRenderer {
     const pathPosition = this._pathPosition(snapshot.visualProgressUnits || 0, snapshot.lateralOffset || 0);
     this.playerWorldPosition.copy(pathPosition);
 
-    const climbBob = snapshot.state === 'movement' ? Math.sin(time * 8.4) * 0.12 : Math.sin(time * 2.2) * 0.03;
+    const climbBob = snapshot.state === 'movement'
+      ? Math.sin(time * lerp(7.6, 9.1, swingIntensity)) * lerp(0.08, 0.16, swingIntensity)
+      : Math.sin(time * 2.2) * 0.03;
     this.playerGroup.position.copy(pathPosition);
     this.playerGroup.position.y += climbBob;
-    this.playerGroup.rotation.z = clamp(-(snapshot.lateralVelocity || 0) * 0.1, -0.38, 0.38);
-    this.playerGroup.rotation.x = snapshot.state === 'dead' ? 1.05 : -0.06;
-    this.playerTorso.rotation.x = snapshot.state === 'movement' ? -0.12 : 0;
+    if (snapshot.state === 'dead') {
+      this.playerGroup.position.y -= Math.min(7.2, deathSeconds * 2.6);
+      this.playerGroup.position.z -= deathSeconds * 1.25;
+      this.playerGroup.position.x += Math.sin(deathSeconds * 3.4) * 0.34;
+    }
+    this.playerGroup.rotation.z = clamp(
+      -((snapshot.lateralVelocity || 0) * 0.065) + (emergencyLedgeActive ? (snapshot.ledgeSide || 0) * 0.28 : 0),
+      -0.62,
+      0.62
+    );
+    this.playerGroup.rotation.x = snapshot.state === 'dead'
+      ? 1.05 + Math.min(0.56, deathSeconds * 0.4)
+      : -0.08 - (swingIntensity * 0.08);
+    this.playerTorso.rotation.x = snapshot.state === 'movement' ? -0.14 - (swingIntensity * 0.12) : -0.02;
 
-    this.playerLeftArm.rotation.x = Math.sin(time * 7.5) * 0.28;
-    this.playerRightArm.rotation.x = -Math.sin(time * 7.5) * 0.28;
-    this.playerLeftLeg.rotation.x = -Math.sin(time * 7.5) * 0.34;
-    this.playerRightLeg.rotation.x = Math.sin(time * 7.5) * 0.34;
+    const gripIntensity = emergencyLedgeActive ? 1 : swingIntensity;
+    const armCycle = time * lerp(7.5, 9.4, swingIntensity);
+    const legCycle = time * lerp(7.5, 8.6, swingIntensity);
+    this.playerLeftArm.rotation.x = (-0.44 * gripIntensity) + (Math.sin(armCycle) * lerp(0.28, 0.12, gripIntensity));
+    this.playerRightArm.rotation.x = (-0.44 * gripIntensity) - (Math.sin(armCycle) * lerp(0.28, 0.12, gripIntensity));
+    this.playerLeftArm.rotation.z = lerp(0.34, 0.58, gripIntensity);
+    this.playerRightArm.rotation.z = -lerp(0.34, 0.58, gripIntensity);
+    this.playerLeftLeg.rotation.x = snapshot.state === 'dead'
+      ? -0.38 - (Math.sin(deathSeconds * 4.2) * 0.18)
+      : -(Math.sin(legCycle) * lerp(0.34, 0.22, gripIntensity));
+    this.playerRightLeg.rotation.x = snapshot.state === 'dead'
+      ? 0.38 + (Math.sin(deathSeconds * 4.2) * 0.18)
+      : Math.sin(legCycle) * lerp(0.34, 0.22, gripIntensity);
 
-    this._updateRope(this.playerGroup.position);
+    this._updateRope(this.playerGroup.position, snapshot);
 
     const hazardSafeLanes = snapshot.hazard
       ? [0, 1, 2].filter((lane) => !snapshot.hazard.waves.some((wave) => wave.lanes.includes(lane)))
@@ -528,19 +565,28 @@ class AscentRenderer {
     const currentFootprintUnit = Math.floor((snapshot.visualProgressUnits || 0) * 2);
     if (currentFootprintUnit > this.lastFootprintUnit) {
       this.lastFootprintUnit = currentFootprintUnit;
-      this._dropFootprint(pathPosition, snapshot.lateralOffset || 0, snapshot.visualProgressUnits || 0);
+      this._dropFootprint(pathPosition, snapshot.lateralOffset || 0, snapshot.visualProgressUnits || 0, biomeMix);
     }
 
-    this.snowField.material.opacity = lerp(0.34, 0.08, biomeMix) + ((snapshot.stormStrength || 0) * 0.18);
-    this.ashField.material.opacity = lerp(0, 0.36, snapshot.ashStrength || 0);
+    this.snowField.material.opacity = lerp(0.34, 0.08, biomeMix) + ((snapshot.stormStrength || 0) * 0.18) + (visibilityLoss * 0.04);
+    this.ashField.material.opacity = lerp(0, 0.36, snapshot.ashStrength || 0) + (visibilityLoss * 0.06);
     this._updateParticles(this.snowField, pathPosition, deltaSeconds, -1.4, -0.7, 0.8);
     this._updateParticles(this.ashField, pathPosition, deltaSeconds, -1.1, -0.2, 1.1);
 
-    const desiredTarget = pathPosition.clone().add(new THREE.Vector3(0, 1.25, 4.8));
-    const desiredCamera = pathPosition.clone().add(
+    const cameraFocus = this.playerGroup.position.clone();
+    const desiredTarget = cameraFocus.clone().add(
       snapshot.state === 'dead'
-        ? new THREE.Vector3(4.8, 4.8, -5.1)
-        : new THREE.Vector3(2.6, 2.9, -7.9)
+        ? new THREE.Vector3(0, 0.8, 2.9)
+        : new THREE.Vector3(0, 1.05, 4.5)
+    );
+    const desiredCamera = cameraFocus.clone().add(
+      snapshot.state === 'dead'
+        ? new THREE.Vector3(5.3, 3.7, -3.8)
+        : new THREE.Vector3(
+          2.95 + ((snapshot.lateralVelocity || 0) * 0.018),
+          2.18 + (visibilityLoss * 0.28),
+          -8.55
+        )
     );
 
     this.cameraTarget.lerp(desiredTarget, 0.08);
