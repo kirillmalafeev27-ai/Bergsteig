@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>DER AUFSTIEG</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div id="menu-screen" class="screen active">
+    <div class="menu-container">
+      <div class="title-kicker">German Climb Prototype</div>
+      <h1 id="game-title">DER AUFSTIEG</h1>
+      <p class="subtitle">
+        A third-person ascent prototype for learning German:
+        choose your CEFR level, lexical field, and five grammar-powered bonuses,
+        then survive rocks, avalanches, swing-back, and a dirty lens on the way to the summit.
+      </p>
+
+      <div id="setup-step1" class="setup-step">
+        <h2 class="step-title">1. Run Setup</h2>
+        <p class="step-hint">Name the climber and this ascent run.</p>
+        <div class="menu-options">
+          <div class="option-group name-input-group">
+            <label for="player-name">Climber Name</label>
+            <input type="text" id="player-name" placeholder="Lena" maxlength="24">
+          </div>
+          <div class="option-group name-input-group">
+            <label for="run-name">Run Name</label>
+            <input type="text" id="run-name" placeholder="White Ridge" maxlength="32">
+          </div>
+        </div>
+        <div class="action-row center">
+          <button id="to-step2-btn" class="btn-primary">Next</button>
+        </div>
+      </div>
+
+      <div id="setup-step2" class="setup-step hidden">
+        <h2 class="step-title">2. CEFR Level</h2>
+        <p class="step-hint">Language difficulty changes with CEFR. Mountain difficulty stays the same.</p>
+        <div class="option-group level-group">
+          <div id="level-buttons" class="level-buttons">
+            <button type="button" class="level-btn" data-level="A1">A1</button>
+            <button type="button" class="level-btn" data-level="A2">A2</button>
+            <button type="button" class="level-btn" data-level="B1">B1</button>
+            <button type="button" class="level-btn" data-level="B2">B2</button>
+          </div>
+        </div>
+        <div class="action-row center">
+          <button id="back-to-step1" class="btn-secondary">Back</button>
+          <button id="to-step3-btn" class="btn-primary">Next</button>
+        </div>
+      </div>
+
+      <div id="setup-step3" class="setup-step hidden">
+        <h2 class="step-title">3. Lexical Theme</h2>
+        <p class="step-hint">All generated questions stay inside this lexical field.</p>
+        <div id="lexical-grid" class="lexical-grid"></div>
+        <div class="action-row center">
+          <button id="back-to-step2" class="btn-secondary">Back</button>
+          <button id="to-step4-btn" class="btn-primary" disabled>Next</button>
+        </div>
+      </div>
+
+      <div id="setup-step4" class="setup-step hidden">
+        <h2 class="step-title">4. Assign Five Grammar Slots</h2>
+        <p class="step-hint">
+          Each slot is one grammar topic plus one climb bonus.
+          During the ascent you answer a question from that topic to trigger the bonus.
+        </p>
+
+        <div id="bonus-slots" class="bonus-slots"></div>
+        <div class="grammar-picker-label">Grammar Topics</div>
+        <div id="grammar-picker" class="grammar-picker"></div>
+
+        <div class="action-row center">
+          <button id="back-to-step3" class="btn-secondary">Back</button>
+          <button id="start-btn" class="btn-primary" disabled>Start Ascent</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="tutorial-overlay" class="modal-screen hidden">
+    <div class="modal-card tutorial-card">
+      <div class="title-kicker">How The Prototype Works</div>
+      <h2>Read The Mountain</h2>
+      <div class="tutorial-step"><strong>1.</strong> Each turn telegraphs a hazard: a rock pattern or an avalanche.</div>
+      <div class="tutorial-step"><strong>2.</strong> Choose a target lane, then choose one of your five grammar slots.</div>
+      <div class="tutorial-step"><strong>3.</strong> A correct answer triggers the slot bonus, and the movement phase resolves.</div>
+      <div class="tutorial-step"><strong>4.</strong> Weak swings dodge 1 lane. Strong swings dodge any lane and hard-evade avalanches.</div>
+      <div class="tutorial-step"><strong>5.</strong> Snow and ash dirty the lens. Use <em>Klare Sicht</em> before the screen becomes unreadable.</div>
+      <div class="action-row center">
+        <button id="tutorial-close" class="btn-primary">Climb</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="game-screen" class="screen">
+    <canvas id="game-canvas"></canvas>
+    <div id="storm-overlay"></div>
+    <div id="lens-overlay">
+      <div class="lens-smear lens-smear-a"></div>
+      <div class="lens-smear lens-smear-b"></div>
+      <div class="lens-smear lens-smear-c"></div>
+    </div>
+
+    <div id="message-banner" class="message-banner hidden"></div>
+    <div id="checkpoint-banner" class="checkpoint-banner hidden"></div>
+
+    <div id="hud">
+      <div class="hud-row">
+        <div class="hud-pill large">
+          <span class="pill-label">Level</span>
+          <span id="level-name">Level 1</span>
+        </div>
+        <div class="hud-pill">
+          <span class="pill-label">Run</span>
+          <span id="run-name-display">White Ridge</span>
+        </div>
+        <div class="hud-pill">
+          <span class="pill-label">Theme</span>
+          <span id="lexical-topic-display">Reisen</span>
+        </div>
+      </div>
+
+      <div class="hud-row">
+        <div class="hud-pill">
+          <span class="pill-label">Altitude</span>
+          <span id="altitude-display">0%</span>
+        </div>
+        <div class="hud-pill">
+          <span class="pill-label">Segment</span>
+          <span id="progress-display">0 / 4</span>
+        </div>
+        <div class="hud-pill">
+          <span class="pill-label">Visibility</span>
+          <span id="visibility-display">Clear</span>
+        </div>
+        <div class="hud-pill">
+          <span class="pill-label">Accuracy</span>
+          <span id="accuracy-display">0%</span>
+        </div>
+      </div>
+    </div>
+
+    <div id="left-panel" class="side-panel">
+      <div class="panel-kicker">Hazard Telegraph</div>
+      <h3 id="hazard-title">Incoming rock</h3>
+      <p id="hazard-description">One lane is unsafe. Read the slope and choose your move.</p>
+      <div id="hazard-lanes" class="hazard-lanes"></div>
+      <div id="effect-chips" class="effect-chips"></div>
+    </div>
+
+    <div id="right-panel" class="side-panel align-right">
+      <div class="panel-kicker">Cooldowns</div>
+      <div id="cooldown-chips" class="cooldown-chips"></div>
+      <div class="controls-card">
+        <div class="controls-line">Lane: <strong>A</strong> left, <strong>S</strong> center, <strong>D</strong> right</div>
+        <div class="controls-line">Slots: <strong>1-5</strong></div>
+        <div class="controls-line">Answers: <strong>1-4</strong></div>
+      </div>
+    </div>
+
+    <div id="bottom-ui">
+      <div class="lane-shell">
+        <div class="panel-kicker">Choose Target Lane</div>
+        <div id="lane-buttons" class="lane-buttons">
+          <button class="lane-btn" data-lane="0">Left</button>
+          <button class="lane-btn" data-lane="1">Center</button>
+          <button class="lane-btn" data-lane="2">Right</button>
+        </div>
+      </div>
+
+      <div class="slot-shell">
+        <div class="panel-kicker">Grammar Slots</div>
+        <div id="slot-bar" class="slot-bar"></div>
+      </div>
+    </div>
+
+    <div id="question-panel" class="question-panel hidden">
+      <div class="question-head">
+        <div>
+          <div id="question-kicker" class="panel-kicker">Grammar Slot</div>
+          <h3 id="question-title">Question</h3>
+        </div>
+        <div id="question-level" class="question-level">A2</div>
+      </div>
+      <p id="question-text" class="question-text"></p>
+      <div id="question-display" class="question-display"></div>
+      <div id="question-options" class="question-options"></div>
+      <div id="question-feedback" class="question-feedback"></div>
+    </div>
+  </div>
+
+  <div id="win-screen" class="screen">
+    <div class="end-container">
+      <div class="title-kicker">Summit Reached</div>
+      <h1>THE SUMMIT</h1>
+      <p id="win-stats" class="end-copy"></p>
+      <div class="action-row center">
+        <button id="win-restart" class="btn-primary">Climb Again</button>
+        <button id="win-menu" class="btn-secondary">Back To Menu</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="lose-screen" class="screen">
+    <div class="end-container">
+      <div class="title-kicker">Fall</div>
+      <h1>YOU FELL</h1>
+      <p id="lose-message" class="end-copy"></p>
+      <p id="lose-stats" class="end-copy subdued"></p>
+      <div class="action-row center">
+        <button id="lose-restart" class="btn-primary">Restart Run</button>
+        <button id="lose-menu" class="btn-secondary">Back To Menu</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="js/questions.js"></script>
+  <script src="js/ascent-balance.js"></script>
+  <script src="js/renderer.js"></script>
+  <script src="js/game.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
