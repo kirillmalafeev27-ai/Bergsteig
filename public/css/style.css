@@ -37,6 +37,8 @@ input {
 
 button {
   cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .screen {
