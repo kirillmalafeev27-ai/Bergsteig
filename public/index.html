@@ -3,186 +3,91 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <title>DER AUFSTIEG</title>
+  <title>Склон</title>
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
   <div id="menu-screen" class="screen active">
-    <div class="menu-container">
-      <div class="title-kicker">German Climb Prototype</div>
-      <h1 id="game-title">DER AUFSTIEG</h1>
-      <p class="subtitle">
-        A third-person ascent prototype for learning German:
-        choose your CEFR level, lexical field, and five grammar-powered bonuses,
-        then survive rocks, avalanches, swing-back, and a dirty lens on the way to the summit.
-      </p>
-
-      <div id="setup-step1" class="setup-step">
-        <h2 class="step-title">1. Run Setup</h2>
-        <p class="step-hint">Name the climber and this ascent run.</p>
-        <div class="menu-options">
-          <div class="option-group name-input-group">
-            <label for="player-name">Climber Name</label>
-            <input type="text" id="player-name" placeholder="Lena" maxlength="24">
-          </div>
-          <div class="option-group name-input-group">
-            <label for="run-name">Run Name</label>
-            <input type="text" id="run-name" placeholder="White Ridge" maxlength="32">
-          </div>
-        </div>
-        <div class="action-row center">
-          <button id="to-step2-btn" class="btn-primary">Next</button>
-        </div>
-      </div>
-
-      <div id="setup-step2" class="setup-step hidden">
-        <h2 class="step-title">2. CEFR Level</h2>
-        <p class="step-hint">Language difficulty changes with CEFR. Mountain difficulty stays the same.</p>
-        <div class="option-group level-group">
-          <div id="level-buttons" class="level-buttons">
-            <button type="button" class="level-btn" data-level="A1">A1</button>
-            <button type="button" class="level-btn" data-level="A2">A2</button>
-            <button type="button" class="level-btn" data-level="B1">B1</button>
-            <button type="button" class="level-btn" data-level="B2">B2</button>
-          </div>
-        </div>
-        <div class="action-row center">
-          <button id="back-to-step1" class="btn-secondary">Back</button>
-          <button id="to-step3-btn" class="btn-primary">Next</button>
-        </div>
-      </div>
-
-      <div id="setup-step3" class="setup-step hidden">
-        <h2 class="step-title">3. Lexical Theme</h2>
-        <p class="step-hint">All generated questions stay inside this lexical field.</p>
-        <div id="lexical-grid" class="lexical-grid"></div>
-        <div class="action-row center">
-          <button id="back-to-step2" class="btn-secondary">Back</button>
-          <button id="to-step4-btn" class="btn-primary" disabled>Next</button>
-        </div>
-      </div>
-
-      <div id="setup-step4" class="setup-step hidden">
-        <h2 class="step-title">4. Assign Five Grammar Slots</h2>
-        <p class="step-hint">
-          Each slot is one grammar topic plus one climb bonus.
-          During the ascent you answer a question from that topic to trigger the bonus.
+    <div class="menu-shell">
+      <div class="hero-copy">
+        <div class="hero-kicker">Новый прототип</div>
+        <h1 class="hero-title">Склон</h1>
+        <p class="hero-subtitle">
+          Камни идут без пауз. Правильные ответы покупают ходы, а тратить их можно в любой момент:
+          вильнуть влево, уйти вправо или продавить шаг вверх прямо в опасное окно.
         </p>
-
-        <div id="bonus-slots" class="bonus-slots"></div>
-        <div class="grammar-picker-label">Grammar Topics</div>
-        <div id="grammar-picker" class="grammar-picker"></div>
-
-        <div class="action-row center">
-          <button id="back-to-step3" class="btn-secondary">Back</button>
-          <button id="start-btn" class="btn-primary" disabled>Start Ascent</button>
-        </div>
       </div>
-    </div>
-  </div>
 
-  <div id="tutorial-overlay" class="modal-screen hidden">
-    <div class="modal-card tutorial-card">
-      <div class="title-kicker">How The Prototype Works</div>
-      <h2>Read The Mountain</h2>
-      <div class="tutorial-step"><strong>1.</strong> Each hazard telegraphs a live window: rock pattern or avalanche.</div>
-      <div class="tutorial-step"><strong>2.</strong> Choose a target lane, then hit one of your five grammar slots.</div>
-      <div class="tutorial-step"><strong>3.</strong> A correct answer gives 1 climb tick, triggers the slot bonus, and starts the live resolution window.</div>
-      <div class="tutorial-step"><strong>4.</strong> Weak swings cross 1 lane. Strong swings can jump onto a side ledge to dodge avalanches, then swing back through danger.</div>
-      <div class="tutorial-step"><strong>5.</strong> Wrong answers skip the climb tick, and higher levels can drag you down. <em>Klare Sicht</em> clears the lens instantly.</div>
-      <div class="action-row center">
-        <button id="tutorial-close" class="btn-primary">Climb</button>
+      <div class="setup-grid">
+        <section class="setup-card">
+          <div class="section-kicker">Уровень</div>
+          <h2>Сложность немецкого</h2>
+          <div id="level-buttons" class="pill-grid compact"></div>
+        </section>
+
+        <section class="setup-card">
+          <div class="section-kicker">Лексика</div>
+          <h2>Тема восхождения</h2>
+          <div id="lexical-grid" class="pill-grid"></div>
+        </section>
+
+        <section class="setup-card wide">
+          <div class="section-kicker">Сессия</div>
+          <h2>Темы, которые будут всегда под рукой</h2>
+          <p class="section-copy">
+            Выбери темы сессии. Во время забега они останутся кнопками на экране и будут мгновенно открывать задания из уже собранного пула.
+          </p>
+          <div id="session-grid" class="topic-grid"></div>
+          <div class="selected-row">
+            <span class="selected-label">Выбрано:</span>
+            <div id="selected-session-topics" class="selected-topics"></div>
+          </div>
+        </section>
+      </div>
+
+      <div class="menu-actions">
+        <div class="start-hint" id="start-hint">Сначала выбери тему восхождения и темы сессии.</div>
+        <button id="start-btn" class="primary-btn" disabled>Начать забег</button>
       </div>
     </div>
   </div>
 
   <div id="game-screen" class="screen">
     <canvas id="game-canvas"></canvas>
-    <div id="storm-overlay"></div>
-    <div id="lens-overlay">
-      <div class="lens-smear lens-smear-a"></div>
-      <div class="lens-smear lens-smear-b"></div>
-      <div class="lens-smear lens-smear-c"></div>
-    </div>
+    <div class="screen-glow"></div>
+    <div class="snow-film"></div>
 
-    <div id="message-banner" class="message-banner hidden"></div>
-    <div id="checkpoint-banner" class="checkpoint-banner hidden"></div>
+    <div id="toast" class="toast hidden"></div>
 
-    <div id="hud">
-      <div class="hud-row">
-        <div class="hud-pill large">
-          <span class="pill-label">Level</span>
-          <span id="level-name">Level 1</span>
-        </div>
-        <div class="hud-pill">
-          <span class="pill-label">Run</span>
-          <span id="run-name-display">White Ridge</span>
-        </div>
-        <div class="hud-pill">
-          <span class="pill-label">Theme</span>
-          <span id="lexical-topic-display">Reisen</span>
-        </div>
+    <div class="hud-strip">
+      <div class="hud-chip">
+        <span class="hud-label">До кромки</span>
+        <span id="distance-display" class="hud-value">0 м</span>
       </div>
-
-      <div class="hud-row">
-        <div class="hud-pill">
-          <span class="pill-label">Altitude</span>
-          <span id="altitude-display">0%</span>
-        </div>
-        <div class="hud-pill">
-          <span class="pill-label">Segment</span>
-          <span id="progress-display">0 / 4</span>
-        </div>
-        <div class="hud-pill">
-          <span class="pill-label">Visibility</span>
-          <span id="visibility-display">Clear</span>
-        </div>
-        <div class="hud-pill">
-          <span class="pill-label">Accuracy</span>
-          <span id="accuracy-display">0%</span>
-        </div>
+      <div class="hud-chip accent">
+        <span class="hud-label">Ходы</span>
+        <span id="moves-display" class="hud-value">0</span>
+      </div>
+      <div class="hud-chip">
+        <span class="hud-label">Верно</span>
+        <span id="accuracy-display" class="hud-value">0%</span>
+      </div>
+      <div class="hud-chip">
+        <span class="hud-label">Камни</span>
+        <span id="pressure-display" class="hud-value">редко</span>
       </div>
     </div>
 
-    <div id="left-panel" class="side-panel">
-      <div class="panel-kicker">Hazard Telegraph</div>
-      <h3 id="hazard-title">Incoming rock</h3>
-      <p id="hazard-description">One lane is unsafe. Read the slope and choose your move.</p>
-      <div id="hazard-lanes" class="hazard-lanes"></div>
-      <div id="effect-chips" class="effect-chips"></div>
+    <div class="study-panel">
+      <div class="section-kicker">Темы сессии</div>
+      <div id="session-theme-bar" class="session-theme-bar"></div>
     </div>
 
-    <div id="right-panel" class="side-panel align-right">
-      <div class="panel-kicker">Cooldowns</div>
-      <div id="cooldown-chips" class="cooldown-chips"></div>
-      <div class="controls-card">
-        <div class="controls-line">Lane: <strong>A</strong> left, <strong>S</strong> center, <strong>D</strong> right</div>
-        <div class="controls-line">Slots: <strong>1-5</strong></div>
-        <div class="controls-line">Answers: <strong>1-4</strong></div>
-      </div>
-    </div>
-
-    <div id="bottom-ui">
-      <div class="lane-shell">
-        <div class="panel-kicker">Choose Target Lane</div>
-        <div id="lane-buttons" class="lane-buttons">
-          <button class="lane-btn" data-lane="0">Left</button>
-          <button class="lane-btn" data-lane="1">Center</button>
-          <button class="lane-btn" data-lane="2">Right</button>
-        </div>
-      </div>
-
-      <div class="slot-shell">
-        <div class="panel-kicker">Grammar Slots</div>
-        <div id="slot-bar" class="slot-bar"></div>
-      </div>
-    </div>
-
-    <div id="question-panel" class="question-panel hidden">
+    <div id="question-card" class="question-card hidden">
       <div class="question-head">
         <div>
-          <div id="question-kicker" class="panel-kicker">Grammar Slot</div>
-          <h3 id="question-title">Question</h3>
+          <div id="question-theme" class="section-kicker">Тема</div>
+          <h3 id="question-title">Задание</h3>
         </div>
         <div id="question-level" class="question-level">A2</div>
       </div>
@@ -191,36 +96,41 @@
       <div id="question-options" class="question-options"></div>
       <div id="question-feedback" class="question-feedback"></div>
     </div>
-  </div>
 
-  <div id="win-screen" class="screen">
-    <div class="end-container">
-      <div class="title-kicker">Summit Reached</div>
-      <h1>THE SUMMIT</h1>
-      <p id="win-stats" class="end-copy"></p>
-      <div class="action-row center">
-        <button id="win-restart" class="btn-primary">Climb Again</button>
-        <button id="win-menu" class="btn-secondary">Back To Menu</button>
+    <div class="move-panel">
+      <div class="section-kicker">Купленные ходы</div>
+      <div class="move-pad">
+        <button id="move-left" class="move-btn" type="button" data-direction="left">
+          <span class="move-arrow">←</span>
+          <span class="move-caption">Влево</span>
+        </button>
+        <button id="move-up" class="move-btn move-btn-main" type="button" data-direction="up">
+          <span class="move-arrow">↑</span>
+          <span class="move-caption">Вверх</span>
+        </button>
+        <button id="move-right" class="move-btn" type="button" data-direction="right">
+          <span class="move-arrow">→</span>
+          <span class="move-caption">Вправо</span>
+        </button>
       </div>
+      <div id="move-hint" class="move-hint">Стрелки, A/W/D и касание работают одновременно.</div>
     </div>
   </div>
 
-  <div id="lose-screen" class="screen">
-    <div class="end-container">
-      <div class="title-kicker">Fall</div>
-      <h1>YOU FELL</h1>
-      <p id="lose-message" class="end-copy"></p>
-      <p id="lose-stats" class="end-copy subdued"></p>
-      <div class="action-row center">
-        <button id="lose-restart" class="btn-primary">Restart Run</button>
-        <button id="lose-menu" class="btn-secondary">Back To Menu</button>
+  <div id="result-screen" class="screen">
+    <div class="result-shell">
+      <div id="result-kicker" class="hero-kicker">Итог</div>
+      <h2 id="result-title" class="result-title">Забег окончен</h2>
+      <p id="result-copy" class="result-copy"></p>
+      <div class="menu-actions center">
+        <button id="result-restart" class="primary-btn">Еще раз</button>
+        <button id="result-menu" class="ghost-btn">Назад к настройке</button>
       </div>
     </div>
   </div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   <script src="js/questions.js"></script>
-  <script src="js/ascent-balance.js"></script>
   <script src="js/renderer.js"></script>
   <script src="js/game.js"></script>
   <script src="js/main.js"></script>
