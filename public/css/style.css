@@ -534,7 +534,6 @@ input[type="text"]:focus {
 }
 
 #game-screen {
-  position: relative;
   overflow: hidden;
   background: #050a10;
 }
