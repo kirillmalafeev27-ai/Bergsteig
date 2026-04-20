@@ -611,6 +611,38 @@ class BergRenderer {
       this.cloudGroup.add(cloud);
     }
 
+    // "Sea of clouds" shelf that follows the climber below eye-level. It
+    // materialises past mid-climb and sells the feeling of being above the
+    // weather layer. Positioned in root scope so it inherits verticalCompression.
+    this.undercloudGroup = new THREE.Group();
+    this.root.add(this.undercloudGroup);
+    this.undercloudCards = [];
+    for (let index = 0; index < 18; index += 1) {
+      const material = this.materials.cloud.clone();
+      material.opacity = 0;
+      const cloud = new THREE.Mesh(
+        new THREE.PlaneGeometry(32 + Math.random() * 26, 10 + Math.random() * 8),
+        material
+      );
+      const angle = (index / 18) * Math.PI * 2;
+      const radius = 28 + Math.random() * 36;
+      cloud.position.set(
+        Math.cos(angle) * radius,
+        (index % 3 - 1) * 4,   // slight vertical jitter
+        -6 - Math.sin(angle) * 14 - Math.random() * 10
+      );
+      cloud.rotation.x = -Math.PI / 2 + (Math.random() - 0.5) * 0.14;
+      cloud.rotation.z = Math.random() * Math.PI * 2;
+      this.undercloudCards.push({
+        mesh: cloud,
+        angle,
+        radius,
+        speed: 0.08 + Math.random() * 0.06,
+        yOffset: cloud.position.y
+      });
+      this.undercloudGroup.add(cloud);
+    }
+
     this.auroraGroup = new THREE.Group();
     this.root.add(this.auroraGroup);
     for (let index = 0; index < 3; index += 1) {
@@ -856,8 +888,10 @@ class BergRenderer {
     backMass.receiveShadow = true;
     backMass.castShadow = false;
     this.environmentGroup.add(backMass);
+    this.backMassMesh = backMass;
 
     // Two flanking sub-peaks spreading outward so the ridge feels broad.
+    this.backFlankMeshes = [];
     [-1, 1].forEach((side) => {
       const flankGeom = new THREE.ConeGeometry(42, 230, 6, 2, false);
       const flank = new THREE.Mesh(flankGeom, this.materials.peakShadow.clone());
@@ -866,6 +900,7 @@ class BergRenderer {
       flank.rotation.z = side * 0.18;
       flank.receiveShadow = true;
       this.environmentGroup.add(flank);
+      this.backFlankMeshes.push(flank);
     });
 
     // Jagged ridgeline spires on each flank — further out now that the
@@ -971,6 +1006,74 @@ class BergRenderer {
 
       this.crackNodes.push({ tube, glow, offset: index * 0.6 });
     });
+
+    // Altitude landmarks — distinctive features at memorable heights so the
+    // climber measures real distance travelled, not just abstract progress.
+    this.altitudeMarkers = [];
+    const ledgeMat = new THREE.MeshStandardMaterial({
+      color: 0xe8f5ff,
+      roughness: 0.6,
+      metalness: 0.02,
+      flatShading: true
+    });
+    // 1) Wide ice ledge at ~30m — the first "rest" shelf the climber passes.
+    const ledge1 = new THREE.Mesh(new THREE.BoxGeometry(9, 0.6, 3.2), ledgeMat.clone());
+    ledge1.position.set(-3.2, 70, 1.05);
+    ledge1.rotation.z = -0.06;
+    ledge1.castShadow = true;
+    ledge1.receiveShadow = true;
+    this.environmentGroup.add(ledge1);
+    this.altitudeMarkers.push(ledge1);
+
+    // 2) Serac (leaning ice tower) at ~55m.
+    const serac = new THREE.Mesh(new THREE.ConeGeometry(1.6, 5, 5, 1, false), ledgeMat.clone());
+    serac.material.color.setHex(0xb9dff0);
+    serac.position.set(2.6, 120, 1.2);
+    serac.rotation.z = 0.28;
+    serac.castShadow = true;
+    this.environmentGroup.add(serac);
+    this.altitudeMarkers.push(serac);
+
+    // 3) Old rope stub + frayed fabric at ~70m (previous party's retreat).
+    const oldRope = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.08, 0.08, 2.6, 6),
+      new THREE.MeshStandardMaterial({ color: 0x7a2a2a, roughness: 0.95 })
+    );
+    oldRope.position.set(-2.2, 158, 1.14);
+    oldRope.rotation.z = 0.24;
+    this.environmentGroup.add(oldRope);
+    const oldRopeFlag = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.9, 1.8),
+      new THREE.MeshBasicMaterial({ color: 0xc9483b, transparent: true, opacity: 0.7, side: THREE.DoubleSide, depthWrite: false })
+    );
+    oldRopeFlag.position.set(-2.6, 157, 1.22);
+    oldRopeFlag.rotation.z = 0.12;
+    this.environmentGroup.add(oldRopeFlag);
+    this.altitudeMarkers.push(oldRopeFlag);
+
+    // 4) Overhanging ice curtain at ~85m.
+    const curtain = new THREE.Mesh(
+      new THREE.ConeGeometry(1.3, 4.2, 4, 1, false),
+      ledgeMat.clone()
+    );
+    curtain.material.color.setHex(0xc0e6ff);
+    curtain.material.opacity = 0.78;
+    curtain.material.transparent = true;
+    curtain.position.set(3.4, 190, 1.3);
+    curtain.rotation.x = Math.PI;      // point downward (icicle)
+    curtain.rotation.z = 0.08;
+    this.environmentGroup.add(curtain);
+    this.altitudeMarkers.push(curtain);
+
+    // 5) Bergschrund — dark final crack at ~95m, just below the summit.
+    const bergschrund = new THREE.Mesh(
+      new THREE.PlaneGeometry(5.4, 0.7),
+      new THREE.MeshBasicMaterial({ color: 0x0b1116, transparent: true, opacity: 0.85, depthWrite: false })
+    );
+    bergschrund.position.set(-0.4, 218, 1.09);
+    bergschrund.rotation.z = -0.12;
+    this.environmentGroup.add(bergschrund);
+    this.altitudeMarkers.push(bergschrund);
   }
 
   _buildRope() {
@@ -993,16 +1096,46 @@ class BergRenderer {
     }
 
     this.anchorNodes = [];
-    [24, 58, 94, 132, 170, 210].forEach((y, index) => {
+    const anchorRibbonMat = new THREE.MeshBasicMaterial({
+      color: 0xffb24a,
+      transparent: true,
+      opacity: 0.82,
+      side: THREE.DoubleSide,
+      depthWrite: false
+    });
+    // Denser anchor ladder so the climber measures progress against it.
+    [14, 32, 52, 72, 92, 112, 132, 152, 172, 192, 212, 228].forEach((y, index) => {
+      const sideSign = index % 2 === 0 ? -1 : 1;
       const screw = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.14, 1.4, 10), this.materials.anchorMetal);
-      screw.position.set(index % 2 === 0 ? -0.8 : 0.8, y, 0.34);
+      screw.position.set(sideSign * 0.8, y, 0.34);
       screw.rotation.z = Math.PI / 2;
       this.environmentGroup.add(screw);
 
       const ring = new THREE.Mesh(new THREE.TorusGeometry(0.34, 0.06, 10, 18), this.materials.anchorMetal);
-      ring.position.set(index % 2 === 0 ? -0.1 : 0.1, y, 0.98);
+      ring.position.set(sideSign * 0.1, y, 0.98);
       this.environmentGroup.add(ring);
-      this.anchorNodes.push({ screw, ring, baseY: y });
+
+      // Faded ribbon flag on every third anchor — visible "altitude marker".
+      let ribbon = null;
+      if (index % 3 === 0) {
+        ribbon = new THREE.Mesh(
+          new THREE.PlaneGeometry(1.4, 0.38),
+          anchorRibbonMat.clone()
+        );
+        ribbon.material.color.setHSL(0.05 + (index / 12) * 0.12, 0.68, 0.56);
+        ribbon.position.set(sideSign * 0.9, y + 0.05, 1.12);
+        ribbon.rotation.z = sideSign * -0.14;
+        this.environmentGroup.add(ribbon);
+      }
+
+      // Pulse glow sprite — fires as the climber passes.
+      const pulse = new THREE.Sprite(this.materials.halo.clone());
+      pulse.position.set(sideSign * 0.1, y, 1.2);
+      pulse.scale.set(0.1, 0.1, 1);
+      pulse.material.opacity = 0;
+      this.environmentGroup.add(pulse);
+
+      this.anchorNodes.push({ screw, ring, ribbon, pulse, baseY: y, triggeredAt: -1e9 });
     });
   }
 
@@ -1305,6 +1438,28 @@ class BergRenderer {
       cloud.mesh.material.opacity = 0.08 + (1 - phase) * 0.09 + Math.sin(this.elapsed * cloud.speed) * 0.015;
     });
 
+    // "Sea of clouds" shelf: rises into view past progressRatio 0.35 and sits
+    // below the climber. The whole group tracks the player in scene-local Y so
+    // the camera (below & behind) always looks down onto it.
+    const shelfBaseY = this.playerRender.y - 18;
+    this.undercloudGroup.position.y = shelfBaseY;
+    const shelfFade = clamp01((progressRatio - 0.35) / 0.2);
+    const warmth = phase * 0.25;
+    this.undercloudCards.forEach((card, index) => {
+      card.angle += card.speed * dt * 0.3;
+      card.mesh.position.x = Math.cos(card.angle) * card.radius;
+      card.mesh.position.z = -6 - Math.sin(card.angle) * (card.radius * 0.55) - 4;
+      card.mesh.position.y = card.yOffset + Math.sin(this.elapsed * 0.22 + index) * 0.6;
+      const targetOpacity = shelfFade * (0.32 + Math.sin(this.elapsed * 0.4 + index) * 0.05);
+      card.mesh.material.opacity = targetOpacity;
+      card.mesh.material.color.setRGB(
+        0.82 - warmth * 0.08,
+        0.9 - phase * 0.18,
+        1 - phase * 0.28
+      );
+    });
+    this.undercloudGroup.visible = shelfFade > 0.001;
+
     this.auroraBands.forEach((band, index) => {
       band.visible = phase < 0.4;
       band.material.opacity = (1 - phase) * (0.08 + Math.sin(this.elapsed * 0.8 + index) * 0.03);
@@ -1312,14 +1467,36 @@ class BergRenderer {
       band.position.x = -22 + index * 22 + Math.sin(this.elapsed * 0.2 + index) * 8;
     });
 
+    // Atmospheric perspective: distant peaks wash toward the horizon colour so
+    // depth reads clearly. Mix amount rises with distance from the viewer.
+    const horizonColor = this.tempColorA || (this.tempColorA = new THREE.Color());
+    horizonColor.setRGB(
+      0.66 + phase * 0.18,
+      0.74 - phase * 0.18,
+      0.86 - phase * 0.3
+    );
+    const rockColor = this.tempColorB || (this.tempColorB = new THREE.Color());
     this.distantPeaks.children.forEach((peak, index) => {
       peak.position.y = 40 + Math.sin(this.elapsed * 0.16 + index * 0.8) * 2 + progressRatio * 10;
-      peak.material.color.setRGB(
-        0.05 + phase * 0.16,
-        0.08 + phase * 0.05,
-        0.1 - phase * 0.01
+      rockColor.setRGB(
+        0.18 + phase * 0.18,
+        0.22 + phase * 0.06,
+        0.26 - phase * 0.02
       );
+      // Strong haze for farthest silhouettes (Z around -130 in local).
+      peak.material.color.copy(rockColor).lerp(horizonColor, 0.68 - phase * 0.15);
     });
+
+    if (this.backMassMesh) {
+      rockColor.setRGB(0.2 + phase * 0.16, 0.24 + phase * 0.05, 0.28 - phase * 0.02);
+      this.backMassMesh.material.color.copy(rockColor).lerp(horizonColor, 0.34 - phase * 0.1);
+    }
+    if (this.backFlankMeshes) {
+      this.backFlankMeshes.forEach((flank) => {
+        rockColor.setRGB(0.22 + phase * 0.18, 0.26 + phase * 0.05, 0.3 - phase * 0.02);
+        flank.material.color.copy(rockColor).lerp(horizonColor, 0.24 - phase * 0.08);
+      });
+    }
   }
 
   _updateEnvironment(snapshot) {
@@ -1348,8 +1525,8 @@ class BergRenderer {
       0.08 + phase * 0.03,
       0.12 - phase * 0.02
     );
-    this.scene.fog.near = 18;
-    this.scene.fog.far = 100 - phase * 22 - danger * 8;
+    this.scene.fog.near = 85 - phase * 10;
+    this.scene.fog.far = 300 - phase * 40 - danger * 12;
 
     this.renderer.setClearColor(
       new THREE.Color().setRGB(
@@ -1409,21 +1586,32 @@ class BergRenderer {
     const climbPulse = Math.sin(this.elapsed * 7 + snapshot.player.y * 0.38) * 0.18;
     const sway = clamp(snapshot.player.x * 0.08 + lateralSwing * 0.008, -0.45, 0.45);
 
+    // Phase-driven posture blend:
+    //   snow:  balanced axe-planting stance
+    //   ice:   leaning deeper into the face, shorter reaches (more tension)
+    //   lava:  right arm rises to shield the face from heat/embers
+    const phase = snapshot.phaseRatio || 0;
+    const iceMix = clamp01((phase - 0.45) / 0.33);
+    const heatMix = clamp01((phase - 0.78) / 0.22);
+    const torsoLean = iceMix * 0.12 - heatMix * 0.08;
+    const shieldRaise = heatMix * 1.15;
+
     this.playerGroup.rotation.z = -sway * 0.7;
-    this.playerGroup.rotation.x = -0.16 + climbPulse * 0.08;
+    this.playerGroup.rotation.x = -0.16 + climbPulse * 0.08 - torsoLean;
 
-    this.leftArmPivot.rotation.x = 1.65 + climbPulse * 0.55;
-    this.leftArmPivot.rotation.z = -0.38 - sway * 0.25;
-    this.leftForearmPivot.rotation.x = -0.52 - climbPulse * 0.34;
+    this.leftArmPivot.rotation.x = 1.65 + climbPulse * 0.55 + iceMix * 0.18;
+    this.leftArmPivot.rotation.z = -0.38 - sway * 0.25 - iceMix * 0.08;
+    this.leftForearmPivot.rotation.x = -0.52 - climbPulse * 0.34 - iceMix * 0.18;
 
-    this.rightArmPivot.rotation.x = 1.42 - climbPulse * 0.45;
-    this.rightArmPivot.rotation.z = 0.34 - sway * 0.22;
-    this.rightForearmPivot.rotation.x = -0.44 + climbPulse * 0.24;
+    // Right arm lifts up to shield during volcanic phase.
+    this.rightArmPivot.rotation.x = 1.42 - climbPulse * 0.45 - shieldRaise;
+    this.rightArmPivot.rotation.z = 0.34 - sway * 0.22 + heatMix * 0.28;
+    this.rightForearmPivot.rotation.x = -0.44 + climbPulse * 0.24 - heatMix * 0.9;
 
-    this.leftLegPivot.rotation.x = 0.28 - climbPulse * 0.58;
-    this.leftShinPivot.rotation.x = -0.32 + climbPulse * 0.44;
-    this.rightLegPivot.rotation.x = 0.22 + climbPulse * 0.58;
-    this.rightShinPivot.rotation.x = -0.28 - climbPulse * 0.38;
+    this.leftLegPivot.rotation.x = 0.28 - climbPulse * 0.58 - iceMix * 0.1;
+    this.leftShinPivot.rotation.x = -0.32 + climbPulse * 0.44 + iceMix * 0.08;
+    this.rightLegPivot.rotation.x = 0.22 + climbPulse * 0.58 + iceMix * 0.12;
+    this.rightShinPivot.rotation.x = -0.28 - climbPulse * 0.38 - iceMix * 0.06;
 
     this.headlamp.intensity = 1.8 + Math.sin(this.elapsed * 8) * 0.18;
 
@@ -1493,9 +1681,31 @@ class BergRenderer {
       segment.quaternion.setFromUnitVectors(this.upAxis, this.tempVecA);
     }
 
+    const playerSceneY = snapshot.player.y;
     this.anchorNodes.forEach((node) => {
       node.ring.rotation.x = Math.PI / 2 + Math.sin(this.elapsed * 1.2 + node.baseY * 0.01) * 0.06;
       node.ring.rotation.y = Math.sin(this.elapsed * 0.9 + node.baseY * 0.008) * 0.14;
+
+      // Trigger a pulse the first frame the climber rises past the anchor.
+      if (node.triggeredAt < 0 && playerSceneY >= node.baseY - 1.2) {
+        node.triggeredAt = this.elapsed;
+      }
+      const age = this.elapsed - node.triggeredAt;
+      if (age >= 0 && age < 1.3) {
+        const t = age / 1.3;
+        const fade = 1 - t;
+        node.pulse.material.opacity = fade * 0.85;
+        node.pulse.scale.setScalar(0.4 + t * 4.2);
+      } else {
+        node.pulse.material.opacity = 0;
+      }
+
+      if (node.ribbon) {
+        // Ribbons flutter on wind; amplitude rises with altitude.
+        const altFactor = clamp01(node.baseY / 240);
+        node.ribbon.rotation.z += Math.sin(this.elapsed * 3.1 + node.baseY * 0.04) * 0.003 * (0.4 + altFactor);
+        node.ribbon.position.x += Math.sin(this.elapsed * 2.2 + node.baseY * 0.06) * 0.002;
+      }
     });
   }
 
@@ -1853,12 +2063,22 @@ class BergRenderer {
     this.camera.position.lerp(targetPosition, 1 - Math.exp(-dt * 3.2));
     this.cameraTarget.lerp(targetLook, 1 - Math.exp(-dt * 3.6));
 
+    // Altitude breathing: slow organic sway on Y plus a subtle fore/aft surge.
+    // Amplitude grows with progress so the summit stretch feels the most tense.
+    const breathAmp = 0.12 + progressRatio * 0.38 + danger * 0.08;
+    const breath = Math.sin(this.elapsed * 0.8) * breathAmp;
+    const breathPitch = Math.sin(this.elapsed * 0.8 + 0.6) * breathAmp * 0.55;
+    this.camera.position.y += breath;
+    this.camera.position.z += breathPitch;
+
     this.camera.position.x += Math.sin(this.elapsed * 23) * shake * 0.16;
     this.camera.position.y += Math.cos(this.elapsed * 19) * shake * 0.24;
     this.camera.position.z += Math.sin(this.elapsed * 21) * shake * 0.12;
 
     this.camera.lookAt(this.cameraTarget);
-    this.camera.rotation.z = -snapshot.player.x * 0.012 - (snapshot.player.vx || 0) * 0.0018 + Math.sin(this.elapsed * 0.9) * 0.004;
+    // Faint roll breath adds to the organic feel.
+    const rollBreath = Math.sin(this.elapsed * 0.7 + 1.2) * (0.002 + progressRatio * 0.004);
+    this.camera.rotation.z = -snapshot.player.x * 0.012 - (snapshot.player.vx || 0) * 0.0018 + Math.sin(this.elapsed * 0.9) * 0.004 + rollBreath;
   }
 
   resize() {
