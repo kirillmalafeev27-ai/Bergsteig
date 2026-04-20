@@ -77,6 +77,7 @@ button {
 .menu-layout {
   width: min(1400px, calc(100% - 28px));
   max-height: calc(100vh - 28px);
+  overflow-y: auto;
   display: grid;
   grid-template-columns: 1.1fr 0.9fr;
   gap: 18px;
