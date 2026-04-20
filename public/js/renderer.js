@@ -15,12 +15,12 @@ class BergRenderer {
 
     this.routeHeight = 228;
     this.routeScale = this.routeHeight / 100;
-    this.verticalCompression = 0.32;
+    this.verticalCompression = 0.52;
     this.summitFocusLocal = new THREE.Vector3(0, 239.5, -0.6);
 
-    this.camera = new THREE.PerspectiveCamera(58, window.innerWidth / window.innerHeight, 0.1, 520);
-    this.camera.position.set(0, -4, 52);
-    this.camera.lookAt(0, 38, 0);
+    this.camera = new THREE.PerspectiveCamera(74, window.innerWidth / window.innerHeight, 0.1, 520);
+    this.camera.position.set(0, 2, 4.2);
+    this.camera.lookAt(0, 12, 0);
 
     this.renderer = new THREE.WebGLRenderer({
       canvas: this.canvas,
@@ -2001,84 +2001,66 @@ class BergRenderer {
   }
 
   _updateCamera(snapshot, dt) {
-    const phase = snapshot.phaseRatio;
     const danger = snapshot.dangerLevel || 0;
     const shake = snapshot.cameraShake || 0;
     const progressRatio = Math.min(1, snapshot.player.progressY / 100);
     const playerWorldY = this._worldY(this.playerRender.y);
     const summitWorldY = this._worldY(this.summitFocusLocal.y);
-    const spanY = Math.max(3.5, summitWorldY - playerWorldY);
 
-    // Widen FOV slightly near the base so the whole mountain reads in one
-    // glance; tighten it near the summit for a cinematic push-in.
-    const desiredFov = 64 - progressRatio * 10;
+    // Over-the-shoulder POV: the camera rides just behind and above the
+    // climber's helmet, pitched up the slope. It sells the feel of sitting
+    // on the climber's shoulders while still showing the mountain face, the
+    // summit, and the hazards coming down.
+    const desiredFov = 78 - progressRatio * 6;
     if (Math.abs(this.camera.fov - desiredFov) > 0.02) {
       this.camera.fov += (desiredFov - this.camera.fov) * Math.min(1, dt * 3.2);
       this.camera.updateProjectionMatrix();
     }
 
-    const halfFovRad = (this.camera.fov * Math.PI / 180) / 2;
-    const tanHalf = Math.tan(halfFovRad);
+    // Rig offsets in world space. The climber's helmet sits around scene-local
+    // y=2.5 on top of the player render, so in world y that's ~1.3 given the
+    // current vertical compression.
+    const shoulderWorldY = this._worldY(2.45);
+    const camBackOffset = 2.9;   // behind the climber along +Z
+    const camRise = 0.65;        // a touch above the helmet for a clear forward read
 
-    // Where to aim: a point biased toward the summit so the peak sits in the
-    // upper third of the frame. The player is always below the look point.
-    // Capped so we never overshoot the actual peak near the end of the climb.
-    const lookBias = 0.58 + progressRatio * 0.1;
-    const lookY = Math.min(summitWorldY + 0.6, playerWorldY + spanY * lookBias);
-    const lookZ = 1.2 + (summitWorldY - lookY) * 0.02;
-
-    // Required horizontal distance so both player and peak fit vertically,
-    // with margin. Derived from: (max angular offset) = atan(d / D), then
-    // solved for D using the screen-space target position.
-    const playerAngularSpan = lookY - playerWorldY;           // distance from look target down to player
-    const summitAngularSpan = Math.max(0.5, summitWorldY + 3 - lookY);  // up to peak plus headroom for flag/aura
-    // Player should sit at ~0.85 of half-FOV below centre; peak at ~0.55 above.
-    const distForPlayer = playerAngularSpan / (0.86 * tanHalf);
-    const distForPeak = summitAngularSpan / (0.55 * tanHalf);
-    const framingDistance = Math.max(distForPlayer, distForPeak);
-
-    // Near the summit, hold a minimum distance so the peak still looms without
-    // the camera clipping into geometry.
-    const minDistance = 16 + (1 - progressRatio) * 6;
-    const rawDistance = Math.max(minDistance, framingDistance);
-    // Soft-cap distance so early game doesn't push the camera past the fog.
-    const distance = Math.min(rawDistance, 140);
-
-    // Camera sits below the look target so the view pitches up the slope.
-    // As the climber approaches the peak, pitch flattens for the summit shot.
-    const pitchDrop = spanY * (0.18 - progressRatio * 0.06);
-    const cameraY = lookY - Math.max(4, pitchDrop);
+    // Aim point: up the slope, climbing along with the player. Clamped so we
+    // never overshoot the summit near the top of the route.
+    const lookAheadLocal = 26 + progressRatio * 10;
+    const lookWorldY = Math.min(
+      summitWorldY + 0.8,
+      playerWorldY + this._worldY(lookAheadLocal)
+    );
+    const lookZ = 0.2;
 
     const targetPosition = this.tempVecA.set(
-      this.playerRender.x * 0.32 + Math.sin(this.elapsed * 0.4) * 0.2,
-      cameraY - danger * 0.4,
-      distance + Math.sin(this.elapsed * 0.6) * 0.22
+      this.playerRender.x * 0.55,
+      playerWorldY + shoulderWorldY + camRise,
+      this.playerRender.z + camBackOffset + Math.sin(this.elapsed * 0.5) * 0.05
     );
     const targetLook = this.tempVecB.set(
-      this.playerRender.x * 0.12,
-      lookY + phase * 0.8,
+      this.playerRender.x * 0.3,
+      lookWorldY,
       lookZ
     );
 
-    this.camera.position.lerp(targetPosition, 1 - Math.exp(-dt * 3.2));
-    this.cameraTarget.lerp(targetLook, 1 - Math.exp(-dt * 3.6));
+    this.camera.position.lerp(targetPosition, 1 - Math.exp(-dt * 6));
+    this.cameraTarget.lerp(targetLook, 1 - Math.exp(-dt * 6.5));
 
-    // Altitude breathing: slow organic sway on Y plus a subtle fore/aft surge.
-    // Amplitude grows with progress so the summit stretch feels the most tense.
-    const breathAmp = 0.12 + progressRatio * 0.38 + danger * 0.08;
-    const breath = Math.sin(this.elapsed * 0.8) * breathAmp;
-    const breathPitch = Math.sin(this.elapsed * 0.8 + 0.6) * breathAmp * 0.55;
+    // Subtle breathing so the head-cam never feels locked.
+    const breathAmp = 0.05 + progressRatio * 0.1 + danger * 0.05;
+    const breath = Math.sin(this.elapsed * 0.85) * breathAmp;
+    const breathSway = Math.sin(this.elapsed * 0.6 + 0.4) * breathAmp * 0.6;
     this.camera.position.y += breath;
-    this.camera.position.z += breathPitch;
+    this.camera.position.x += breathSway;
 
-    this.camera.position.x += Math.sin(this.elapsed * 23) * shake * 0.16;
-    this.camera.position.y += Math.cos(this.elapsed * 19) * shake * 0.24;
-    this.camera.position.z += Math.sin(this.elapsed * 21) * shake * 0.12;
+    this.camera.position.x += Math.sin(this.elapsed * 23) * shake * 0.14;
+    this.camera.position.y += Math.cos(this.elapsed * 19) * shake * 0.2;
+    this.camera.position.z += Math.sin(this.elapsed * 21) * shake * 0.08;
 
     this.camera.lookAt(this.cameraTarget);
-    // Faint roll breath adds to the organic feel.
-    const rollBreath = Math.sin(this.elapsed * 0.7 + 1.2) * (0.002 + progressRatio * 0.004);
-    this.camera.rotation.z = -snapshot.player.x * 0.012 - (snapshot.player.vx || 0) * 0.0018 + Math.sin(this.elapsed * 0.9) * 0.004 + rollBreath;
+    const rollBreath = Math.sin(this.elapsed * 0.7 + 1.2) * (0.003 + progressRatio * 0.004);
+    this.camera.rotation.z = -snapshot.player.x * 0.018 - (snapshot.player.vx || 0) * 0.0022 + rollBreath;
   }
 
   resize() {
