@@ -11,16 +11,16 @@ class BergRenderer {
   constructor(canvas) {
     this.canvas = canvas;
     this.scene = new THREE.Scene();
-    this.scene.fog = new THREE.Fog(0x0e1821, 20, 95);
+    this.scene.fog = new THREE.Fog(0x0e1821, 85, 300);
 
     this.routeHeight = 228;
     this.routeScale = this.routeHeight / 100;
     this.verticalCompression = 0.32;
     this.summitFocusLocal = new THREE.Vector3(0, 239.5, -0.6);
 
-    this.camera = new THREE.PerspectiveCamera(52, window.innerWidth / window.innerHeight, 0.1, 320);
-    this.camera.position.set(0, -10, 16.5);
-    this.camera.lookAt(0, 12, 0);
+    this.camera = new THREE.PerspectiveCamera(58, window.innerWidth / window.innerHeight, 0.1, 520);
+    this.camera.position.set(0, -4, 52);
+    this.camera.lookAt(0, 38, 0);
 
     this.renderer = new THREE.WebGLRenderer({
       canvas: this.canvas,
@@ -577,13 +577,13 @@ class BergRenderer {
 
     this.distantPeaks = new THREE.Group();
     this.root.add(this.distantPeaks);
-    const peakPositions = [-62, -46, -30, -16, 18, 34, 48, 64];
+    const peakPositions = [-148, -118, -92, -70, 72, 94, 120, 150];
     peakPositions.forEach((x, index) => {
       const peak = new THREE.Mesh(
-        new THREE.ConeGeometry(7 + (index % 3) * 2.5, 24 + (index % 4) * 8, 5 + (index % 2)),
+        new THREE.ConeGeometry(14 + (index % 3) * 4, 42 + (index % 4) * 14, 5 + (index % 2)),
         this.materials.peakShadow.clone()
       );
-      peak.position.set(x, 44 + (index % 3) * 12, -78 - (index % 2) * 12);
+      peak.position.set(x, 32 + (index % 3) * 14, -130 - (index % 2) * 18);
       peak.rotation.z = (Math.random() - 0.5) * 0.15;
       peak.scale.x = 1 + (index % 2) * 0.25;
       peak.scale.z = 1.2;
@@ -631,7 +631,15 @@ class BergRenderer {
     const LANE_X = 2.85;
     const ROUTE_HALF = LANE_X * 1.5 + 0.35;
 
-    const mountainGeometry = new THREE.PlaneGeometry(40, 270, 96, 320);
+    // Wider, taller plane so the mountain reads as a real peak, not a strip.
+    // The playable corridor stays at +/-ROUTE_HALF; everything outside tapers
+    // into a classic pyramidal silhouette that narrows to a single apex.
+    const MOUNT_WIDTH = 150;
+    const MOUNT_HEIGHT = 290;
+    const MOUNT_HALF_W = MOUNT_WIDTH / 2;
+    const MOUNT_HALF_H = MOUNT_HEIGHT / 2;
+    const FLANK_SPAN = MOUNT_HALF_W - ROUTE_HALF;
+    const mountainGeometry = new THREE.PlaneGeometry(MOUNT_WIDTH, MOUNT_HEIGHT, 180, 340);
     const positions = mountainGeometry.attributes.position;
     const colors = new Float32Array(positions.count * 3);
     const snowTone = new THREE.Color(0xe5f0f7);
@@ -643,66 +651,87 @@ class BergRenderer {
     for (let index = 0; index < positions.count; index += 1) {
       const baseX = positions.getX(index);
       const y = positions.getY(index);
-      const slopeRatio = clamp01((y + 135) / 270);
+      const slopeRatio = clamp01((y + MOUNT_HALF_H) / MOUNT_HEIGHT);
       const xSign = baseX === 0 ? 0 : Math.sign(baseX);
-      const shoulderPush = Math.sin(slopeRatio * Math.PI) * 1.95;
-      const taper = 1 - slopeRatio * 0.52;
-      const summitPinch = smoothStep(0.78, 1, slopeRatio) * 1.85;
-      const x =
-        baseX * Math.max(0.34, taper) +
-        xSign * smoothStep(5, 18, Math.abs(baseX)) * shoulderPush -
-        xSign * summitPinch;
+
+      // Silhouette profile: wide at base, near-zero at summit. This is what
+      // gives the mesh its triangular "mountain" outline when seen from below.
+      const silhouette = Math.pow(1 - slopeRatio, 1.55);
+      const summitPinch = smoothStep(0.82, 1, slopeRatio);
+
+      let x;
+      const absBase = Math.abs(baseX);
+      if (absBase <= ROUTE_HALF) {
+        // Climbing corridor: preserve geometry exactly so gameplay stays valid.
+        x = baseX;
+      } else {
+        // Exterior: collapse outward vertices by the silhouette profile so
+        // flanks shrink to the apex.
+        const outerFrac = (absBase - ROUTE_HALF) / FLANK_SPAN;
+        const scaled = outerFrac * Math.max(0.04, silhouette);
+        x = xSign * (ROUTE_HALF * Math.max(0.05, silhouette + summitPinch * -0.04) + scaled * FLANK_SPAN);
+      }
       const absX = Math.abs(x);
-      const insideRoute = absX < ROUTE_HALF;
+      const outsideCorridor = absX > ROUTE_HALF;
+      const insideRoute = !outsideCorridor;
 
       positions.setX(index, x);
 
-      // large-scale spine pulling toward centre
-      const spineBank = Math.pow(Math.max(0, 1 - absX / 18.5), 1.3) * 2.9;
-      // broad terraces
+      // Central spine pulls the climb face outward toward the camera.
+      const spineBank = Math.pow(Math.max(0, 1 - absX / 22), 1.3) * 3.1;
+      // Broad terraces across the face.
       const terrace = Math.sin(y * 0.085) * 1.35 + Math.sin(y * 0.04 - x * 0.18) * 0.9;
-      // rocky crags
+      // Rocky crag noise (quieter inside the corridor so gameplay reads clean).
       const crags =
         noise(x, y, 0.32, 0.22) * 1.4 +
         noise(x, y, 0.78, 0.61) * 0.85 +
         noise(x, y, 1.6, 1.1) * 0.38;
-      // sharp side buttresses
-      const sideMass = smoothStep(7, 16.5, absX) * (2.35 + Math.sin(y * 0.14) * 0.6);
-      // shoulders and crown so the silhouette reads like a mountain, not a wall
-      const shoulderRise = Math.sin(slopeRatio * Math.PI) * smoothStep(6, 15, absX) * 1.15;
-      const crownLift = smoothStep(0.72, 1, slopeRatio) * Math.max(0, 5.4 - absX * 0.25);
-      // dramatic overhang near summit
-      const overhang = smoothStep(150, 240, y) * (1.9 + Math.cos(x * 0.42) * 0.45);
-      // deepen route as a shallow couloir so climbers feel inside the mountain
+      // Side buttresses — heavy shoulders mid-height.
+      const sideMass = smoothStep(ROUTE_HALF + 2, ROUTE_HALF + 16, absX) * (3.4 + Math.sin(y * 0.14) * 0.7);
+      const shoulderRise = Math.sin(slopeRatio * Math.PI) * smoothStep(ROUTE_HALF, ROUTE_HALF + 14, absX) * 1.6;
+      const crownLift = smoothStep(0.7, 1, slopeRatio) * Math.max(0, 6.2 - absX * 0.32);
+      // Flanks recede away from the viewer to give the mountain real volume.
+      const flankFrac = outsideCorridor
+        ? clamp01((absX - ROUTE_HALF) / FLANK_SPAN)
+        : 0;
+      const flankRecession = -Math.pow(flankFrac, 1.35) * 22;
+      // Subtle couloir carved into the climb corridor.
       const couloirDepth = insideRoute
         ? smoothStep(0, ROUTE_HALF, ROUTE_HALF - absX) * (0.78 + Math.sin(y * 0.22) * 0.1)
         : 0;
-      // ledges and cracks across the route
       const ledges = insideRoute ? Math.sin(y * 0.55 + x * 0.2) * 0.22 : 0;
+      // Apex push so the summit sits slightly forward of the receding flanks.
+      const apexPush = smoothStep(0.85, 1, slopeRatio) * Math.max(0, 3.4 - absX * 0.42);
 
       const z =
         -2.8 +
         spineBank +
         terrace +
-        crags * (insideRoute ? 0.48 : 1) +
+        crags * (insideRoute ? 0.48 : 0.9) +
         sideMass +
         shoulderRise +
         crownLift +
-        ledges -
-        couloirDepth -
-        overhang;
+        ledges +
+        apexPush +
+        flankRecession -
+        couloirDepth;
 
       positions.setZ(index, z);
 
-      // colour mixing: snowy near the route, stone on flanks, darker in deep terraces
-      const snowMix = clamp01(1 - absX / 11.5 + smoothStep(0.76, 1, slopeRatio) * 0.14 - Math.max(0, -crags * 0.28));
+      // Colour mixing: snow hugs the route and summit; flanks darken into stone.
+      const snowMix = clamp01(
+        1 - absX / 14 +
+        smoothStep(0.72, 1, slopeRatio) * 0.25 -
+        Math.max(0, -crags * 0.28)
+      );
       const darkMix = clamp01(
         Math.max(0, -terrace * 0.35 - crags * 0.18) +
         smoothStep(90, 10, y) * 0.15 +
-        smoothStep(8, 18, absX) * 0.08
+        smoothStep(ROUTE_HALF + 4, ROUTE_HALF + 22, absX) * 0.22 +
+        flankFrac * 0.18
       );
       scratch.copy(stoneTone).lerp(snowTone, snowMix);
-      scratch.lerp(darkTone, darkMix * 0.7);
+      scratch.lerp(darkTone, darkMix * 0.75);
       colors[index * 3] = scratch.r;
       colors[index * 3 + 1] = scratch.g;
       colors[index * 3 + 2] = scratch.b;
@@ -768,11 +797,14 @@ class BergRenderer {
       new THREE.MeshStandardMaterial({ map: this.materials.cliffShadow.map, color: 0x3d4954, roughness: 1, metalness: 0.03, flatShading: true }),
       new THREE.MeshStandardMaterial({ color: 0x788c98, roughness: 0.85, metalness: 0.04, flatShading: true })
     ];
-    for (let index = 0; index < 64; index += 1) {
+    for (let index = 0; index < 72; index += 1) {
       const side = Math.random() < 0.5 ? -1 : 1;
-      const bx = side * (ROUTE_HALF + 0.4 + Math.random() * 12);
-      const by = -8 + Math.random() * 252;
-      const bz = 1.4 + Math.random() * 0.8 - Math.min(6, Math.abs(bx) * 0.18);
+      const slopeFrac = Math.random();
+      // Scatter boulders along the tapered flanks rather than on a flat band.
+      const flankBand = ROUTE_HALF + 0.4 + Math.random() * Math.max(2, (1 - slopeFrac * 0.8) * 30);
+      const bx = side * flankBand;
+      const by = -8 + slopeFrac * 252;
+      const bz = 0.6 + Math.random() * 0.8 - Math.min(12, (Math.abs(bx) - ROUTE_HALF) * 0.42);
       const scale = 0.8 + Math.random() * 2.2;
       const geom = Math.random() < 0.5
         ? new THREE.DodecahedronGeometry(scale, 0)
@@ -804,25 +836,52 @@ class BergRenderer {
       this.environmentGroup.add(boulder);
     }
 
-    const leftWall = new THREE.Mesh(new THREE.BoxGeometry(28, 300, 44), this.materials.cliffShadow);
-    leftWall.position.set(-34, 110, -14);
-    leftWall.receiveShadow = true;
-    leftWall.castShadow = true;
-    this.environmentGroup.add(leftWall);
+    // Massive background silhouette — a single broad pyramid behind the climb
+    // face that gives the mountain its iconic triangular profile against the sky.
+    const backMassGeometry = new THREE.ConeGeometry(96, 330, 7, 4, false);
+    const backMassPositions = backMassGeometry.attributes.position;
+    for (let i = 0; i < backMassPositions.count; i += 1) {
+      const px = backMassPositions.getX(i);
+      const py = backMassPositions.getY(i);
+      const pz = backMassPositions.getZ(i);
+      // Add coarse ridgeline noise so the back mass reads as craggy rock.
+      const n = Math.sin(px * 0.18 + py * 0.11) * Math.cos(pz * 0.22 - py * 0.08);
+      backMassPositions.setX(i, px + n * 3.4);
+      backMassPositions.setZ(i, pz + Math.cos(px * 0.12 + py * 0.1) * 2.6);
+    }
+    backMassGeometry.computeVertexNormals();
+    const backMass = new THREE.Mesh(backMassGeometry, this.materials.peakShadow.clone());
+    backMass.material.color.setHex(0x2a3643);
+    backMass.position.set(0, 108, -52);
+    backMass.receiveShadow = true;
+    backMass.castShadow = false;
+    this.environmentGroup.add(backMass);
 
-    const rightWall = leftWall.clone();
-    rightWall.position.x = 34;
-    this.environmentGroup.add(rightWall);
+    // Two flanking sub-peaks spreading outward so the ridge feels broad.
+    [-1, 1].forEach((side) => {
+      const flankGeom = new THREE.ConeGeometry(42, 230, 6, 2, false);
+      const flank = new THREE.Mesh(flankGeom, this.materials.peakShadow.clone());
+      flank.material.color.setHex(0x323e4b);
+      flank.position.set(side * 62, 72, -44);
+      flank.rotation.z = side * 0.18;
+      flank.receiveShadow = true;
+      this.environmentGroup.add(flank);
+    });
 
-    // jagged silhouettes on each flank
-    for (let index = 0; index < 12; index += 1) {
+    // Jagged ridgeline spires on each flank — further out now that the
+    // mountain itself is wide.
+    for (let index = 0; index < 14; index += 1) {
       const side = index % 2 === 0 ? -1 : 1;
       const spire = new THREE.Mesh(
-        new THREE.ConeGeometry(2.2 + Math.random() * 1.8, 14 + Math.random() * 18, 5),
+        new THREE.ConeGeometry(2.8 + Math.random() * 2.2, 18 + Math.random() * 22, 5),
         this.materials.cliffShadow.clone()
       );
-      spire.position.set(side * (22 + Math.random() * 6), -4 + index * 22 + Math.random() * 6, -4);
-      spire.rotation.z = side * (0.08 + Math.random() * 0.12);
+      spire.position.set(
+        side * (58 + Math.random() * 18),
+        -2 + index * 20 + Math.random() * 6,
+        -18 - Math.random() * 10
+      );
+      spire.rotation.z = side * (0.08 + Math.random() * 0.14);
       spire.castShadow = true;
       spire.receiveShadow = true;
       this.environmentGroup.add(spire);
@@ -883,7 +942,7 @@ class BergRenderer {
         this.materials.glacier.clone()
       );
       panel.position.set(
-        -11 + Math.random() * 22,
+        -5.2 + Math.random() * 10.4,
         14 + index * 18 + Math.random() * 8,
         1.4 + Math.random() * 0.5
       );
@@ -1738,29 +1797,61 @@ class BergRenderer {
     const progressRatio = Math.min(1, snapshot.player.progressY / 100);
     const playerWorldY = this._worldY(this.playerRender.y);
     const summitWorldY = this._worldY(this.summitFocusLocal.y);
-    const remainingToSummit = Math.max(4, summitWorldY - playerWorldY);
-    const desiredFov = 72 - progressRatio * 14;
-    const baseDistance = 21 + remainingToSummit * 0.34 - progressRatio * 2.6 - phase * 1.2;
-    const lookAhead = Math.min(remainingToSummit * 0.62, 23);
+    const spanY = Math.max(3.5, summitWorldY - playerWorldY);
 
+    // Widen FOV slightly near the base so the whole mountain reads in one
+    // glance; tighten it near the summit for a cinematic push-in.
+    const desiredFov = 64 - progressRatio * 10;
     if (Math.abs(this.camera.fov - desiredFov) > 0.02) {
-      this.camera.fov += (desiredFov - this.camera.fov) * Math.min(1, dt * 4.5);
+      this.camera.fov += (desiredFov - this.camera.fov) * Math.min(1, dt * 3.2);
       this.camera.updateProjectionMatrix();
     }
 
-    const targetPosition = new THREE.Vector3(
-      this.playerRender.x * 0.5 + Math.sin(this.elapsed * 0.6) * 0.18,
-      playerWorldY - (6.6 - danger * 0.6) - remainingToSummit * 0.22,
-      baseDistance + Math.sin(this.elapsed * 0.8) * 0.28
+    const halfFovRad = (this.camera.fov * Math.PI / 180) / 2;
+    const tanHalf = Math.tan(halfFovRad);
+
+    // Where to aim: a point biased toward the summit so the peak sits in the
+    // upper third of the frame. The player is always below the look point.
+    // Capped so we never overshoot the actual peak near the end of the climb.
+    const lookBias = 0.58 + progressRatio * 0.1;
+    const lookY = Math.min(summitWorldY + 0.6, playerWorldY + spanY * lookBias);
+    const lookZ = 1.2 + (summitWorldY - lookY) * 0.02;
+
+    // Required horizontal distance so both player and peak fit vertically,
+    // with margin. Derived from: (max angular offset) = atan(d / D), then
+    // solved for D using the screen-space target position.
+    const playerAngularSpan = lookY - playerWorldY;           // distance from look target down to player
+    const summitAngularSpan = Math.max(0.5, summitWorldY + 3 - lookY);  // up to peak plus headroom for flag/aura
+    // Player should sit at ~0.85 of half-FOV below centre; peak at ~0.55 above.
+    const distForPlayer = playerAngularSpan / (0.86 * tanHalf);
+    const distForPeak = summitAngularSpan / (0.55 * tanHalf);
+    const framingDistance = Math.max(distForPlayer, distForPeak);
+
+    // Near the summit, hold a minimum distance so the peak still looms without
+    // the camera clipping into geometry.
+    const minDistance = 16 + (1 - progressRatio) * 6;
+    const rawDistance = Math.max(minDistance, framingDistance);
+    // Soft-cap distance so early game doesn't push the camera past the fog.
+    const distance = Math.min(rawDistance, 140);
+
+    // Camera sits below the look target so the view pitches up the slope.
+    // As the climber approaches the peak, pitch flattens for the summit shot.
+    const pitchDrop = spanY * (0.18 - progressRatio * 0.06);
+    const cameraY = lookY - Math.max(4, pitchDrop);
+
+    const targetPosition = this.tempVecA.set(
+      this.playerRender.x * 0.32 + Math.sin(this.elapsed * 0.4) * 0.2,
+      cameraY - danger * 0.4,
+      distance + Math.sin(this.elapsed * 0.6) * 0.22
     );
-    const targetLook = new THREE.Vector3(
-      this.playerRender.x * 0.18,
-      Math.min(summitWorldY - 0.8, playerWorldY + lookAhead + phase * 1.4),
-      1.1 + remainingToSummit * 0.012
+    const targetLook = this.tempVecB.set(
+      this.playerRender.x * 0.12,
+      lookY + phase * 0.8,
+      lookZ
     );
 
-    this.camera.position.lerp(targetPosition, 1 - Math.exp(-dt * 3.9));
-    this.cameraTarget.lerp(targetLook, 1 - Math.exp(-dt * 4.2));
+    this.camera.position.lerp(targetPosition, 1 - Math.exp(-dt * 3.2));
+    this.cameraTarget.lerp(targetLook, 1 - Math.exp(-dt * 3.6));
 
     this.camera.position.x += Math.sin(this.elapsed * 23) * shake * 0.16;
     this.camera.position.y += Math.cos(this.elapsed * 19) * shake * 0.24;
