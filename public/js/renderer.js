@@ -3,6 +3,10 @@ function smoothStep(min, max, value) {
   return x * x * (3 - 2 * x);
 }
 
+function clamp01(value) {
+  return Math.max(0, Math.min(1, value));
+}
+
 class BergRenderer {
   constructor(canvas) {
     this.canvas = canvas;
@@ -257,9 +261,11 @@ class BergRenderer {
       }),
       cliff: new THREE.MeshStandardMaterial({
         map: snowMap,
-        color: 0xe3f1f9,
+        color: 0xffffff,
         roughness: 0.95,
-        metalness: 0.03
+        metalness: 0.03,
+        vertexColors: true,
+        flatShading: true
       }),
       cliffShadow: new THREE.MeshStandardMaterial({
         map: rockMap,
@@ -616,19 +622,66 @@ class BergRenderer {
     this.environmentGroup = new THREE.Group();
     this.root.add(this.environmentGroup);
 
-    const mountainGeometry = new THREE.PlaneGeometry(36, 260, 52, 220);
+    const LANE_X = 2.85;
+    const ROUTE_HALF = LANE_X * 1.5 + 0.35;
+
+    const mountainGeometry = new THREE.PlaneGeometry(40, 270, 96, 320);
     const positions = mountainGeometry.attributes.position;
+    const colors = new Float32Array(positions.count * 3);
+    const snowTone = new THREE.Color(0xe5f0f7);
+    const stoneTone = new THREE.Color(0x485864);
+    const darkTone = new THREE.Color(0x242d36);
+    const scratch = new THREE.Color();
+    const noise = (x, y, fx, fy) => Math.sin(x * fx + y * fy * 1.3) * Math.cos(y * fx * 1.1 - x * fy * 0.7);
+
     for (let index = 0; index < positions.count; index += 1) {
       const x = positions.getX(index);
       const y = positions.getY(index);
-      const widthRatio = Math.abs(x) / 18;
-      const shelf = Math.sin(y * 0.045 + x * 0.42) * 0.8;
-      const ridge = Math.cos(y * 0.12 - x * 0.25) * 0.55;
-      const wrinkle = Math.sin(y * 0.02) * 1.1 + Math.sin(x * 0.95) * 0.18;
-      const overhang = smoothStep(138, 236, y) * (1.1 + Math.cos(x * 0.52) * 0.35);
-      const spine = (1 - widthRatio) * 0.78;
-      positions.setZ(index, -2.6 + shelf + ridge + wrinkle + spine - widthRatio * 1.8 - overhang);
+      const absX = Math.abs(x);
+      const insideRoute = absX < ROUTE_HALF;
+
+      // large-scale spine pulling toward centre
+      const spineBank = Math.pow(Math.max(0, 1 - absX / 20), 1.4) * 2.6;
+      // broad terraces
+      const terrace = Math.sin(y * 0.085) * 1.35 + Math.sin(y * 0.04 - x * 0.18) * 0.9;
+      // rocky crags
+      const crags =
+        noise(x, y, 0.32, 0.22) * 1.4 +
+        noise(x, y, 0.78, 0.61) * 0.85 +
+        noise(x, y, 1.6, 1.1) * 0.38;
+      // sharp side buttresses
+      const sideMass = smoothStep(7, 18, absX) * (2.2 + Math.sin(y * 0.14) * 0.6);
+      // dramatic overhang near summit
+      const overhang = smoothStep(150, 240, y) * (1.6 + Math.cos(x * 0.42) * 0.55);
+      // deepen route as a shallow couloir so climbers feel inside the mountain
+      const couloirDepth = insideRoute
+        ? smoothStep(0, ROUTE_HALF, ROUTE_HALF - absX) * (0.55 + Math.sin(y * 0.22) * 0.08)
+        : 0;
+      // ledges and cracks across the route
+      const ledges = insideRoute ? Math.sin(y * 0.55 + x * 0.2) * 0.22 : 0;
+
+      const z =
+        -2.4 +
+        spineBank +
+        terrace +
+        crags * (insideRoute ? 0.55 : 1) +
+        sideMass +
+        ledges -
+        couloirDepth -
+        overhang;
+
+      positions.setZ(index, z);
+
+      // colour mixing: snowy near the route, stone on flanks, darker in deep terraces
+      const snowMix = clamp01(1 - absX / 12 - Math.max(0, -crags * 0.28));
+      const darkMix = clamp01(Math.max(0, -terrace * 0.35 - crags * 0.18) + smoothStep(90, 10, y) * 0.15);
+      scratch.copy(stoneTone).lerp(snowTone, snowMix);
+      scratch.lerp(darkTone, darkMix * 0.7);
+      colors[index * 3] = scratch.r;
+      colors[index * 3 + 1] = scratch.g;
+      colors[index * 3 + 2] = scratch.b;
     }
+    mountainGeometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     mountainGeometry.computeVertexNormals();
 
     this.mountain = new THREE.Mesh(mountainGeometry, this.materials.cliff);
@@ -647,14 +700,107 @@ class BergRenderer {
     this.glacierSheen.position.z += 0.05;
     this.environmentGroup.add(this.glacierSheen);
 
-    const leftWall = new THREE.Mesh(new THREE.BoxGeometry(22, 290, 34), this.materials.cliffShadow);
-    leftWall.position.set(-28, 112, -12);
+    // lane markers: three painted chalk strips along the route
+    const laneOffsets = [-LANE_X, 0, LANE_X];
+    laneOffsets.forEach((laneOffsetX, laneIndex) => {
+      const laneGeom = new THREE.PlaneGeometry(0.42, 240, 1, 40);
+      const lanePositions = laneGeom.attributes.position;
+      for (let i = 0; i < lanePositions.count; i += 1) {
+        const py = lanePositions.getY(i);
+        lanePositions.setZ(i, Math.sin(py * 0.3 + laneIndex) * 0.04);
+      }
+      const laneMat = new THREE.MeshBasicMaterial({
+        color: laneIndex === 1 ? 0xf4c88a : 0xbcd6e4,
+        transparent: true,
+        opacity: 0.34,
+        depthWrite: false
+      });
+      const laneStrip = new THREE.Mesh(laneGeom, laneMat);
+      laneStrip.position.set(laneOffsetX, 110, 1.38);
+      this.environmentGroup.add(laneStrip);
+
+      // dashed rungs across each lane every few meters
+      for (let rung = 0; rung < 44; rung += 1) {
+        const rungY = -6 + rung * 6 + (laneIndex - 1) * 0.8;
+        const rungMesh = new THREE.Mesh(
+          new THREE.PlaneGeometry(1.4, 0.12),
+          new THREE.MeshBasicMaterial({
+            color: 0xffe7b8,
+            transparent: true,
+            opacity: 0.24 + (rung % 2) * 0.12,
+            depthWrite: false
+          })
+        );
+        rungMesh.position.set(laneOffsetX, rungY, 1.4);
+        this.environmentGroup.add(rungMesh);
+      }
+    });
+
+    // scattered boulders, flanking crags, and ledges so the face feels 3D
+    this._boulderMats = [
+      new THREE.MeshStandardMaterial({ map: this.materials.cliffShadow.map, color: 0x556673, roughness: 0.96, metalness: 0.05, flatShading: true }),
+      new THREE.MeshStandardMaterial({ map: this.materials.cliffShadow.map, color: 0x3d4954, roughness: 1, metalness: 0.03, flatShading: true }),
+      new THREE.MeshStandardMaterial({ color: 0x788c98, roughness: 0.85, metalness: 0.04, flatShading: true })
+    ];
+    for (let index = 0; index < 64; index += 1) {
+      const side = Math.random() < 0.5 ? -1 : 1;
+      const bx = side * (ROUTE_HALF + 0.4 + Math.random() * 12);
+      const by = -8 + Math.random() * 252;
+      const bz = 1.4 + Math.random() * 0.8 - Math.min(6, Math.abs(bx) * 0.18);
+      const scale = 0.8 + Math.random() * 2.2;
+      const geom = Math.random() < 0.5
+        ? new THREE.DodecahedronGeometry(scale, 0)
+        : new THREE.IcosahedronGeometry(scale * 0.95, 0);
+      const boulder = new THREE.Mesh(geom, this._boulderMats[index % this._boulderMats.length]);
+      boulder.position.set(bx, by, bz);
+      boulder.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+      boulder.scale.set(1 + Math.random() * 0.4, 0.55 + Math.random() * 0.35, 0.7 + Math.random() * 0.5);
+      boulder.castShadow = true;
+      boulder.receiveShadow = true;
+      this.environmentGroup.add(boulder);
+    }
+
+    // a handful of boulders inside the route for visual interest (clear of lanes)
+    for (let index = 0; index < 18; index += 1) {
+      const laneBetween = Math.random() < 0.5 ? -LANE_X * 0.5 : LANE_X * 0.5;
+      const bx = laneBetween + (Math.random() - 0.5) * 0.8;
+      const by = 4 + Math.random() * 236;
+      const scale = 0.42 + Math.random() * 0.56;
+      const boulder = new THREE.Mesh(
+        new THREE.DodecahedronGeometry(scale, 0),
+        this._boulderMats[index % this._boulderMats.length]
+      );
+      boulder.position.set(bx, by, 1.42);
+      boulder.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+      boulder.scale.set(1, 0.45, 0.6);
+      boulder.castShadow = true;
+      boulder.receiveShadow = true;
+      this.environmentGroup.add(boulder);
+    }
+
+    const leftWall = new THREE.Mesh(new THREE.BoxGeometry(28, 300, 44), this.materials.cliffShadow);
+    leftWall.position.set(-34, 110, -14);
     leftWall.receiveShadow = true;
+    leftWall.castShadow = true;
     this.environmentGroup.add(leftWall);
 
     const rightWall = leftWall.clone();
-    rightWall.position.x = 28;
+    rightWall.position.x = 34;
     this.environmentGroup.add(rightWall);
+
+    // jagged silhouettes on each flank
+    for (let index = 0; index < 12; index += 1) {
+      const side = index % 2 === 0 ? -1 : 1;
+      const spire = new THREE.Mesh(
+        new THREE.ConeGeometry(2.2 + Math.random() * 1.8, 14 + Math.random() * 18, 5),
+        this.materials.cliffShadow.clone()
+      );
+      spire.position.set(side * (22 + Math.random() * 6), -4 + index * 22 + Math.random() * 6, -4);
+      spire.rotation.z = side * (0.08 + Math.random() * 0.12);
+      spire.castShadow = true;
+      spire.receiveShadow = true;
+      this.environmentGroup.add(spire);
+    }
 
     const lowerMist = new THREE.Mesh(
       new THREE.PlaneGeometry(120, 48),
@@ -1078,9 +1224,9 @@ class BergRenderer {
     );
 
     this.materials.cliff.color.lerpColors(
-      new THREE.Color(0xe3f1f9),
-      new THREE.Color(0x544242),
-      phase * 0.78
+      new THREE.Color(0xffffff),
+      new THREE.Color(0x8c5a4a),
+      phase * 0.42
     );
     this.materials.cliff.emissive = new THREE.Color(0x000000);
     this.materials.moltenFace.opacity = phase * 0.92;
@@ -1224,57 +1370,125 @@ class BergRenderer {
 
       if (!node) {
         const group = new THREE.Group();
-        const core = new THREE.Mesh(new THREE.DodecahedronGeometry(1, 0), this.materials.rock.clone());
+        const core = new THREE.Mesh(
+          new THREE.DodecahedronGeometry(1.55, 0),
+          new THREE.MeshStandardMaterial({
+            map: this.materials.rock.map,
+            color: 0x697782,
+            roughness: 1,
+            metalness: 0.06,
+            flatShading: true
+          })
+        );
         core.castShadow = true;
         core.receiveShadow = true;
         group.add(core);
 
+        const shell = new THREE.Mesh(
+          new THREE.IcosahedronGeometry(1.75, 0),
+          new THREE.MeshBasicMaterial({
+            color: 0xfff0c6,
+            transparent: true,
+            opacity: 0.18,
+            depthWrite: false,
+            side: THREE.BackSide
+          })
+        );
+        group.add(shell);
+
         const trail = new THREE.Sprite(this.materials.trail.clone());
-        trail.position.set(0, 1.2, -0.1);
+        trail.position.set(0, 1.8, -0.1);
+        trail.scale.set(3.2, 5.6, 1);
         group.add(trail);
 
         const ember = new THREE.Sprite(this.materials.emberTrail.clone());
-        ember.position.set(0, 0.6, 0.1);
+        ember.position.set(0, 1.0, 0.1);
+        ember.scale.set(2.4, 2.4, 1);
         group.add(ember);
 
         const chips = [];
-        for (let chipIndex = 0; chipIndex < 3; chipIndex += 1) {
-          const chip = new THREE.Mesh(new THREE.IcosahedronGeometry(0.18 + chipIndex * 0.05, 0), this.materials.rock.clone());
+        for (let chipIndex = 0; chipIndex < 4; chipIndex += 1) {
+          const chip = new THREE.Mesh(
+            new THREE.IcosahedronGeometry(0.26 + chipIndex * 0.08, 0),
+            core.material
+          );
           chip.position.set(
-            (Math.random() - 0.5) * 0.9,
-            (Math.random() - 0.5) * 0.9,
-            (Math.random() - 0.5) * 0.9
+            (Math.random() - 0.5) * 1.2,
+            (Math.random() - 0.5) * 1.2,
+            (Math.random() - 0.5) * 1.2
           );
           group.add(chip);
           chips.push(chip);
         }
 
+        // landing telegraph on the slope
+        const targetGeom = new THREE.RingGeometry(1.1, 1.45, 28);
+        const targetMat = new THREE.MeshBasicMaterial({
+          color: 0xffb070,
+          transparent: true,
+          opacity: 0.55,
+          depthWrite: false,
+          side: THREE.DoubleSide
+        });
+        const target = new THREE.Mesh(targetGeom, targetMat);
+        target.rotation.x = 0;
+        this.dynamicHazards.add(target);
+
+        const targetCore = new THREE.Mesh(
+          new THREE.CircleGeometry(0.9, 24),
+          new THREE.MeshBasicMaterial({
+            color: 0xff6a3d,
+            transparent: true,
+            opacity: 0.22,
+            depthWrite: false,
+            side: THREE.DoubleSide
+          })
+        );
+        this.dynamicHazards.add(targetCore);
+
         this.dynamicHazards.add(group);
-        node = { group, core, trail, ember, chips };
+        node = { group, core, shell, trail, ember, chips, target, targetCore };
         this.rockMeshes.set(rock.id, node);
       }
 
-      node.group.position.set(rock.x, rock.y, 1.6 + Math.sin(this.elapsed * 12 + index) * 0.2);
-      node.group.scale.setScalar(rock.size);
+      node.group.position.set(rock.x, rock.y, 1.9 + Math.sin(this.elapsed * 12 + index) * 0.2);
+      node.group.scale.setScalar(rock.size * 1.25);
       node.group.rotation.x += (0.07 + rock.speed * 0.002) * dt * 60;
       node.group.rotation.y += 0.06 * dt * 60;
       node.group.rotation.z += 0.04 * dt * 60;
-      node.core.material.color.setHex(rock.warning ? 0x9fc7df : 0x445963);
-      node.trail.material.opacity = rock.warning ? 0.2 : 0.34;
-      node.trail.scale.set(rock.size * 2.4, rock.size * 3.8, 1);
-      node.trail.position.y = 1.2 + rock.speed * 0.03;
-      node.ember.material.opacity = snapshot.phaseRatio * 0.18;
-      node.ember.scale.set(rock.size * 1.4, rock.size * 1.4, 1);
+      node.core.material.color.setHex(rock.warning ? 0xaed6ea : 0x5f6e79);
+      node.shell.material.opacity = rock.warning ? 0.32 + Math.sin(this.elapsed * 9) * 0.08 : 0.12;
+      node.trail.material.opacity = rock.warning ? 0.32 : 0.44;
+      node.trail.scale.set(rock.size * 2.6, rock.size * 4.2, 1);
+      node.ember.material.opacity = snapshot.phaseRatio * 0.22;
+      node.ember.scale.set(rock.size * 1.6, rock.size * 1.6, 1);
 
       node.chips.forEach((chip, chipIndex) => {
         chip.rotation.x += 0.03 + chipIndex * 0.02;
         chip.rotation.y += 0.05 + chipIndex * 0.03;
       });
+
+      // telegraph marker tracks the landing lane at the player's current altitude
+      const dy = Math.max(0, rock.y - snapshot.player.y);
+      const timeToImpact = dy / Math.max(4, rock.speed);
+      const urgency = clamp01(1 - timeToImpact / 2.4);
+      const pulse = 0.7 + Math.sin(this.elapsed * (6 + urgency * 14)) * 0.25;
+      const markerY = snapshot.player.y + 0.4;
+      node.target.position.set(rock.x, markerY, 1.44);
+      node.target.scale.setScalar(1 + (1 - urgency) * 1.2);
+      node.target.material.opacity = (0.35 + urgency * 0.45) * pulse;
+      node.target.material.color.setHex(urgency > 0.6 ? 0xff4a2a : 0xffb070);
+      node.targetCore.position.set(rock.x, markerY, 1.43);
+      node.targetCore.scale.setScalar(0.9 + urgency * 0.4);
+      node.targetCore.material.opacity = 0.18 + urgency * 0.42;
+      node.targetCore.material.color.setHex(urgency > 0.6 ? 0xff3020 : 0xff6a3d);
     });
 
     Array.from(this.rockMeshes.entries()).forEach(([id, node]) => {
       if (!nextRockIds.has(id)) {
         this.dynamicHazards.remove(node.group);
+        this.dynamicHazards.remove(node.target);
+        this.dynamicHazards.remove(node.targetCore);
         node.group.traverse((child) => {
           if (child.geometry) {
             child.geometry.dispose();
@@ -1283,6 +1497,14 @@ class BergRenderer {
             child.material.dispose();
           }
         });
+        if (node.target) {
+          node.target.geometry.dispose();
+          node.target.material.dispose();
+        }
+        if (node.targetCore) {
+          node.targetCore.geometry.dispose();
+          node.targetCore.material.dispose();
+        }
         this.rockMeshes.delete(id);
       }
     });
@@ -1435,17 +1657,17 @@ class BergRenderer {
     const phase = snapshot.phaseRatio;
     const danger = snapshot.dangerLevel || 0;
     const shake = snapshot.cameraShake || 0;
-    const baseDistance = 16.8 - phase * 1.6;
+    const baseDistance = 18.6 - phase * 1.4;
 
     const targetPosition = new THREE.Vector3(
-      this.playerRender.x * 0.58 + Math.sin(this.elapsed * 0.6) * 0.15,
-      this.playerRender.y - (10.4 - danger * 0.6),
-      baseDistance + Math.sin(this.elapsed * 0.8) * 0.24
+      this.playerRender.x * 0.5 + Math.sin(this.elapsed * 0.6) * 0.18,
+      this.playerRender.y - (8.6 - danger * 0.7),
+      baseDistance + Math.sin(this.elapsed * 0.8) * 0.28
     );
     const targetLook = new THREE.Vector3(
       this.playerRender.x * 0.18,
-      this.playerRender.y + 11.5 + phase * 0.8,
-      0.35
+      this.playerRender.y + 14.5 + phase * 1.2,
+      1.1
     );
 
     this.camera.position.lerp(targetPosition, 1 - Math.exp(-dt * 3.9));

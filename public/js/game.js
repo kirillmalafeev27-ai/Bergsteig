@@ -192,8 +192,8 @@ class Game {
       nearMisses: 0
     };
 
-    this.nextRockSpawnAt = this.startedAt + 1400;
-    this.nextAvalancheSpawnAt = this.startedAt + 9500;
+    this.nextRockSpawnAt = this.startedAt + 6500;
+    this.nextAvalancheSpawnAt = this.startedAt + 16000;
 
     this.currentQuestion = null;
     this.pendingDirection = null;
@@ -202,7 +202,7 @@ class Game {
     this._renderTopicButtons();
     this._updateHud();
     this._updateHazardFeed();
-    this._showMessage('Подъём начался. Камни и лавины не ждут ответа.', 2200);
+    this._showMessage('Подъём начался. Следи за оранжевыми метками на склоне — там упадёт камень.', 3200);
     this._loop(this.startedAt);
   }
 
@@ -404,8 +404,10 @@ class Game {
 
   _spawnRockWave(now) {
     const phaseRatio = this._phaseRatio();
+    const rampUp = clamp((now - this.startedAt) / 30000, 0, 1);
     const lanes = shuffleArray([-1, 0, 1]);
-    const count = Math.random() < 0.34 + phaseRatio * 0.12 ? 2 : 1;
+    const count = rampUp > 0.6 && Math.random() < 0.22 + phaseRatio * 0.18 ? 2 : 1;
+    const baseSpeed = 8.4 + rampUp * 4 + phaseRatio * 4.4;
 
     for (let index = 0; index < count; index += 1) {
       const lane = lanes[index];
@@ -413,30 +415,33 @@ class Game {
         id: `rock-${this.hazardCounter += 1}`,
         lane,
         x: laneToX(lane),
-        y: this.player.progress + randomRange(44, 58),
-        speed: randomRange(11.8, 15.2) + phaseRatio * 4.4,
-        size: randomRange(0.92, 1.36),
-        armedUntil: now + 420,
+        y: this.player.progress + randomRange(48, 64),
+        speed: baseSpeed + randomRange(0, 2.6),
+        size: randomRange(1.1, 1.55),
+        armedUntil: now + 720,
         warning: true,
         closeCallDone: false
       });
     }
 
-    this.nextRockSpawnAt = now + randomRange(900, 1650) - phaseRatio * 140;
+    const cadence = randomRange(2000, 3200) - phaseRatio * 320 - rampUp * 500;
+    this.nextRockSpawnAt = now + Math.max(1400, cadence);
   }
 
   _spawnAvalanche(now) {
     const phaseRatio = this._phaseRatio();
+    const rampUp = clamp((now - this.startedAt) / 40000, 0, 1);
     this.hazards.avalanches.push({
       id: `avalanche-${this.hazardCounter += 1}`,
-      y: this.player.progress + randomRange(52, 68),
-      speed: randomRange(9.8, 12.8) + phaseRatio * 2.1,
+      y: this.player.progress + randomRange(60, 78),
+      speed: randomRange(7.6, 10) + phaseRatio * 2.1 + rampUp * 1.4,
       intensity: randomRange(0.65, 1),
       heightScale: randomRange(1.05, 1.45),
       processed: false
     });
 
-    this.nextAvalancheSpawnAt = now + randomRange(11500, 17000) - phaseRatio * 900;
+    const cadence = randomRange(16000, 22000) - phaseRatio * 1200 - rampUp * 2000;
+    this.nextAvalancheSpawnAt = now + Math.max(12000, cadence);
   }
 
   openQuestion(slotId) {
