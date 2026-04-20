@@ -5,7 +5,6 @@ const STRONG_SWING_DISTANCE = 5.3;
 const STRONG_SWING_ESCAPE_X = 4.2;
 const STRONG_SWING_HOLD_MS = 720;
 const SHIELD_ACTIVE_MS = 15000;
-const INTRO_GRACE_MS = 18000;
 const SPRING_STIFFNESS = 30;
 const SPRING_DAMPING = 8.4;
 
@@ -57,8 +56,6 @@ class Game {
     this.lastFrameAt = 0;
     this.startedAt = 0;
     this.currentTime = 0;
-    this.hazardsActive = false;
-    this.introGraceUntil = 0;
 
     this.onWin = null;
     this.onLose = null;
@@ -156,7 +153,7 @@ class Game {
     this.questionManager.setLexicalTopic(settings.lexicalTopic);
     this.questionManager.configureSlots(settings.slotConfigs);
 
-    this.renderer = createGameRenderer(this.ui.canvas);
+    this.renderer = new BergRenderer(this.ui.canvas);
     this.audio = new AudioManager();
     this.audio.init();
 
@@ -195,10 +192,8 @@ class Game {
       nearMisses: 0
     };
 
-    this.hazardsActive = false;
-    this.introGraceUntil = this.startedAt + INTRO_GRACE_MS;
-    this.nextRockSpawnAt = this.startedAt + 2200;
-    this.nextAvalancheSpawnAt = this.startedAt + 9800;
+    this.nextRockSpawnAt = this.startedAt + 1400;
+    this.nextAvalancheSpawnAt = this.startedAt + 9500;
 
     this.currentQuestion = null;
     this.pendingDirection = null;
@@ -207,12 +202,7 @@ class Game {
     this._renderTopicButtons();
     this._updateHud();
     this._updateHazardFeed();
-    this._showMessage(
-      this.renderer && this.renderer.mode === 'fallback'
-        ? '3D-сцена переключена в упрощённый режим. Выбери тему 1-5, и тогда опасности снова пойдут вниз.'
-        : 'Подъём начался. Выбери тему 1-5, и гора даст тебе несколько секунд на осмотр.',
-      5200
-    );
+    this._showMessage('Подъём начался. Камни и лавины не ждут ответа.', 2200);
     this._loop(this.startedAt);
   }
 
@@ -243,8 +233,6 @@ class Game {
     this.currentQuestion = null;
     this.pendingDirection = null;
     this.state = 'idle';
-    this.hazardsActive = false;
-    this.introGraceUntil = 0;
     this.ui.messageBanner.classList.add('hidden');
     this._closeQuestionPanel();
     this._closeDirectionPanel();
@@ -322,29 +310,24 @@ class Game {
   _updateEnvironment(dt, now) {
     const phaseRatio = this._phaseRatio();
     const shieldFactor = this.player.shieldCharges > 0 ? 0.72 : 1;
-    const passiveThreat = this.hazardsActive ? this._dangerLevel() : 0.04;
     this.player.lens = clamp(
-      this.player.lens + dt * (0.012 + phaseRatio * 0.01 + passiveThreat * 0.008) * shieldFactor,
+      this.player.lens + dt * (0.018 + phaseRatio * 0.013 + this._dangerLevel() * 0.01) * shieldFactor,
       0,
       1
     );
     this.cameraShake = Math.max(0, this.cameraShake - dt * 1.3);
 
-    if (!this.hazardsActive && now >= this.introGraceUntil) {
-      this._activateHazards(now, true);
-    }
-
-    const stormStrength = 0.18 + phaseRatio * 0.16 + (this.hazardsActive ? this._dangerLevel() * 0.24 : 0.03);
+    const stormStrength = 0.28 + phaseRatio * 0.18 + this._dangerLevel() * 0.24;
     this.ui.stormOverlay.style.setProperty('--storm-strength', stormStrength.toFixed(3));
     this.ui.lensOverlay.style.setProperty('--lens-blur', this.player.lens.toFixed(3));
     this.ui.lensOverlay.style.setProperty('--lens-haze', (this.player.lens * 0.9).toFixed(3));
     this.ui.lensOverlay.style.setProperty('--lens-frost', clamp(this.player.lens * 1.15, 0, 1).toFixed(3));
 
     if (!this.player.falling) {
-      if (this.hazardsActive && now >= this.nextRockSpawnAt) {
+      if (now >= this.nextRockSpawnAt) {
         this._spawnRockWave(now);
       }
-      if (this.hazardsActive && now >= this.nextAvalancheSpawnAt) {
+      if (now >= this.nextAvalancheSpawnAt) {
         this._spawnAvalanche(now);
       }
       if (this.player.progress >= SUMMIT_HEIGHT) {
@@ -472,10 +455,6 @@ class Game {
         this._showMessage(`Снежный щит ещё восстанавливается: ${formatCooldown(remaining)}.`, 1600);
         return;
       }
-    }
-
-    if (!this.hazardsActive) {
-      this._activateHazards(this.currentTime);
     }
 
     this.currentQuestion = this.questionManager.getQuestion(slotId);
@@ -779,14 +758,6 @@ class Game {
   }
 
   _updateHazardFeed() {
-    if (!this.hazardsActive) {
-      const secondsLeft = Math.max(0, Math.ceil((this.introGraceUntil - this.currentTime) / 1000));
-      this.ui.hazardText.textContent = secondsLeft > 0
-        ? `Осмотрись и выбери бонусную тему 1-5. Первый камень пойдёт через ${secondsLeft} сек, если ты не начнёшь раньше.`
-        : 'Опасности уже просыпаются. Выбор темы сразу вернёт тебя в темп подъёма.';
-      return;
-    }
-
     const nearestAvalanche = this.hazards.avalanches
       .filter((hazard) => hazard.y >= this.player.progress)
       .sort((left, right) => left.y - right.y)[0];
@@ -948,20 +919,6 @@ class Game {
     const dangerFromRocks = this.hazards.rocks.length * 0.08;
     const dangerFromAvalanches = this.hazards.avalanches.length * 0.22;
     return clamp(dangerFromRocks + dangerFromAvalanches + this.player.lens * 0.22, 0, 1);
-  }
-
-  _activateHazards(now, fromTimeout = false) {
-    if (this.hazardsActive) {
-      return;
-    }
-
-    this.hazardsActive = true;
-    this.nextRockSpawnAt = Math.max(this.nextRockSpawnAt, now + 1200);
-    this.nextAvalancheSpawnAt = Math.max(this.nextAvalancheSpawnAt, now + 7200);
-
-    if (fromTimeout) {
-      this._showMessage('Гора снова двинулась: камни и лавины возвращаются в игру.', 1800);
-    }
   }
 
   _showMessage(text, duration = 1400) {
