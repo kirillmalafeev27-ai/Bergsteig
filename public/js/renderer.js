@@ -1,37 +1,33 @@
-class AscentRenderer {
+class MountainRenderer {
   constructor(canvas) {
     this.canvas = canvas;
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0xc9deeb);
-    this.scene.fog = new THREE.Fog(0xb6ccdc, 18, 92);
+    this.scene.background = new THREE.Color(0xc7e6fa);
+    this.scene.fog = new THREE.Fog(0xd7ebf6, 20, 92);
 
-    this.camera = new THREE.PerspectiveCamera(54, window.innerWidth / window.innerHeight, 0.1, 240);
+    this.camera = new THREE.PerspectiveCamera(52, window.innerWidth / window.innerHeight, 0.1, 260);
     this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, alpha: false });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.outputEncoding = THREE.sRGBEncoding;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.05;
+    this.renderer.toneMappingExposure = 1.06;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
     this.clock = new THREE.Clock();
+    this.cameraTarget = new THREE.Vector3(0, 0, 0);
+    this.cameraPosition = new THREE.Vector3(0, 3.2, 10.2);
+
     this.root = new THREE.Group();
     this.scene.add(this.root);
 
-    this.hazardEntries = [];
-    this.currentHazardKey = '';
-    this.lastFootprintUnit = -1;
-    this.nextFootprintIndex = 0;
-    this.footprints = [];
-    this.cameraTarget = new THREE.Vector3(0, 0, 0);
-    this.cameraPosition = new THREE.Vector3(2.8, 2.15, -8.2);
-    this.playerWorldPosition = new THREE.Vector3();
-    this.anchorPosition = new THREE.Vector3();
+    this.rockMeshes = new Map();
 
     this._createMaterials();
     this._buildLights();
     this._buildWorld();
+    this._buildPlayer();
     this._buildParticles();
 
     this._onResize = this._onResize.bind(this);
@@ -40,222 +36,162 @@ class AscentRenderer {
 
   _createMaterials() {
     this.mountainMaterial = new THREE.MeshStandardMaterial({
-      color: 0xdde6ef,
-      roughness: 0.96,
+      color: 0xe4eff7,
+      roughness: 0.92,
       metalness: 0.02
     });
-    this.darkMountainMaterial = new THREE.MeshStandardMaterial({
-      color: 0x31414d,
-      roughness: 0.96,
+    this.shadowMaterial = new THREE.MeshStandardMaterial({
+      color: 0x516879,
+      roughness: 1,
       metalness: 0.02
     });
-    this.laneMaterials = [0, 1, 2].map(() => new THREE.MeshStandardMaterial({
-      color: 0xd7e3eb,
-      emissive: 0x0a1420,
-      emissiveIntensity: 0.24,
-      roughness: 0.7,
-      metalness: 0.05
-    }));
-    this.ropeMaterial = new THREE.LineBasicMaterial({ color: 0xe7d6b0, transparent: true, opacity: 0.84 });
-    this.playerBodyMaterial = new THREE.MeshStandardMaterial({ color: 0x264762, roughness: 0.62, metalness: 0.08 });
-    this.playerAccentMaterial = new THREE.MeshStandardMaterial({ color: 0xf5a34d, roughness: 0.48, metalness: 0.12 });
-    this.playerSkinMaterial = new THREE.MeshStandardMaterial({ color: 0xf2dac0, roughness: 0.66, metalness: 0.02 });
-    this.playerBootMaterial = new THREE.MeshStandardMaterial({ color: 0x1c232d, roughness: 0.84, metalness: 0.08 });
     this.rockMaterial = new THREE.MeshStandardMaterial({
-      color: 0x574d46,
+      color: 0x605952,
       roughness: 0.82,
       metalness: 0.08,
-      emissive: 0x120d09,
-      emissiveIntensity: 0.28
+      emissive: 0x18110d,
+      emissiveIntensity: 0.24
     });
-    this.avalancheMaterial = new THREE.MeshStandardMaterial({
-      color: 0xf2f6fb,
-      transparent: true,
-      opacity: 0.42,
-      roughness: 0.6,
-      metalness: 0.02
-    });
-    this.footprintMaterial = new THREE.MeshBasicMaterial({
-      color: 0x5c6d77,
-      transparent: true,
-      opacity: 0.34
-    });
-    this.summitMaterial = new THREE.MeshStandardMaterial({
-      color: 0xcfdbe4,
-      roughness: 0.9,
-      metalness: 0.04
-    });
-    this.volcanoMaterial = new THREE.MeshStandardMaterial({
-      color: 0x2d2424,
-      emissive: 0x6d2d17,
-      emissiveIntensity: 0.6,
-      roughness: 0.84,
+    this.playerBodyMaterial = new THREE.MeshStandardMaterial({
+      color: 0x294d66,
+      roughness: 0.56,
       metalness: 0.08
     });
-    this.craterGlowMaterial = new THREE.MeshBasicMaterial({
-      color: 0xff7d2f,
-      transparent: true,
-      opacity: 0.42
+    this.playerAccentMaterial = new THREE.MeshStandardMaterial({
+      color: 0xf4a75b,
+      roughness: 0.44,
+      metalness: 0.12
+    });
+    this.playerSkinMaterial = new THREE.MeshStandardMaterial({
+      color: 0xf1dac1,
+      roughness: 0.68,
+      metalness: 0.02
+    });
+    this.playerBootMaterial = new THREE.MeshStandardMaterial({
+      color: 0x1b232d,
+      roughness: 0.88,
+      metalness: 0.08
     });
   }
 
   _buildLights() {
-    this.ambientLight = new THREE.HemisphereLight(0xeaf6ff, 0x172433, 0.95);
+    this.ambientLight = new THREE.HemisphereLight(0xeef7ff, 0x1d2732, 0.96);
     this.scene.add(this.ambientLight);
 
-    this.sunLight = new THREE.DirectionalLight(0xffffff, 1.35);
-    this.sunLight.position.set(12, 18, -6);
+    this.sunLight = new THREE.DirectionalLight(0xffffff, 1.3);
+    this.sunLight.position.set(14, 18, 8);
     this.sunLight.castShadow = true;
     this.sunLight.shadow.mapSize.width = 2048;
     this.sunLight.shadow.mapSize.height = 2048;
     this.sunLight.shadow.camera.near = 0.5;
-    this.sunLight.shadow.camera.far = 140;
-    this.sunLight.shadow.camera.left = -22;
-    this.sunLight.shadow.camera.right = 22;
-    this.sunLight.shadow.camera.top = 22;
-    this.sunLight.shadow.camera.bottom = -22;
+    this.sunLight.shadow.camera.far = 160;
+    this.sunLight.shadow.camera.left = -18;
+    this.sunLight.shadow.camera.right = 18;
+    this.sunLight.shadow.camera.top = 20;
+    this.sunLight.shadow.camera.bottom = -20;
     this.sunLight.shadow.bias = -0.0007;
     this.scene.add(this.sunLight);
 
-    this.rimLight = new THREE.DirectionalLight(0x8cd0ff, 0.46);
-    this.rimLight.position.set(-10, 8, 10);
-    this.scene.add(this.rimLight);
-
-    this.lavaLight = new THREE.PointLight(0xff6b2d, 0.3, 42, 1.7);
-    this.lavaLight.position.set(0, 26, 74);
-    this.scene.add(this.lavaLight);
+    this.fillLight = new THREE.DirectionalLight(0x94d8ff, 0.4);
+    this.fillLight.position.set(-10, 8, 10);
+    this.scene.add(this.fillLight);
   }
 
   _buildWorld() {
     const skyShell = new THREE.Mesh(
-      new THREE.SphereGeometry(120, 32, 16),
+      new THREE.SphereGeometry(130, 36, 18),
       new THREE.MeshBasicMaterial({
-        color: 0xe9f3fb,
+        color: 0xe8f5ff,
         side: THREE.BackSide
       })
     );
     this.root.add(skyShell);
-    this.skyShell = skyShell;
 
-    const slope = new THREE.Mesh(new THREE.BoxGeometry(28, 5, 146), this.mountainMaterial);
-    slope.position.set(0, -4.4, 24);
-    slope.rotation.x = -0.58;
-    slope.receiveShadow = true;
-    this.root.add(slope);
-    this.slope = slope;
-
-    const ridgeLeft = new THREE.Mesh(new THREE.BoxGeometry(10, 24, 146), this.darkMountainMaterial);
-    ridgeLeft.position.set(-11.5, 0.5, 24);
-    ridgeLeft.rotation.x = -0.58;
-    ridgeLeft.castShadow = true;
-    ridgeLeft.receiveShadow = true;
-    this.root.add(ridgeLeft);
-
-    const ridgeRight = ridgeLeft.clone();
-    ridgeRight.position.x = 11.5;
-    this.root.add(ridgeRight);
-
-    this.laneMeshes = [];
-    for (let lane = 0; lane < 3; lane += 1) {
-      const laneMesh = new THREE.Mesh(
-        new THREE.BoxGeometry(1.1, 0.14, 112),
-        this.laneMaterials[lane]
-      );
-      laneMesh.position.set(LANE_WORLD_X[lane] * 1.95, -1.05, 23);
-      laneMesh.rotation.x = -0.58;
-      laneMesh.castShadow = true;
-      laneMesh.receiveShadow = true;
-      this.root.add(laneMesh);
-      this.laneMeshes.push(laneMesh);
+    const mountainGeometry = new THREE.PlaneGeometry(26, 170, 34, 120);
+    const positions = mountainGeometry.attributes.position;
+    for (let index = 0; index < positions.count; index += 1) {
+      const x = positions.getX(index);
+      const y = positions.getY(index);
+      const noise = (Math.sin(y * 0.12) * 0.44) + (Math.cos(x * 0.7 + y * 0.08) * 0.22);
+      const ridge = Math.pow(Math.abs(x) / 12, 1.45) * 2.2;
+      positions.setZ(index, noise - ridge);
     }
+    mountainGeometry.computeVertexNormals();
 
-    const laneGlow = new THREE.Mesh(
-      new THREE.PlaneGeometry(9, 94),
-      new THREE.MeshBasicMaterial({
-        color: 0xd8edf9,
-        transparent: true,
-        opacity: 0.06
-      })
-    );
-    laneGlow.position.set(0, 0.2, 24);
-    laneGlow.rotation.x = -Math.PI / 2 + 0.58;
-    this.root.add(laneGlow);
+    const mountain = new THREE.Mesh(mountainGeometry, this.mountainMaterial);
+    mountain.rotation.x = -1.12;
+    mountain.position.set(0, -16, -64);
+    mountain.receiveShadow = true;
+    mountain.castShadow = true;
+    this.root.add(mountain);
+    this.mountain = mountain;
 
-    const summit = new THREE.Mesh(new THREE.ConeGeometry(12, 18, 8), this.summitMaterial);
-    summit.position.set(0, 30, 84);
-    summit.castShadow = true;
-    summit.receiveShadow = true;
-    this.root.add(summit);
-    this.summit = summit;
+    const cliffLeft = new THREE.Mesh(new THREE.BoxGeometry(8, 34, 144), this.shadowMaterial);
+    cliffLeft.position.set(-14.2, 3.4, -34);
+    cliffLeft.rotation.x = -0.5;
+    cliffLeft.castShadow = true;
+    cliffLeft.receiveShadow = true;
+    this.root.add(cliffLeft);
 
-    const volcanoCone = new THREE.Mesh(new THREE.ConeGeometry(7.5, 9, 12), this.volcanoMaterial);
-    volcanoCone.position.set(0, 27.8, 80);
-    volcanoCone.castShadow = true;
-    volcanoCone.receiveShadow = true;
-    this.root.add(volcanoCone);
-    this.volcanoCone = volcanoCone;
+    const cliffRight = cliffLeft.clone();
+    cliffRight.position.x = 14.2;
+    this.root.add(cliffRight);
 
-    const craterGlow = new THREE.Mesh(new THREE.CylinderGeometry(4.8, 4.8, 0.18, 32), this.craterGlowMaterial);
-    craterGlow.position.set(0, 31.8, 80);
-    this.root.add(craterGlow);
-    this.craterGlow = craterGlow;
+    const ridge = new THREE.Mesh(new THREE.ConeGeometry(15, 18, 9), this.shadowMaterial.clone());
+    ridge.position.set(0, 40, -116);
+    ridge.castShadow = true;
+    ridge.receiveShadow = true;
+    this.root.add(ridge);
 
-    this.hazardGroup = new THREE.Group();
-    this.root.add(this.hazardGroup);
+    const crest = new THREE.Mesh(new THREE.BoxGeometry(12, 1.1, 6), this.mountainMaterial.clone());
+    crest.position.set(0, 33.6, -102);
+    crest.rotation.z = 0.06;
+    crest.castShadow = true;
+    crest.receiveShadow = true;
+    this.root.add(crest);
 
-    this.footprintGroup = new THREE.Group();
-    this.root.add(this.footprintGroup);
-    for (let index = 0; index < 48; index += 1) {
-      const footprint = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.01, 0.38), this.footprintMaterial.clone());
-      footprint.visible = false;
-      this.footprintGroup.add(footprint);
-      this.footprints.push(footprint);
-    }
-
-    this._buildPlayer();
-    this._buildRope();
+    this.rockGroup = new THREE.Group();
+    this.root.add(this.rockGroup);
   }
 
   _buildPlayer() {
     this.playerGroup = new THREE.Group();
 
-    const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.34, 1.18, 10), this.playerBodyMaterial);
-    torso.position.y = 1.15;
+    const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.4, 1.34, 10), this.playerBodyMaterial);
+    torso.position.y = 1.2;
     torso.castShadow = true;
     this.playerGroup.add(torso);
     this.playerTorso = torso;
 
-    const chest = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.34, 0.34), this.playerAccentMaterial);
-    chest.position.set(0, 1.32, 0.08);
+    const chest = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.34, 0.34), this.playerAccentMaterial);
+    chest.position.set(0, 1.36, 0.1);
     chest.castShadow = true;
     this.playerGroup.add(chest);
 
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.22, 14, 14), this.playerSkinMaterial);
-    head.position.set(0, 1.95, 0.02);
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.24, 16, 16), this.playerSkinMaterial);
+    head.position.set(0, 2.12, 0.04);
     head.castShadow = true;
     this.playerGroup.add(head);
 
-    const backpack = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.64, 0.22), this.playerAccentMaterial);
-    backpack.position.set(0, 1.2, -0.25);
+    const backpack = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.72, 0.28), this.playerAccentMaterial);
+    backpack.position.set(0, 1.28, -0.3);
     backpack.castShadow = true;
     this.playerGroup.add(backpack);
 
-    this.playerLeftArm = this._createLimb(0.1, 0.58, this.playerBodyMaterial);
-    this.playerLeftArm.position.set(-0.37, 1.42, 0.02);
-    this.playerLeftArm.rotation.z = 0.34;
+    this.playerLeftArm = this._createLimb(0.11, 0.68, this.playerBodyMaterial);
+    this.playerLeftArm.position.set(-0.42, 1.5, 0.02);
     this.playerGroup.add(this.playerLeftArm);
 
-    this.playerRightArm = this._createLimb(0.1, 0.58, this.playerBodyMaterial);
-    this.playerRightArm.position.set(0.37, 1.42, 0.02);
-    this.playerRightArm.rotation.z = -0.34;
+    this.playerRightArm = this._createLimb(0.11, 0.68, this.playerBodyMaterial);
+    this.playerRightArm.position.set(0.42, 1.5, 0.02);
     this.playerGroup.add(this.playerRightArm);
 
-    this.playerLeftLeg = this._createLimb(0.12, 0.72, this.playerBootMaterial);
-    this.playerLeftLeg.position.set(-0.16, 0.45, 0.04);
+    this.playerLeftLeg = this._createLimb(0.12, 0.86, this.playerBootMaterial);
+    this.playerLeftLeg.position.set(-0.18, 0.48, 0.08);
     this.playerGroup.add(this.playerLeftLeg);
 
-    this.playerRightLeg = this._createLimb(0.12, 0.72, this.playerBootMaterial);
-    this.playerRightLeg.position.set(0.16, 0.45, -0.02);
+    this.playerRightLeg = this._createLimb(0.12, 0.86, this.playerBootMaterial);
+    this.playerRightLeg.position.set(0.18, 0.48, -0.02);
     this.playerGroup.add(this.playerRightLeg);
 
     this.root.add(this.playerGroup);
@@ -267,15 +203,9 @@ class AscentRenderer {
     return limb;
   }
 
-  _buildRope() {
-    this.ropeGeometry = new THREE.BufferGeometry();
-    this.ropeLine = new THREE.Line(this.ropeGeometry, this.ropeMaterial);
-    this.root.add(this.ropeLine);
-  }
-
   _buildParticles() {
-    this.snowField = this._createParticleField(260, 0xffffff, 0.1, 10, 8, 26, 0.54);
-    this.ashField = this._createParticleField(140, 0xff7d3b, 0.12, 10, 8, 22, 0.24);
+    this.snowField = this._createParticleField(260, 0xffffff, 0.11, 13, 9, 24, 0.44);
+    this.dustField = this._createParticleField(110, 0xdad4cf, 0.12, 12, 7, 18, 0.18);
   }
 
   _createParticleField(count, color, size, spreadX, spreadY, spreadZ, opacity) {
@@ -299,125 +229,47 @@ class AscentRenderer {
       opacity,
       depthWrite: false
     });
-
     const points = new THREE.Points(geometry, material);
     this.root.add(points);
 
-    return {
-      count,
-      spreadX,
-      spreadY,
-      spreadZ,
-      points,
-      geometry,
-      positions,
-      speeds,
-      material
-    };
+    return { count, spreadX, spreadY, spreadZ, geometry, positions, speeds, points, material };
   }
 
-  _syncHazards(snapshot) {
-    if (!snapshot.hazardSignature) {
-      while (this.hazardGroup.children.length) {
-        this.hazardGroup.remove(this.hazardGroup.children[0]);
-      }
-      this.hazardEntries = [];
-      this.currentHazardKey = '';
-      return;
-    }
+  _mountainPoint(progress, lateral) {
+    return new THREE.Vector3(
+      lateral * 3.2,
+      -2.2 + (progress * 0.92) + Math.sin(progress * 0.22) * 0.18,
+      16 - (progress * 3.12) + Math.cos(progress * 0.14 + lateral) * 0.14
+    );
+  }
 
-    if (this.currentHazardKey === snapshot.hazardSignature) {
-      return;
-    }
+  _syncRocks(rocks) {
+    const nextIds = new Set(rocks.map((rock) => rock.id));
 
-    while (this.hazardGroup.children.length) {
-      this.hazardGroup.remove(this.hazardGroup.children[0]);
-    }
-    this.hazardEntries = [];
-    this.currentHazardKey = snapshot.hazardSignature;
-
-    const hazard = snapshot.hazard;
-    if (!hazard) {
-      return;
-    }
-
-    hazard.waves.forEach((wave, waveIndex) => {
-      if (wave.kind === 'rock') {
-        wave.lanes.forEach((lane) => {
-          const rock = new THREE.Mesh(new THREE.IcosahedronGeometry(0.52, 1), this.rockMaterial.clone());
-          rock.castShadow = true;
-          rock.receiveShadow = true;
-          this.hazardGroup.add(rock);
-          this.hazardEntries.push({ mesh: rock, waveIndex, lane, kind: 'rock' });
-        });
+    Array.from(this.rockMeshes.keys()).forEach((id) => {
+      if (nextIds.has(id)) {
         return;
       }
+      const mesh = this.rockMeshes.get(id);
+      this.rockGroup.remove(mesh);
+      this.rockMeshes.delete(id);
+    });
 
-      const wall = new THREE.Mesh(
-        new THREE.PlaneGeometry(8.8, 5.6, 1, 1),
-        this.avalancheMaterial.clone()
-      );
-      wall.rotation.x = -0.08;
-      this.hazardGroup.add(wall);
-      this.hazardEntries.push({ mesh: wall, waveIndex, lane: 1, kind: 'avalanche' });
+    rocks.forEach((rock) => {
+      if (this.rockMeshes.has(rock.id)) {
+        return;
+      }
+      const mesh = new THREE.Mesh(new THREE.DodecahedronGeometry(0.84, 0), this.rockMaterial.clone());
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      this.rockGroup.add(mesh);
+      this.rockMeshes.set(rock.id, mesh);
     });
   }
 
-  _pathPosition(progressUnits, lateralOffset) {
-    const position = new THREE.Vector3(
-      lateralOffset * 1.95,
-      -0.8 + progressUnits * 1.9,
-      -24 + progressUnits * 5.4
-    );
-    return position;
-  }
-
-  _dropFootprint(pathPosition, lateralOffset, progressUnits, biomeMix) {
-    const footprint = this.footprints[this.nextFootprintIndex];
-    this.nextFootprintIndex = (this.nextFootprintIndex + 1) % this.footprints.length;
-
-    const strideSide = (this.nextFootprintIndex % 2 === 0 ? 1 : -1) * 0.12;
-    footprint.visible = true;
-    footprint.position.set(
-      (lateralOffset * 1.95) + strideSide,
-      pathPosition.y - 0.7,
-      pathPosition.z - 0.1
-    );
-    footprint.rotation.x = -0.58;
-    footprint.rotation.y = randomBetween(-0.25, 0.25);
-    footprint.scale.set(lerp(1, 0.72, biomeMix), 1, lerp(1, 0.7, biomeMix));
-    footprint.material.opacity = lerp(0.32, 0.15, biomeMix) + (Math.sin(progressUnits) * 0.04);
-  }
-
-  _updateRope(playerPosition, snapshot) {
-    const anchorBase = this._pathPosition(Math.max(0, (playerPosition.z + 24) / 5.4 + 2.4), 0);
-    this.anchorPosition.set(anchorBase.x, anchorBase.y + 4.4, anchorBase.z + 7.2);
-
-    const swingSag = (snapshot.swingIntensity || 0) * 0.42;
-    const deathSag = snapshot.state === 'dead' ? Math.min(2.4, (snapshot.deathElapsedMs || 0) / 1000 * 1.5) : 0;
-    const sagAmount = 1.15 + swingSag + deathSag;
-    const points = [];
-    const handPosition = playerPosition.clone().add(new THREE.Vector3(
-      (snapshot.lateralVelocity || 0) * 0.02 + ((snapshot.emergencyLedgeActive ? snapshot.ledgeSide : 0) * 0.18),
-      1.5,
-      0.12
-    ));
-    for (let index = 0; index < 6; index += 1) {
-      const t = index / 5;
-      const point = new THREE.Vector3().lerpVectors(this.anchorPosition, handPosition, t);
-      point.y -= Math.sin(t * Math.PI) * sagAmount;
-      if (snapshot.state === 'dead') {
-        point.z -= Math.sin(t * Math.PI) * 0.65;
-      }
-      points.push(point);
-    }
-    this.ropeGeometry.setFromPoints(points);
-  }
-
-  _updateParticles(field, playerPosition, deltaSeconds, driftX, driftY, driftZ) {
-    const { positions, speeds, geometry, spreadX, spreadY, spreadZ, count } = field;
-    field.points.position.copy(playerPosition);
-
+  _updateParticles(field, anchor, deltaSeconds, driftX, driftY, driftZ) {
+    field.points.position.copy(anchor);
+    const { positions, speeds, spreadX, spreadY, spreadZ, geometry, count } = field;
     for (let index = 0; index < count; index += 1) {
       const i3 = index * 3;
       positions[i3] += driftX * speeds[index] * deltaSeconds;
@@ -431,165 +283,84 @@ class AscentRenderer {
       if (positions[i3 + 2] < -spreadZ) positions[i3 + 2] = spreadZ;
       if (positions[i3 + 2] > spreadZ) positions[i3 + 2] = -spreadZ;
     }
-
     geometry.attributes.position.needsUpdate = true;
   }
 
   render(snapshot, deltaSeconds) {
     const time = this.clock.getElapsedTime();
-    const biomeMix = snapshot.biomeMix || 0;
-    const swingIntensity = snapshot.swingIntensity || 0;
-    const emergencyLedgeActive = Boolean(snapshot.emergencyLedgeActive);
-    const visibilityLoss = 1 - (snapshot.visibilityClarity || 1);
-    const deathSeconds = (snapshot.deathElapsedMs || 0) / 1000;
-    const fogNear = lerp(20, 14, snapshot.stormStrength || 0);
-    const fogFar = lerp(92, 54, clamp((snapshot.stormStrength || 0) * 0.7 + (snapshot.ashStrength || 0), 0, 1));
+    const pressure = snapshot.pressure || 0;
+    const accent = new THREE.Color(snapshot.themeAccent || '#9fdcff');
+    const cold = new THREE.Color(0xc7e6fa);
+    const mist = new THREE.Color(0xecf6ff);
 
-    this.scene.background.lerpColors(
-      new THREE.Color(0xc9deeb),
-      new THREE.Color(0x3a2626),
-      biomeMix
-    );
-    this.scene.fog.color.copy(this.scene.background);
-    this.scene.fog.near = fogNear;
-    this.scene.fog.far = fogFar;
+    this.scene.background.copy(cold.clone().lerp(accent, 0.14));
+    this.scene.fog.color.copy(mist.clone().lerp(accent, 0.1));
+    this.scene.fog.near = 20 - (pressure * 2);
+    this.scene.fog.far = 92 - (pressure * 18);
+    this.ambientLight.intensity = 0.96 - (pressure * 0.08);
+    this.sunLight.intensity = 1.28 - (pressure * 0.18);
+    this.fillLight.intensity = 0.38 + (pressure * 0.08);
 
-    this.ambientLight.intensity = lerp(1.0, 0.62, biomeMix);
-    this.sunLight.intensity = lerp(1.35, 0.78, biomeMix);
-    this.rimLight.intensity = lerp(0.46, 0.26, biomeMix);
-    this.lavaLight.intensity = lerp(0.3, 2.1, biomeMix);
-    this.craterGlow.material.opacity = lerp(0.12, 0.6, biomeMix);
+    this.mountainMaterial.color.copy(new THREE.Color(0xe4eff7).lerp(accent, 0.08));
 
-    this.mountainMaterial.color.lerpColors(new THREE.Color(0xdde6ef), new THREE.Color(0x665753), biomeMix);
-    this.darkMountainMaterial.color.lerpColors(new THREE.Color(0x31414d), new THREE.Color(0x241d1e), biomeMix);
-    this.summitMaterial.color.lerpColors(new THREE.Color(0xcfdbe4), new THREE.Color(0x73584e), biomeMix);
-    this.volcanoCone.material.emissiveIntensity = lerp(0.6, 1.35, biomeMix);
-
-    const pathPosition = this._pathPosition(snapshot.visualProgressUnits || 0, snapshot.lateralOffset || 0);
-    this.playerWorldPosition.copy(pathPosition);
-
-    const climbBob = snapshot.state === 'movement'
-      ? Math.sin(time * lerp(7.6, 9.1, swingIntensity)) * lerp(0.08, 0.16, swingIntensity)
-      : Math.sin(time * 2.2) * 0.03;
-    this.playerGroup.position.copy(pathPosition);
+    const playerPos = this._mountainPoint(snapshot.playerProgress || 0, snapshot.playerLateral || 0);
+    const movePulse = snapshot.isMoving ? 1 : 0;
+    const climbBob = movePulse ? Math.sin(time * 10.4) * 0.08 : Math.sin(time * 2.4) * 0.02;
+    this.playerGroup.position.copy(playerPos);
     this.playerGroup.position.y += climbBob;
-    if (snapshot.state === 'dead') {
-      this.playerGroup.position.y -= Math.min(7.2, deathSeconds * 2.6);
-      this.playerGroup.position.z -= deathSeconds * 1.25;
-      this.playerGroup.position.x += Math.sin(deathSeconds * 3.4) * 0.34;
-    }
-    this.playerGroup.rotation.z = clamp(
-      -((snapshot.lateralVelocity || 0) * 0.065) + (emergencyLedgeActive ? (snapshot.ledgeSide || 0) * 0.28 : 0),
-      -0.62,
-      0.62
-    );
-    this.playerGroup.rotation.x = snapshot.state === 'dead'
-      ? 1.05 + Math.min(0.56, deathSeconds * 0.4)
-      : -0.08 - (swingIntensity * 0.08);
-    this.playerTorso.rotation.x = snapshot.state === 'movement' ? -0.14 - (swingIntensity * 0.12) : -0.02;
 
-    const gripIntensity = emergencyLedgeActive ? 1 : swingIntensity;
-    const armCycle = time * lerp(7.5, 9.4, swingIntensity);
-    const legCycle = time * lerp(7.5, 8.6, swingIntensity);
-    this.playerLeftArm.rotation.x = (-0.44 * gripIntensity) + (Math.sin(armCycle) * lerp(0.28, 0.12, gripIntensity));
-    this.playerRightArm.rotation.x = (-0.44 * gripIntensity) - (Math.sin(armCycle) * lerp(0.28, 0.12, gripIntensity));
-    this.playerLeftArm.rotation.z = lerp(0.34, 0.58, gripIntensity);
-    this.playerRightArm.rotation.z = -lerp(0.34, 0.58, gripIntensity);
-    this.playerLeftLeg.rotation.x = snapshot.state === 'dead'
-      ? -0.38 - (Math.sin(deathSeconds * 4.2) * 0.18)
-      : -(Math.sin(legCycle) * lerp(0.34, 0.22, gripIntensity));
-    this.playerRightLeg.rotation.x = snapshot.state === 'dead'
-      ? 0.38 + (Math.sin(deathSeconds * 4.2) * 0.18)
-      : Math.sin(legCycle) * lerp(0.34, 0.22, gripIntensity);
-
-    this._updateRope(this.playerGroup.position, snapshot);
-
-    const hazardSafeLanes = snapshot.hazard
-      ? [0, 1, 2].filter((lane) => !snapshot.hazard.waves.some((wave) => wave.lanes.includes(lane)))
-      : [0, 1, 2];
-
-    this.laneMeshes.forEach((laneMesh, lane) => {
-      const material = this.laneMaterials[lane];
-      const isSelected = lane === snapshot.selectedLane;
-      const isCurrent = lane === snapshot.currentLane;
-      const isSafe = hazardSafeLanes.includes(lane);
-
-      material.color.lerpColors(
-        new THREE.Color(0xd7e3eb),
-        new THREE.Color(0x6f4739),
-        biomeMix
-      );
-      material.emissive.setHex(
-        isSelected
-          ? 0xffb55a
-          : isCurrent
-            ? 0x6fb1ff
-            : isSafe
-              ? 0x12303a
-              : 0x5a1e17
-      );
-      material.emissiveIntensity = isSelected ? 0.62 : isCurrent ? 0.4 : isSafe ? 0.18 : 0.34;
-    });
-
-    this._syncHazards(snapshot);
-    this.hazardEntries.forEach((entry) => {
-      const wave = snapshot.hazard?.waves?.[entry.waveIndex];
-      if (!wave) {
-        entry.mesh.visible = false;
-        return;
-      }
-
-      if (entry.kind === 'rock') {
-        const progress = clamp(snapshot.hazardElapsedMs / Math.max(wave.impactMs, 1), 0, 1.24);
-        const travel = lerp(16, -2.4, progress);
-        entry.mesh.visible = progress <= 1.16;
-        entry.mesh.position.set(
-          LANE_WORLD_X[entry.lane] * 1.95,
-          pathPosition.y + 2 + (travel * 0.35),
-          pathPosition.z + travel
-        );
-        entry.mesh.rotation.x += deltaSeconds * 4.2;
-        entry.mesh.rotation.y += deltaSeconds * 3.1;
-        entry.mesh.scale.setScalar(entry.mesh.visible ? 1 : 0.001);
-        return;
-      }
-
-      const progress = clamp(snapshot.hazardElapsedMs / Math.max(wave.impactMs, 1), 0, 1.15);
-      const travel = lerp(20, -2, progress);
-      entry.mesh.visible = progress <= 1.05;
-      entry.mesh.position.set(0, pathPosition.y + 3.6 + (travel * 0.2), pathPosition.z + travel);
-      entry.mesh.rotation.y = Math.sin(time * 0.9) * 0.08;
-      entry.mesh.material.opacity = 0.28 + (Math.sin(time * 6.5) * 0.04);
-    });
-
-    const currentFootprintUnit = Math.floor((snapshot.visualProgressUnits || 0) * 2);
-    if (currentFootprintUnit > this.lastFootprintUnit) {
-      this.lastFootprintUnit = currentFootprintUnit;
-      this._dropFootprint(pathPosition, snapshot.lateralOffset || 0, snapshot.visualProgressUnits || 0, biomeMix);
+    if (snapshot.isDead) {
+      const fallSeconds = (snapshot.deathElapsedMs || 0) / 1000;
+      this.playerGroup.position.y -= Math.min(7.4, fallSeconds * 3.2);
+      this.playerGroup.position.z += fallSeconds * 1.4;
+      this.playerGroup.position.x += Math.sin(fallSeconds * 3.2) * 0.38;
     }
 
-    this.snowField.material.opacity = lerp(0.34, 0.08, biomeMix) + ((snapshot.stormStrength || 0) * 0.18) + (visibilityLoss * 0.04);
-    this.ashField.material.opacity = lerp(0, 0.36, snapshot.ashStrength || 0) + (visibilityLoss * 0.06);
-    this._updateParticles(this.snowField, pathPosition, deltaSeconds, -1.4, -0.7, 0.8);
-    this._updateParticles(this.ashField, pathPosition, deltaSeconds, -1.1, -0.2, 1.1);
+    this.playerGroup.rotation.x = snapshot.isDead ? 0.92 : -0.24;
+    this.playerGroup.rotation.z = clamp(-(snapshot.playerLateralVelocity || 0) * 0.08, -0.46, 0.46);
+    this.playerTorso.rotation.x = snapshot.isDead ? 0.42 : -0.14;
 
-    const cameraFocus = this.playerGroup.position.clone();
-    const desiredTarget = cameraFocus.clone().add(
-      snapshot.state === 'dead'
-        ? new THREE.Vector3(0, 0.8, 2.9)
-        : new THREE.Vector3(0, 1.05, 4.5)
-    );
-    const desiredCamera = cameraFocus.clone().add(
-      snapshot.state === 'dead'
-        ? new THREE.Vector3(5.3, 3.7, -3.8)
-        : new THREE.Vector3(
-          2.95 + ((snapshot.lateralVelocity || 0) * 0.018),
-          2.18 + (visibilityLoss * 0.28),
-          -8.55
-        )
+    const actionBias = snapshot.moveDirection === 'left'
+      ? -1
+      : snapshot.moveDirection === 'right'
+        ? 1
+        : 0;
+    const stride = movePulse ? Math.sin(time * 10.2) : Math.sin(time * 3.2) * 0.1;
+    this.playerLeftArm.rotation.x = -0.3 + (stride * 0.24);
+    this.playerRightArm.rotation.x = -0.3 - (stride * 0.24);
+    this.playerLeftArm.rotation.z = 0.26 - (actionBias * 0.12);
+    this.playerRightArm.rotation.z = -0.26 - (actionBias * 0.12);
+    this.playerLeftLeg.rotation.x = -stride * 0.34;
+    this.playerRightLeg.rotation.x = stride * 0.34;
+
+    this._syncRocks(snapshot.rocks || []);
+    (snapshot.rocks || []).forEach((rock) => {
+      const mesh = this.rockMeshes.get(rock.id);
+      if (!mesh) {
+        return;
+      }
+      const position = this._mountainPoint(rock.progress, rock.lateral + ((1 - clamp((rock.progress - snapshot.playerProgress) / 14, 0, 1)) * rock.entryBias * 0.08));
+      mesh.position.copy(position);
+      mesh.position.y += 0.9 + (Math.sin(time * 8 + rock.id) * 0.06);
+      mesh.scale.setScalar(rock.size);
+      mesh.rotation.x = rock.rotation * rock.spinX * 0.08;
+      mesh.rotation.y = rock.rotation * rock.spinY * 0.08;
+      mesh.rotation.z = rock.rotation * 0.14;
+    });
+
+    this.snowField.material.opacity = 0.24 + (pressure * 0.18);
+    this.dustField.material.opacity = 0.06 + (pressure * 0.24);
+    this._updateParticles(this.snowField, playerPos, deltaSeconds, -1.2, -0.46, 0.72);
+    this._updateParticles(this.dustField, playerPos, deltaSeconds, -0.84, -0.22, 0.46);
+
+    const target = playerPos.clone().add(snapshot.isDead ? new THREE.Vector3(0, 0.5, -1.4) : new THREE.Vector3(0, 0.95, -4.9));
+    const desiredCamera = playerPos.clone().add(
+      snapshot.isDead
+        ? new THREE.Vector3(4.8, 3.8, 4.1)
+        : new THREE.Vector3((snapshot.playerLateral || 0) * 0.55, 2.7, 8.0)
     );
 
-    this.cameraTarget.lerp(desiredTarget, 0.08);
+    this.cameraTarget.lerp(target, 0.09);
     this.cameraPosition.lerp(desiredCamera, 0.08);
     this.camera.position.copy(this.cameraPosition);
     this.camera.lookAt(this.cameraTarget);
