@@ -1,15 +1,14 @@
-const STORAGE_LEVEL_KEY = 'sklon_level';
-const STORAGE_LEXICAL_KEY = 'sklon_lexical_theme';
-const STORAGE_SESSION_KEY = 'sklon_session_topics';
-
-const game = new Game();
+const STORAGE_KEYS = {
+  playerName: 'bergstieg_player_name',
+  level: 'bergstieg_lang_level'
+};
 
 function safeStorageGet(key, fallback = '') {
   try {
     const value = localStorage.getItem(key);
     return value === null ? fallback : value;
   } catch (error) {
-    console.warn(`Не удалось прочитать ${key}:`, error);
+    console.warn(`Storage read failed for ${key}:`, error);
     return fallback;
   }
 }
@@ -18,125 +17,129 @@ function safeStorageSet(key, value) {
   try {
     localStorage.setItem(key, value);
   } catch (error) {
-    console.warn(`Не удалось сохранить ${key}:`, error);
+    console.warn(`Storage write failed for ${key}:`, error);
   }
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  const game = new Game();
+
   const ui = {
     menuScreen: document.getElementById('menu-screen'),
     gameScreen: document.getElementById('game-screen'),
-    resultScreen: document.getElementById('result-screen'),
+    winScreen: document.getElementById('win-screen'),
+    loseScreen: document.getElementById('lose-screen'),
+    playerName: document.getElementById('player-name'),
     levelButtons: document.getElementById('level-buttons'),
     lexicalGrid: document.getElementById('lexical-grid'),
-    sessionGrid: document.getElementById('session-grid'),
-    selectedSessionTopics: document.getElementById('selected-session-topics'),
-    startHint: document.getElementById('start-hint'),
+    bonusSlots: document.getElementById('bonus-slots'),
+    grammarPicker: document.getElementById('grammar-picker'),
+    selectionCounter: document.getElementById('selection-counter'),
     startButton: document.getElementById('start-btn'),
-    resultKicker: document.getElementById('result-kicker'),
-    resultTitle: document.getElementById('result-title'),
-    resultCopy: document.getElementById('result-copy'),
-    resultRestart: document.getElementById('result-restart'),
-    resultMenu: document.getElementById('result-menu')
+    winStats: document.getElementById('win-stats'),
+    loseStats: document.getElementById('lose-stats'),
+    loseMessage: document.getElementById('lose-message')
   };
 
-  let selectedLevel = safeStorageGet(STORAGE_LEVEL_KEY, DEFAULT_CEFR_LEVEL) || DEFAULT_CEFR_LEVEL;
-  let selectedLexicalTheme = safeStorageGet(STORAGE_LEXICAL_KEY, LEXICAL_THEMES[0].id) || LEXICAL_THEMES[0].id;
-  let selectedSessionTopics = parseStoredTopics(safeStorageGet(STORAGE_SESSION_KEY, ''));
-  let lastSettings = null;
+  let currentStep = 1;
+  let selectedLevel = safeStorageGet(STORAGE_KEYS.level, DEFAULT_CEFR_LEVEL) || DEFAULT_CEFR_LEVEL;
+  let selectedLexical = null;
+  let selectedSlotIndex = 0;
+  const slotAssignments = Array(BONUS_SLOTS.length).fill(null);
 
-  if (!LEXICAL_THEMES.some((theme) => theme.id === selectedLexicalTheme)) {
-    selectedLexicalTheme = LEXICAL_THEMES[0].id;
-  }
-  selectedSessionTopics = selectedSessionTopics.filter((topicId) => SESSION_TOPICS.some((topic) => topic.id === topicId)).slice(0, SESSION_THEME_LIMIT);
+  ui.playerName.value = safeStorageGet(STORAGE_KEYS.playerName, '');
+
+  game.onWin = (stats) => {
+    ui.winStats.textContent =
+      `${stats.playerName} добрался до вершины. Точность: ${stats.accuracy}%. ` +
+      `Ответов: ${stats.correct}/${stats.answers}. Время: ${stats.durationSeconds} сек. ` +
+      `Лавины заблокированы: ${stats.avalanchesBlocked}.`;
+    setScreen('win-screen');
+  };
+
+  game.onLose = (stats) => {
+    ui.loseMessage.textContent =
+      `Достигнуто: ${stats.progress} м из ${SUMMIT_HEIGHT}. Лавины сбивали назад ${stats.avalanchesHit} раз.`;
+    ui.loseStats.textContent =
+      `Точность: ${stats.accuracy}%. Верных ответов: ${stats.correct}/${stats.answers}. ` +
+      `Удачных уходов от опасностей: ${stats.nearMisses}.`;
+    setScreen('lose-screen');
+  };
 
   renderLevelButtons();
-  renderLexicalThemes();
-  renderSessionTopics();
-  renderSelectedTopics();
-  updateStartState();
-  setActiveScreen('menu-screen');
+  renderLexicalGrid();
+  renderBonusSlots();
+  renderGrammarPicker();
+  updateSelectionCounter();
+  updateStartButton();
+  showStep(1);
 
-  ui.startButton.addEventListener('click', () => {
-    const settings = buildGameSettings();
+  document.getElementById('to-step2-btn').addEventListener('click', () => {
+    showStep(2);
+  });
+
+  document.getElementById('to-step3-btn').addEventListener('click', () => {
+    if (!selectedLexical) {
+      return;
+    }
+    showStep(3);
+  });
+
+  document.getElementById('back-to-step1').addEventListener('click', () => showStep(1));
+  document.getElementById('back-to-step2').addEventListener('click', () => showStep(2));
+
+  document.getElementById('start-btn').addEventListener('click', async () => {
+    const settings = buildSettings();
     if (!settings) {
       return;
     }
 
-    safeStorageSet(STORAGE_LEVEL_KEY, settings.langLevel);
-    safeStorageSet(STORAGE_LEXICAL_KEY, settings.lexicalTheme);
-    safeStorageSet(STORAGE_SESSION_KEY, JSON.stringify(settings.sessionTopics));
+    safeStorageSet(STORAGE_KEYS.playerName, settings.playerName);
+    safeStorageSet(STORAGE_KEYS.level, settings.langLevel);
 
-    lastSettings = settings;
-    setActiveScreen('game-screen');
-    game.init(settings, {
-      onWin(stats) {
-        ui.resultKicker.textContent = 'Финиш';
-        ui.resultTitle.textContent = 'Кромка взята';
-        ui.resultCopy.textContent =
-          `Ты добрался до вершины. Ходов куплено: ${stats.movesEarned}, шагов потрачено: ${stats.movesSpent}, точность: ${stats.accuracy}%.`;
-        setActiveScreen('result-screen');
-      },
-      onLose(stats) {
-        ui.resultKicker.textContent = 'Срыв';
-        ui.resultTitle.textContent = 'Камнепад догнал';
-        ui.resultCopy.textContent =
-          `Пройдено ${stats.progressPercent}% склона. Верных ответов: ${stats.correct}/${stats.answered}, купленных ходов: ${stats.movesEarned}, потрачено: ${stats.movesSpent}.`;
-        setActiveScreen('result-screen');
-      }
-    }).catch((error) => {
-      console.error('Не удалось запустить игру:', error);
-      game.destroy();
-      setActiveScreen('menu-screen');
-    });
-  });
-
-  ui.resultRestart.addEventListener('click', () => {
-    if (!lastSettings) {
-      return;
-    }
-    setActiveScreen('game-screen');
-    game.init(lastSettings, {
-      onWin(stats) {
-        ui.resultKicker.textContent = 'Финиш';
-        ui.resultTitle.textContent = 'Кромка взята';
-        ui.resultCopy.textContent =
-          `Ты добрался до вершины. Ходов куплено: ${stats.movesEarned}, шагов потрачено: ${stats.movesSpent}, точность: ${stats.accuracy}%.`;
-        setActiveScreen('result-screen');
-      },
-      onLose(stats) {
-        ui.resultKicker.textContent = 'Срыв';
-        ui.resultTitle.textContent = 'Камнепад догнал';
-        ui.resultCopy.textContent =
-          `Пройдено ${stats.progressPercent}% склона. Верных ответов: ${stats.correct}/${stats.answered}, купленных ходов: ${stats.movesEarned}, потрачено: ${stats.movesSpent}.`;
-        setActiveScreen('result-screen');
-      }
-    }).catch((error) => {
-      console.error('Не удалось перезапустить игру:', error);
-      game.destroy();
-      setActiveScreen('menu-screen');
-    });
-  });
-
-  ui.resultMenu.addEventListener('click', () => {
-    game.destroy();
-    setActiveScreen('menu-screen');
-  });
-
-  function parseStoredTopics(raw) {
-    if (!raw) {
-      return [];
-    }
+    setScreen('game-screen');
     try {
-      const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed : [];
+      await game.init(settings);
     } catch (error) {
-      return [];
+      console.error('Game init failed:', error);
+      game.destroy(false);
+      setScreen('menu-screen');
+      window.alert('Не удалось запустить подъём. Перезагрузи страницу и попробуй снова.');
     }
+  });
+
+  document.getElementById('win-restart').addEventListener('click', () => {
+    game.destroy();
+    resetSessionSelections();
+    setScreen('menu-screen');
+    showStep(1);
+  });
+
+  document.getElementById('lose-restart').addEventListener('click', async () => {
+    setScreen('game-screen');
+    await game.restartCurrentSession();
+  });
+
+  document.getElementById('lose-menu').addEventListener('click', () => {
+    game.destroy(false);
+    setScreen('menu-screen');
+    showStep(1);
+  });
+
+  function showStep(step) {
+    currentStep = step;
+    [1, 2, 3].forEach((stepNumber) => {
+      const node = document.getElementById(`setup-step${stepNumber}`);
+      node.classList.toggle('hidden', stepNumber !== step);
+      const dot = document.querySelector(`[data-step-dot="${stepNumber}"]`);
+      if (dot) {
+        dot.classList.toggle('active', stepNumber === step);
+      }
+    });
   }
 
-  function setActiveScreen(screenId) {
-    ['menu-screen', 'game-screen', 'result-screen'].forEach((id) => {
+  function setScreen(screenId) {
+    ['menu-screen', 'game-screen', 'win-screen', 'lose-screen'].forEach((id) => {
       const node = document.getElementById(id);
       node.classList.toggle('active', id === screenId);
     });
@@ -146,10 +149,9 @@ document.addEventListener('DOMContentLoaded', () => {
     ui.levelButtons.innerHTML = '';
     CEFR_LEVELS.forEach((level) => {
       const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'level-pill';
+      button.className = 'level-btn';
       button.textContent = level;
-      button.classList.toggle('active', selectedLevel === level);
+      button.classList.toggle('active', level === selectedLevel);
       button.addEventListener('click', () => {
         selectedLevel = level;
         renderLevelButtons();
@@ -158,86 +160,118 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  function renderLexicalThemes() {
+  function renderLexicalGrid() {
     ui.lexicalGrid.innerHTML = '';
-    LEXICAL_THEMES.forEach((theme) => {
+    LEXICAL_TOPICS.forEach((topic) => {
       const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'lexical-pill';
-      button.textContent = theme.title;
-      button.classList.toggle('selected', selectedLexicalTheme === theme.id);
+      button.className = 'selection-btn';
+      button.textContent = topic;
+      button.classList.toggle('selected', topic === selectedLexical);
       button.addEventListener('click', () => {
-        selectedLexicalTheme = theme.id;
-        renderLexicalThemes();
-        updateStartState();
+        selectedLexical = topic;
+        renderLexicalGrid();
+        updateStartButton();
       });
       ui.lexicalGrid.appendChild(button);
     });
   }
 
-  function renderSessionTopics() {
-    ui.sessionGrid.innerHTML = '';
-    SESSION_TOPICS.forEach((topic) => {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'topic-pill';
-      const selected = selectedSessionTopics.includes(topic.id);
-      button.classList.toggle('selected', selected);
-      button.classList.toggle('disabled', !selected && selectedSessionTopics.length >= SESSION_THEME_LIMIT);
-      button.innerHTML = `
-        <div class="topic-pill-title">${topic.title}</div>
-        <div class="topic-pill-copy">${topic.blurb}</div>
-      `;
-      button.addEventListener('click', () => {
-        toggleSessionTopic(topic.id);
-      });
-      ui.sessionGrid.appendChild(button);
-    });
-  }
-
-  function renderSelectedTopics() {
-    ui.selectedSessionTopics.innerHTML = '';
-    selectedSessionTopics.forEach((topicId) => {
-      const topic = findSessionTopic(topicId);
-      const chip = document.createElement('div');
-      chip.className = 'selected-chip';
-      chip.textContent = topic.title;
-      ui.selectedSessionTopics.appendChild(chip);
-    });
-  }
-
-  function toggleSessionTopic(topicId) {
-    const currentIndex = selectedSessionTopics.indexOf(topicId);
-    if (currentIndex >= 0) {
-      selectedSessionTopics.splice(currentIndex, 1);
-    } else {
-      if (selectedSessionTopics.length >= SESSION_THEME_LIMIT) {
-        return;
+  function renderBonusSlots() {
+    ui.bonusSlots.innerHTML = '';
+    BONUS_SLOTS.forEach((slot, index) => {
+      const node = document.createElement('button');
+      node.className = 'bonus-slot';
+      if (selectedSlotIndex === index) {
+        node.classList.add('selected');
       }
-      selectedSessionTopics.push(topicId);
+      if (slotAssignments[index]) {
+        node.classList.add('ready');
+      }
+      node.innerHTML = `
+        <div class="slot-kicker">Бонус ${index + 1}</div>
+        <div class="slot-title">${slot.bonusLabel}</div>
+        <div class="slot-topic">${slotAssignments[index] || 'Тема ещё не выбрана'}</div>
+        <div class="slot-help">${slot.help}</div>
+      `;
+      node.addEventListener('click', () => {
+        selectedSlotIndex = index;
+        renderBonusSlots();
+        renderGrammarPicker();
+      });
+      ui.bonusSlots.appendChild(node);
+    });
+  }
+
+  function renderGrammarPicker() {
+    ui.grammarPicker.innerHTML = '';
+    const usedTopics = slotAssignments.filter(Boolean);
+
+    GRAMMAR_TOPICS.forEach((topic) => {
+      const button = document.createElement('button');
+      button.className = 'selection-btn';
+      button.textContent = topic;
+      if (usedTopics.includes(topic)) {
+        button.classList.add('used');
+      }
+      button.addEventListener('click', () => {
+        assignTopicToSlot(topic);
+      });
+      ui.grammarPicker.appendChild(button);
+    });
+  }
+
+  function assignTopicToSlot(topic) {
+    if (slotAssignments.includes(topic)) {
+      return;
     }
-    renderSessionTopics();
-    renderSelectedTopics();
-    updateStartState();
+
+    const targetIndex = selectedSlotIndex !== null ? selectedSlotIndex : slotAssignments.findIndex((slot) => !slot);
+    if (targetIndex < 0) {
+      return;
+    }
+
+    slotAssignments[targetIndex] = topic;
+    const nextEmpty = slotAssignments.findIndex((slot) => !slot);
+    selectedSlotIndex = nextEmpty >= 0 ? nextEmpty : targetIndex;
+    renderBonusSlots();
+    renderGrammarPicker();
+    updateSelectionCounter();
+    updateStartButton();
   }
 
-  function updateStartState() {
-    const ready = Boolean(selectedLexicalTheme) && selectedSessionTopics.length === SESSION_THEME_LIMIT;
-    ui.startButton.disabled = !ready;
-    ui.startHint.textContent = ready
-      ? 'Все готово. Камнепад начнется сразу после запуска.'
-      : `Нужно выбрать тему восхождения и ${SESSION_THEME_LIMIT} тем сессии.`;
+  function updateSelectionCounter() {
+    const selectedCount = slotAssignments.filter(Boolean).length;
+    ui.selectionCounter.textContent = `${selectedCount} / ${BONUS_SLOTS.length}`;
   }
 
-  function buildGameSettings() {
-    if (!selectedLexicalTheme || selectedSessionTopics.length !== SESSION_THEME_LIMIT) {
+  function updateStartButton() {
+    ui.startButton.disabled = !selectedLexical || slotAssignments.some((topic) => !topic);
+  }
+
+  function buildSettings() {
+    if (!selectedLexical || slotAssignments.some((topic) => !topic)) {
       return null;
     }
 
     return {
+      playerName: ui.playerName.value.trim() || 'Spieler',
       langLevel: selectedLevel,
-      lexicalTheme: selectedLexicalTheme,
-      sessionTopics: [...selectedSessionTopics]
+      lexicalTopic: selectedLexical,
+      slotConfigs: BONUS_SLOTS.map((slotDef, index) => ({
+        slotDef,
+        grammarTopic: slotAssignments[index]
+      }))
     };
+  }
+
+  function resetSessionSelections() {
+    selectedLexical = null;
+    selectedSlotIndex = 0;
+    slotAssignments.fill(null);
+    renderLexicalGrid();
+    renderBonusSlots();
+    renderGrammarPicker();
+    updateSelectionCounter();
+    updateStartButton();
   }
 });
