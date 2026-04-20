@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>BERGSTIEG</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div id="menu-screen" class="screen active">
+    <div class="menu-layout">
+      <section class="hero-card">
+        <div class="hero-copy">
+          <div class="hero-kicker">German Climbing Prototype</div>
+          <h1 id="game-title">BERGSTIEG</h1>
+          <p class="hero-subtitle">
+            Подъём на вершину, где каждое упражнение по немецкому языку становится выбором выживания.
+            Камни летят, лавины сносят вниз, снег налипает на камеру, а гора из снежной стены превращается
+            в вулканический ад прямо по ходу сессии.
+          </p>
+        </div>
+
+        <div class="hero-grid">
+          <article class="hero-panel">
+            <div class="hero-panel-title">Что важно в этой версии</div>
+            <p>Камера из-за спины, трос перед игроком, вид на пропасть внизу и вершину наверху, метель, пепел и сильный силуэт альпиниста.</p>
+          </article>
+          <article class="hero-panel">
+            <div class="hero-panel-title">Как работает сессия</div>
+            <p>Игрок выбирает уровень, лексическую тему и 5 грамматических тем. Во время подъёма каждая тема становится кнопкой-бонусом.</p>
+          </article>
+          <article class="hero-panel">
+            <div class="hero-panel-title">Цена ошибки</div>
+            <p>Камни убивают. Лавины отбрасывают на три хода. Пока думаешь над ответом, опасности всё равно продолжают идти вниз.</p>
+          </article>
+        </div>
+
+        <div class="bonus-preview">
+          <div class="bonus-preview-title">Бонусы сессии</div>
+          <div class="bonus-preview-list">
+            <div class="bonus-chip warm">+2 хода вверх</div>
+            <div class="bonus-chip cold">Рывок на 1 линию</div>
+            <div class="bonus-chip cold">Сильный рывок на 2 линии</div>
+            <div class="bonus-chip ember">Снежный щит, CD 3 мин</div>
+            <div class="bonus-chip clear">Очистка камеры</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="setup-card">
+        <div class="setup-topline">
+          <div class="setup-title">Настройка восхождения</div>
+          <div class="setup-steps">
+            <span class="setup-dot active" data-step-dot="1">1</span>
+            <span class="setup-dot" data-step-dot="2">2</span>
+            <span class="setup-dot" data-step-dot="3">3</span>
+          </div>
+        </div>
+
+        <div id="setup-step1" class="setup-step">
+          <h2 class="step-title">Кто поднимается</h2>
+          <p class="step-text">Выбери уровень языка и имя альпиниста для этой сессии. Это влияет только на подбор упражнений и подписи в HUD.</p>
+
+          <div class="form-group">
+            <label for="player-name">Имя игрока</label>
+            <input type="text" id="player-name" maxlength="24" placeholder="Например, Лея">
+          </div>
+
+          <div class="form-group">
+            <label>Уровень немецкого</label>
+            <div id="level-buttons" class="level-buttons"></div>
+          </div>
+
+          <div class="setup-actions">
+            <button id="to-step2-btn" class="btn-primary">Дальше</button>
+          </div>
+        </div>
+
+        <div id="setup-step2" class="setup-step hidden">
+          <h2 class="step-title">Лексическая тема</h2>
+          <p class="step-text">Одна тема на всю сессию. Мы используем её как рамку для упражнений и для атмосферы карточек в ходе подъёма.</p>
+          <div id="lexical-grid" class="selection-grid"></div>
+
+          <div class="setup-actions">
+            <button id="back-to-step1" class="btn-secondary">Назад</button>
+            <button id="to-step3-btn" class="btn-primary">Дальше</button>
+          </div>
+        </div>
+
+        <div id="setup-step3" class="setup-step hidden">
+          <h2 class="step-title">Пять грамматических тем</h2>
+          <p class="step-text">
+            Каждая выбранная тема закрепляется за отдельным бонусом. Снежный щит имеет кулдаун 3 минуты, остальные бонусы без кулдауна.
+          </p>
+
+          <div id="bonus-slots" class="bonus-slots"></div>
+
+          <div class="picker-header">
+            <span>Список грамматических тем</span>
+            <span id="selection-counter">0 / 5</span>
+          </div>
+          <div id="grammar-picker" class="selection-grid grammar-grid"></div>
+
+          <div class="setup-actions">
+            <button id="back-to-step2" class="btn-secondary">Назад</button>
+            <button id="start-btn" class="btn-primary" disabled>Начать подъём</button>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <div id="game-screen" class="screen">
+    <canvas id="game-canvas"></canvas>
+    <div id="environment-vignette"></div>
+    <div id="storm-overlay"></div>
+
+    <div id="lens-overlay" aria-hidden="true">
+      <div class="lens-smear lens-smear-a"></div>
+      <div class="lens-smear lens-smear-b"></div>
+      <div class="lens-smear lens-smear-c"></div>
+      <div class="lens-smear lens-smear-d"></div>
+    </div>
+
+    <div id="message-banner" class="message-banner hidden"></div>
+
+    <div id="hud">
+      <div class="hud-card brand-card">
+        <div class="hud-label">Подъём</div>
+        <div class="hud-value" id="altitude-text">0 / 100 м</div>
+        <div class="altitude-bar">
+          <div id="altitude-bar-fill"></div>
+        </div>
+      </div>
+
+      <div class="hud-card">
+        <div class="hud-label">Фаза горы</div>
+        <div class="hud-value" id="phase-text">Снежный склон</div>
+        <div class="hud-subtext" id="phase-subtext">Ниже скалы и следы от кошек</div>
+      </div>
+
+      <div class="hud-card">
+        <div class="hud-label">Линия</div>
+        <div class="hud-value" id="lane-text">Центр</div>
+        <div class="hud-subtext" id="swing-text">Раскачка: 0%</div>
+      </div>
+
+      <div class="hud-card">
+        <div class="hud-label">Обзор камеры</div>
+        <div class="hud-value" id="lens-text">Чисто</div>
+        <div class="hud-subtext" id="lens-subtext">Снег ещё не мешает</div>
+      </div>
+
+      <div class="hud-card">
+        <div class="hud-label">Щит от лавины</div>
+        <div class="hud-value" id="shield-text">Не активен</div>
+        <div class="hud-subtext" id="shield-subtext">Готов к использованию</div>
+      </div>
+
+      <div class="hud-card">
+        <div class="hud-label">Игрок</div>
+        <div class="hud-value" id="player-display">Spieler</div>
+        <div class="hud-subtext" id="session-display">A2 · Reisen</div>
+      </div>
+    </div>
+
+    <div id="hazard-feed" class="feed-panel">
+      <div class="feed-title">Опасности</div>
+      <div id="hazard-text">Гора ещё только присматривается.</div>
+    </div>
+
+    <div id="topic-panel" class="floating-panel">
+      <div class="panel-topline">
+        <div>
+          <div class="panel-kicker">Темы сессии</div>
+          <div class="panel-title">Выбери бонусную тему</div>
+        </div>
+        <div class="panel-meta">1-5</div>
+      </div>
+      <div id="topic-buttons" class="topic-buttons"></div>
+    </div>
+
+    <div id="question-panel" class="floating-panel hidden">
+      <div class="panel-topline">
+        <div>
+          <div class="panel-kicker" id="question-kicker">Упражнение</div>
+          <div class="panel-title" id="question-title">Ответь быстро</div>
+        </div>
+        <div class="panel-meta" id="question-meta">Камни не ждут</div>
+      </div>
+      <p id="question-text" class="question-text"></p>
+      <div id="question-display" class="question-display"></div>
+      <div id="question-options" class="question-options"></div>
+      <div id="question-feedback" class="question-feedback hidden"></div>
+    </div>
+
+    <div id="direction-panel" class="floating-panel hidden">
+      <div class="panel-topline">
+        <div>
+          <div class="panel-kicker">Рывок</div>
+          <div class="panel-title" id="direction-title">Выбери направление</div>
+        </div>
+        <div class="panel-meta">A / D</div>
+      </div>
+      <div class="direction-buttons">
+        <button class="direction-btn" data-dir="-1">Влево</button>
+        <button class="direction-btn" data-dir="1">Вправо</button>
+      </div>
+    </div>
+
+    <div id="control-hint">
+      Темы: 1-5 · Выбор рывка: A / D или стрелки · Во время ответа камни и лавины продолжают двигаться
+    </div>
+  </div>
+
+  <div id="win-screen" class="screen">
+    <div class="end-card">
+      <div class="end-kicker">Вершина</div>
+      <h2>Подъём завершён</h2>
+      <p id="win-stats"></p>
+      <div class="setup-actions">
+        <button id="win-restart" class="btn-primary">Новая сессия</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="lose-screen" class="screen">
+    <div class="end-card">
+      <div class="end-kicker">Падение</div>
+      <h2 id="lose-title">Камень сбил альпиниста</h2>
+      <p id="lose-message">Гора не простила ошибку.</p>
+      <p id="lose-stats"></p>
+      <div class="setup-actions">
+        <button id="lose-restart" class="btn-primary">Попробовать снова</button>
+        <button id="lose-menu" class="btn-secondary">К настройке</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="js/audio.js"></script>
+  <script src="js/questions.js"></script>
+  <script src="js/renderer.js"></script>
+  <script src="js/game.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
