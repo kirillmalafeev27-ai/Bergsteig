@@ -1,7 +1,7 @@
 {
-  "name": "drucker-game",
+  "name": "sklon-prototype",
   "version": "1.0.0",
-  "description": "Drucker - German learning game with a first-person crusher room",
+  "description": "Sklon - continuous mountain pressure prototype for learning German",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
