@@ -656,21 +656,114 @@ class BergRenderer {
     }
   }
 
+  // Named mountain constants shared by the mesh builder and anything that
+  // needs to sit on the generated slope.
+  _mountainMeta() {
+    const LANE_X = 2.85;
+    const ROUTE_HALF = LANE_X * 1.5 + 0.35;
+    const MOUNT_WIDTH = 150;
+    const MOUNT_HEIGHT = 290;
+    return {
+      LANE_X,
+      ROUTE_HALF,
+      MOUNT_WIDTH,
+      MOUNT_HEIGHT,
+      MOUNT_HALF_W: MOUNT_WIDTH / 2,
+      MOUNT_HALF_H: MOUNT_HEIGHT / 2,
+      FLANK_SPAN: MOUNT_WIDTH / 2 - ROUTE_HALF,
+      BASE_Y: 112,
+      BASE_Z: 0.4
+    };
+  }
+
+  // Single source of truth for the mountain surface. Given a mesh-local
+  // (baseX, meshY), returns the displaced (x, z) along with flags the
+  // mesh builder and prop placers both need.
+  _mountainProfile(baseX, meshY) {
+    const m = this._mountainMeta();
+    const slopeRatio = clamp01((meshY + m.MOUNT_HALF_H) / m.MOUNT_HEIGHT);
+    const xSign = baseX === 0 ? 0 : Math.sign(baseX);
+    const silhouette = Math.pow(1 - slopeRatio, 1.55);
+    const summitPinch = smoothStep(0.82, 1, slopeRatio);
+
+    let x;
+    const absBase = Math.abs(baseX);
+    if (absBase <= m.ROUTE_HALF) {
+      x = baseX;
+    } else {
+      const outerFrac = (absBase - m.ROUTE_HALF) / m.FLANK_SPAN;
+      const scaled = outerFrac * Math.max(0.04, silhouette);
+      x = xSign * (m.ROUTE_HALF * Math.max(0.05, silhouette + summitPinch * -0.04) + scaled * m.FLANK_SPAN);
+    }
+    const absX = Math.abs(x);
+    const outsideCorridor = absX > m.ROUTE_HALF;
+    const insideRoute = !outsideCorridor;
+
+    const noise = (nx, ny, fx, fy) =>
+      Math.sin(nx * fx + ny * fy * 1.3) * Math.cos(ny * fx * 1.1 - nx * fy * 0.7);
+
+    const spineBank = Math.pow(Math.max(0, 1 - absX / 22), 1.3) * 3.1;
+    const terrace = Math.sin(meshY * 0.085) * 1.35 + Math.sin(meshY * 0.04 - x * 0.18) * 0.9;
+    const crags =
+      noise(x, meshY, 0.32, 0.22) * 1.4 +
+      noise(x, meshY, 0.78, 0.61) * 0.85 +
+      noise(x, meshY, 1.6, 1.1) * 0.38;
+    const sideMass = smoothStep(m.ROUTE_HALF + 2, m.ROUTE_HALF + 16, absX) * (3.4 + Math.sin(meshY * 0.14) * 0.7);
+    const shoulderRise = Math.sin(slopeRatio * Math.PI) * smoothStep(m.ROUTE_HALF, m.ROUTE_HALF + 14, absX) * 1.6;
+    const crownLift = smoothStep(0.7, 1, slopeRatio) * Math.max(0, 6.2 - absX * 0.32);
+    const flankFrac = outsideCorridor ? clamp01((absX - m.ROUTE_HALF) / m.FLANK_SPAN) : 0;
+    const flankRecession = -Math.pow(flankFrac, 1.35) * 22;
+    const couloirDepth = insideRoute
+      ? smoothStep(0, m.ROUTE_HALF, m.ROUTE_HALF - absX) * (0.78 + Math.sin(meshY * 0.22) * 0.1)
+      : 0;
+    const ledges = insideRoute ? Math.sin(meshY * 0.55 + x * 0.2) * 0.22 : 0;
+    const apexPush = smoothStep(0.85, 1, slopeRatio) * Math.max(0, 3.4 - absX * 0.42);
+
+    const z =
+      -2.8 +
+      spineBank +
+      terrace +
+      crags * (insideRoute ? 0.48 : 0.9) +
+      sideMass +
+      shoulderRise +
+      crownLift +
+      ledges +
+      apexPush +
+      flankRecession -
+      couloirDepth;
+
+    return { x, z, insideRoute, slopeRatio, crags, terrace, flankFrac };
+  }
+
+  // Given a prop baseX plus its environmentGroup-local y, return the
+  // environmentGroup-local anchor (x, y, z) that sits exactly on the face.
+  // `embedDepth` lets callers sink the prop partially into the slope so
+  // it reads as attached instead of floating above it.
+  _faceAnchor(baseX, worldY, embedDepth = 0) {
+    const m = this._mountainMeta();
+    const meshY = worldY - m.BASE_Y;
+    const profile = this._mountainProfile(baseX, meshY);
+    return {
+      x: profile.x,
+      y: worldY,
+      z: profile.z + m.BASE_Z - embedDepth,
+      insideRoute: profile.insideRoute,
+      slopeRatio: profile.slopeRatio,
+      crags: profile.crags,
+      flankFrac: profile.flankFrac
+    };
+  }
+
   _buildEnvironment() {
     this.environmentGroup = new THREE.Group();
     this.root.add(this.environmentGroup);
 
-    const LANE_X = 2.85;
-    const ROUTE_HALF = LANE_X * 1.5 + 0.35;
+    const m = this._mountainMeta();
+    const { LANE_X, ROUTE_HALF, MOUNT_WIDTH, MOUNT_HEIGHT, MOUNT_HALF_H } = m;
 
     // Wider, taller plane so the mountain reads as a real peak, not a strip.
-    // The playable corridor stays at +/-ROUTE_HALF; everything outside tapers
-    // into a classic pyramidal silhouette that narrows to a single apex.
-    const MOUNT_WIDTH = 150;
-    const MOUNT_HEIGHT = 290;
-    const MOUNT_HALF_W = MOUNT_WIDTH / 2;
-    const MOUNT_HALF_H = MOUNT_HEIGHT / 2;
-    const FLANK_SPAN = MOUNT_HALF_W - ROUTE_HALF;
+    // Vertex displacement runs through _mountainProfile so boulders and
+    // markers placed via _faceAnchor share the exact same surface math.
     const mountainGeometry = new THREE.PlaneGeometry(MOUNT_WIDTH, MOUNT_HEIGHT, 180, 340);
     const positions = mountainGeometry.attributes.position;
     const colors = new Float32Array(positions.count * 3);
@@ -678,89 +771,26 @@ class BergRenderer {
     const stoneTone = new THREE.Color(0x485864);
     const darkTone = new THREE.Color(0x242d36);
     const scratch = new THREE.Color();
-    const noise = (x, y, fx, fy) => Math.sin(x * fx + y * fy * 1.3) * Math.cos(y * fx * 1.1 - x * fy * 0.7);
 
     for (let index = 0; index < positions.count; index += 1) {
       const baseX = positions.getX(index);
       const y = positions.getY(index);
-      const slopeRatio = clamp01((y + MOUNT_HALF_H) / MOUNT_HEIGHT);
-      const xSign = baseX === 0 ? 0 : Math.sign(baseX);
+      const profile = this._mountainProfile(baseX, y);
 
-      // Silhouette profile: wide at base, near-zero at summit. This is what
-      // gives the mesh its triangular "mountain" outline when seen from below.
-      const silhouette = Math.pow(1 - slopeRatio, 1.55);
-      const summitPinch = smoothStep(0.82, 1, slopeRatio);
+      positions.setX(index, profile.x);
+      positions.setZ(index, profile.z);
 
-      let x;
-      const absBase = Math.abs(baseX);
-      if (absBase <= ROUTE_HALF) {
-        // Climbing corridor: preserve geometry exactly so gameplay stays valid.
-        x = baseX;
-      } else {
-        // Exterior: collapse outward vertices by the silhouette profile so
-        // flanks shrink to the apex.
-        const outerFrac = (absBase - ROUTE_HALF) / FLANK_SPAN;
-        const scaled = outerFrac * Math.max(0.04, silhouette);
-        x = xSign * (ROUTE_HALF * Math.max(0.05, silhouette + summitPinch * -0.04) + scaled * FLANK_SPAN);
-      }
-      const absX = Math.abs(x);
-      const outsideCorridor = absX > ROUTE_HALF;
-      const insideRoute = !outsideCorridor;
-
-      positions.setX(index, x);
-
-      // Central spine pulls the climb face outward toward the camera.
-      const spineBank = Math.pow(Math.max(0, 1 - absX / 22), 1.3) * 3.1;
-      // Broad terraces across the face.
-      const terrace = Math.sin(y * 0.085) * 1.35 + Math.sin(y * 0.04 - x * 0.18) * 0.9;
-      // Rocky crag noise (quieter inside the corridor so gameplay reads clean).
-      const crags =
-        noise(x, y, 0.32, 0.22) * 1.4 +
-        noise(x, y, 0.78, 0.61) * 0.85 +
-        noise(x, y, 1.6, 1.1) * 0.38;
-      // Side buttresses — heavy shoulders mid-height.
-      const sideMass = smoothStep(ROUTE_HALF + 2, ROUTE_HALF + 16, absX) * (3.4 + Math.sin(y * 0.14) * 0.7);
-      const shoulderRise = Math.sin(slopeRatio * Math.PI) * smoothStep(ROUTE_HALF, ROUTE_HALF + 14, absX) * 1.6;
-      const crownLift = smoothStep(0.7, 1, slopeRatio) * Math.max(0, 6.2 - absX * 0.32);
-      // Flanks recede away from the viewer to give the mountain real volume.
-      const flankFrac = outsideCorridor
-        ? clamp01((absX - ROUTE_HALF) / FLANK_SPAN)
-        : 0;
-      const flankRecession = -Math.pow(flankFrac, 1.35) * 22;
-      // Subtle couloir carved into the climb corridor.
-      const couloirDepth = insideRoute
-        ? smoothStep(0, ROUTE_HALF, ROUTE_HALF - absX) * (0.78 + Math.sin(y * 0.22) * 0.1)
-        : 0;
-      const ledges = insideRoute ? Math.sin(y * 0.55 + x * 0.2) * 0.22 : 0;
-      // Apex push so the summit sits slightly forward of the receding flanks.
-      const apexPush = smoothStep(0.85, 1, slopeRatio) * Math.max(0, 3.4 - absX * 0.42);
-
-      const z =
-        -2.8 +
-        spineBank +
-        terrace +
-        crags * (insideRoute ? 0.48 : 0.9) +
-        sideMass +
-        shoulderRise +
-        crownLift +
-        ledges +
-        apexPush +
-        flankRecession -
-        couloirDepth;
-
-      positions.setZ(index, z);
-
-      // Colour mixing: snow hugs the route and summit; flanks darken into stone.
+      const absX = Math.abs(profile.x);
       const snowMix = clamp01(
         1 - absX / 14 +
-        smoothStep(0.72, 1, slopeRatio) * 0.25 -
-        Math.max(0, -crags * 0.28)
+        smoothStep(0.72, 1, profile.slopeRatio) * 0.25 -
+        Math.max(0, -profile.crags * 0.28)
       );
       const darkMix = clamp01(
-        Math.max(0, -terrace * 0.35 - crags * 0.18) +
+        Math.max(0, -profile.terrace * 0.35 - profile.crags * 0.18) +
         smoothStep(90, 10, y) * 0.15 +
         smoothStep(ROUTE_HALF + 4, ROUTE_HALF + 22, absX) * 0.22 +
-        flankFrac * 0.18
+        profile.flankFrac * 0.18
       );
       scratch.copy(stoneTone).lerp(snowTone, snowMix);
       scratch.lerp(darkTone, darkMix * 0.75);
@@ -823,49 +853,84 @@ class BergRenderer {
       }
     });
 
-    // scattered boulders, flanking crags, and ledges so the face feels 3D
+    // Embedded boulders and flank crags. Every boulder snaps to the face via
+    // _faceAnchor, then sinks into the slope so it reads as fractured rock
+    // growing out of the mountain rather than beads floating in the air.
     this._boulderMats = [
       new THREE.MeshStandardMaterial({ map: this.materials.cliffShadow.map, color: 0x556673, roughness: 0.96, metalness: 0.05, flatShading: true }),
       new THREE.MeshStandardMaterial({ map: this.materials.cliffShadow.map, color: 0x3d4954, roughness: 1, metalness: 0.03, flatShading: true }),
       new THREE.MeshStandardMaterial({ color: 0x788c98, roughness: 0.85, metalness: 0.04, flatShading: true })
     ];
-    for (let index = 0; index < 72; index += 1) {
-      const side = Math.random() < 0.5 ? -1 : 1;
-      const slopeFrac = Math.random();
-      // Scatter boulders along the tapered flanks rather than on a flat band.
-      const flankBand = ROUTE_HALF + 0.4 + Math.random() * Math.max(2, (1 - slopeFrac * 0.8) * 30);
-      const bx = side * flankBand;
-      const by = -8 + slopeFrac * 252;
-      const bz = 0.6 + Math.random() * 0.8 - Math.min(12, (Math.abs(bx) - ROUTE_HALF) * 0.42);
-      const scale = 0.8 + Math.random() * 2.2;
-      const geom = Math.random() < 0.5
-        ? new THREE.DodecahedronGeometry(scale, 0)
-        : new THREE.IcosahedronGeometry(scale * 0.95, 0);
-      const boulder = new THREE.Mesh(geom, this._boulderMats[index % this._boulderMats.length]);
-      boulder.position.set(bx, by, bz);
-      boulder.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
-      boulder.scale.set(1 + Math.random() * 0.4, 0.55 + Math.random() * 0.35, 0.7 + Math.random() * 0.5);
+
+    const placeBoulder = ({ baseX, worldY, radius, matIndex, wide = 1.05, tall = 0.58, depth = 0.75 }) => {
+      // Bury ~60% of the boulder's vertical extent in the slope so the crown
+      // reads as an outcrop, not a pebble glued onto the face.
+      const embed = radius * tall * 0.62 + 0.35;
+      const anchor = this._faceAnchor(baseX, worldY, embed);
+      // Unit icosahedron scaled per instance — consistent silhouette across the
+      // scatter, no mixed crystalline dodecahedrons.
+      const geometry = new THREE.IcosahedronGeometry(1, 1);
+      const jitter = geometry.attributes.position;
+      for (let v = 0; v < jitter.count; v += 1) {
+        const offset = 0.08 + Math.random() * 0.22;
+        jitter.setXYZ(
+          v,
+          jitter.getX(v) * (1 + (Math.random() - 0.5) * offset),
+          jitter.getY(v) * (1 + (Math.random() - 0.5) * offset),
+          jitter.getZ(v) * (1 + (Math.random() - 0.5) * offset)
+        );
+      }
+      geometry.computeVertexNormals();
+
+      const boulder = new THREE.Mesh(geometry, this._boulderMats[matIndex % this._boulderMats.length]);
+      boulder.position.set(anchor.x, anchor.y, anchor.z);
+      boulder.scale.set(radius * wide, radius * tall, radius * depth);
+      boulder.rotation.set(
+        (Math.random() - 0.5) * 0.4,
+        Math.random() * Math.PI * 2,
+        (Math.random() - 0.5) * 0.4
+      );
       boulder.castShadow = true;
       boulder.receiveShadow = true;
       this.environmentGroup.add(boulder);
+    };
+
+    // Flanking scatter: tapers with slope ratio so the summit stays clean.
+    const flankCount = 54;
+    for (let index = 0; index < flankCount; index += 1) {
+      const side = index % 2 === 0 ? -1 : 1;
+      const slopeFrac = Math.pow(Math.random(), 0.85);  // bias toward lower/mid slopes
+      const lateralReach = Math.max(2.4, (1 - slopeFrac * 0.75) * 26);
+      const baseX = side * (ROUTE_HALF + 0.6 + Math.random() * lateralReach);
+      const worldY = -8 + slopeFrac * 246;
+      const radius = 0.9 + Math.random() * 1.9 * (1 - slopeFrac * 0.35);
+      placeBoulder({
+        baseX,
+        worldY,
+        radius,
+        matIndex: index,
+        wide: 1 + Math.random() * 0.35,
+        tall: 0.5 + Math.random() * 0.35,
+        depth: 0.75 + Math.random() * 0.35
+      });
     }
 
-    // a handful of boulders inside the route for visual interest (clear of lanes)
-    for (let index = 0; index < 18; index += 1) {
-      const laneBetween = Math.random() < 0.5 ? -LANE_X * 0.5 : LANE_X * 0.5;
-      const bx = laneBetween + (Math.random() - 0.5) * 0.8;
-      const by = 4 + Math.random() * 236;
-      const scale = 0.42 + Math.random() * 0.56;
-      const boulder = new THREE.Mesh(
-        new THREE.DodecahedronGeometry(scale, 0),
-        this._boulderMats[index % this._boulderMats.length]
-      );
-      boulder.position.set(bx, by, 1.42);
-      boulder.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
-      boulder.scale.set(1, 0.45, 0.6);
-      boulder.castShadow = true;
-      boulder.receiveShadow = true;
-      this.environmentGroup.add(boulder);
+    // Route-adjacent outcrops: small rocks tucked between lanes for parallax.
+    const innerCount = 12;
+    for (let index = 0; index < innerCount; index += 1) {
+      const side = index % 2 === 0 ? -1 : 1;
+      const baseX = side * (LANE_X * 0.5 + (Math.random() - 0.5) * 0.6);
+      const worldY = 6 + Math.random() * 228;
+      const radius = 0.38 + Math.random() * 0.46;
+      placeBoulder({
+        baseX,
+        worldY,
+        radius,
+        matIndex: index + 2,
+        wide: 1,
+        tall: 0.42 + Math.random() * 0.22,
+        depth: 0.55 + Math.random() * 0.28
+      });
     }
 
     // Massive background silhouette — a single broad pyramid behind the climb
@@ -1007,8 +1072,9 @@ class BergRenderer {
       this.crackNodes.push({ tube, glow, offset: index * 0.6 });
     });
 
-    // Altitude landmarks — distinctive features at memorable heights so the
-    // climber measures real distance travelled, not just abstract progress.
+    // Altitude landmarks — physical 3D features attached to the slope, not
+    // flat decals. Each one snaps to the generated face so the climber sees
+    // real geometry at memorable heights.
     this.altitudeMarkers = [];
     const ledgeMat = new THREE.MeshStandardMaterial({
       color: 0xe8f5ff,
@@ -1016,64 +1082,137 @@ class BergRenderer {
       metalness: 0.02,
       flatShading: true
     });
-    // 1) Wide ice ledge at ~30m — the first "rest" shelf the climber passes.
-    const ledge1 = new THREE.Mesh(new THREE.BoxGeometry(9, 0.6, 3.2), ledgeMat.clone());
-    ledge1.position.set(-3.2, 70, 1.05);
-    ledge1.rotation.z = -0.06;
-    ledge1.castShadow = true;
-    ledge1.receiveShadow = true;
-    this.environmentGroup.add(ledge1);
-    this.altitudeMarkers.push(ledge1);
 
-    // 2) Serac (leaning ice tower) at ~55m.
-    const serac = new THREE.Mesh(new THREE.ConeGeometry(1.6, 5, 5, 1, false), ledgeMat.clone());
-    serac.material.color.setHex(0xb9dff0);
-    serac.position.set(2.6, 120, 1.2);
-    serac.rotation.z = 0.28;
-    serac.castShadow = true;
-    this.environmentGroup.add(serac);
-    this.altitudeMarkers.push(serac);
+    // 1) Wide ice ledge at ~30m — wedge carved out of the face so the top
+    // reads as a walkable shelf and the underside as an overhang.
+    {
+      const anchor = this._faceAnchor(-3.2, 70, 0.35);
+      const shape = new THREE.Shape();
+      shape.moveTo(-4.4, 0);
+      shape.lineTo(4.4, 0);
+      shape.lineTo(3.6, 0.55);
+      shape.lineTo(-3.6, 0.55);
+      shape.closePath();
+      const ledge = new THREE.Mesh(
+        new THREE.ExtrudeGeometry(shape, { depth: 2.6, bevelEnabled: true, bevelSize: 0.08, bevelThickness: 0.12, bevelSegments: 2 }),
+        ledgeMat.clone()
+      );
+      ledge.geometry.translate(0, 0, -1.3);  // centre extrusion on its anchor
+      ledge.position.set(anchor.x, anchor.y, anchor.z);
+      ledge.rotation.x = -Math.PI / 2;
+      ledge.rotation.z = -0.06;
+      ledge.castShadow = true;
+      ledge.receiveShadow = true;
+      this.environmentGroup.add(ledge);
+      this.altitudeMarkers.push(ledge);
+    }
 
-    // 3) Old rope stub + frayed fabric at ~70m (previous party's retreat).
-    const oldRope = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.08, 0.08, 2.6, 6),
-      new THREE.MeshStandardMaterial({ color: 0x7a2a2a, roughness: 0.95 })
-    );
-    oldRope.position.set(-2.2, 158, 1.14);
-    oldRope.rotation.z = 0.24;
-    this.environmentGroup.add(oldRope);
-    const oldRopeFlag = new THREE.Mesh(
-      new THREE.PlaneGeometry(0.9, 1.8),
-      new THREE.MeshBasicMaterial({ color: 0xc9483b, transparent: true, opacity: 0.7, side: THREE.DoubleSide, depthWrite: false })
-    );
-    oldRopeFlag.position.set(-2.6, 157, 1.22);
-    oldRopeFlag.rotation.z = 0.12;
-    this.environmentGroup.add(oldRopeFlag);
-    this.altitudeMarkers.push(oldRopeFlag);
+    // 2) Serac (leaning ice tower) at ~55m — sunk into the face, leaning out.
+    {
+      const anchor = this._faceAnchor(2.6, 120, 0.8);
+      const serac = new THREE.Mesh(
+        new THREE.ConeGeometry(1.6, 5, 5, 1, false),
+        ledgeMat.clone()
+      );
+      serac.material.color.setHex(0xb9dff0);
+      serac.position.set(anchor.x, anchor.y, anchor.z);
+      serac.rotation.z = 0.28;
+      serac.castShadow = true;
+      this.environmentGroup.add(serac);
+      this.altitudeMarkers.push(serac);
+    }
 
-    // 4) Overhanging ice curtain at ~85m.
-    const curtain = new THREE.Mesh(
-      new THREE.ConeGeometry(1.3, 4.2, 4, 1, false),
-      ledgeMat.clone()
-    );
-    curtain.material.color.setHex(0xc0e6ff);
-    curtain.material.opacity = 0.78;
-    curtain.material.transparent = true;
-    curtain.position.set(3.4, 190, 1.3);
-    curtain.rotation.x = Math.PI;      // point downward (icicle)
-    curtain.rotation.z = 0.08;
-    this.environmentGroup.add(curtain);
-    this.altitudeMarkers.push(curtain);
+    // 3) Old rope stub with frayed cloth at ~70m. The rope is a real cylinder
+    // driven slightly into the face; the cloth is a three-segment strip with
+    // a twist so it reads as a torn flag, not a 2D sticker.
+    {
+      const anchor = this._faceAnchor(-2.2, 158, 0.15);
+      const oldRope = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.08, 0.08, 2.6, 6),
+        new THREE.MeshStandardMaterial({ color: 0x7a2a2a, roughness: 0.95 })
+      );
+      oldRope.position.set(anchor.x, anchor.y, anchor.z);
+      oldRope.rotation.z = 0.24;
+      this.environmentGroup.add(oldRope);
 
-    // 5) Bergschrund — dark final crack at ~95m, just below the summit.
-    const bergschrund = new THREE.Mesh(
-      new THREE.PlaneGeometry(5.4, 0.7),
-      new THREE.MeshBasicMaterial({ color: 0x0b1116, transparent: true, opacity: 0.85, depthWrite: false })
-    );
-    bergschrund.position.set(-0.4, 218, 1.09);
-    bergschrund.rotation.z = -0.12;
-    this.environmentGroup.add(bergschrund);
-    this.altitudeMarkers.push(bergschrund);
+      const clothGeometry = new THREE.PlaneGeometry(0.9, 1.8, 1, 6);
+      const clothPositions = clothGeometry.attributes.position;
+      for (let i = 0; i < clothPositions.count; i += 1) {
+        const localX = clothPositions.getX(i);
+        const localY = clothPositions.getY(i);
+        // Curl and warp the cloth so it does not read as a flat decal.
+        const curl = Math.sin(localY * 2.1 + localX * 0.6) * 0.18;
+        const bow = Math.cos(localY * 1.2) * 0.14 * (0.5 - localX);
+        clothPositions.setZ(i, curl + bow);
+      }
+      clothGeometry.computeVertexNormals();
+      const oldRopeFlag = new THREE.Mesh(
+        clothGeometry,
+        new THREE.MeshStandardMaterial({
+          color: 0xc9483b,
+          roughness: 0.85,
+          side: THREE.DoubleSide
+        })
+      );
+      // Offset out of the face so the cloth reads as billowing in wind.
+      oldRopeFlag.position.set(anchor.x - 0.5, anchor.y - 0.2, anchor.z + 0.35);
+      oldRopeFlag.rotation.z = 0.12;
+      this.environmentGroup.add(oldRopeFlag);
+      this.altitudeMarkers.push(oldRopeFlag);
+    }
+
+    // 4) Overhanging ice curtain at ~85m — a trio of icicles clipped to the
+    // wall rather than one floating cone.
+    {
+      const curtainGroup = new THREE.Group();
+      const anchor = this._faceAnchor(3.4, 190, 0.2);
+      const curtainMat = ledgeMat.clone();
+      curtainMat.color.setHex(0xc0e6ff);
+      curtainMat.opacity = 0.82;
+      curtainMat.transparent = true;
+      [[-0.9, 0, 1.0, 4.2], [0.3, -0.4, 0.78, 3.4], [1.4, 0.1, 0.62, 2.6]].forEach(([offsetX, offsetY, radius, length]) => {
+        const icicle = new THREE.Mesh(new THREE.ConeGeometry(radius, length, 5, 1, false), curtainMat.clone());
+        icicle.position.set(offsetX, offsetY - length * 0.5, 0.1 + offsetX * 0.12);
+        icicle.rotation.x = Math.PI;   // point down
+        icicle.rotation.z = 0.08 + offsetX * 0.04;
+        icicle.castShadow = true;
+        curtainGroup.add(icicle);
+      });
+      curtainGroup.position.set(anchor.x, anchor.y, anchor.z);
+      this.environmentGroup.add(curtainGroup);
+      this.altitudeMarkers.push(curtainGroup);
+    }
+
+    // 5) Bergschrund — a real crack carved into the face, built from a
+    // curved tube that hugs the slope. Reads as volumetric shadow, not a
+    // dark rectangle pasted on top.
+    {
+      const crackPoints = [];
+      const segments = 12;
+      for (let i = 0; i <= segments; i += 1) {
+        const t = i / segments;
+        const baseX = -2.7 + t * 5.4;
+        const worldY = 217.5 + Math.sin(t * Math.PI) * 0.9 + (Math.random() - 0.5) * 0.12;
+        const anchor = this._faceAnchor(baseX, worldY, 0.18);
+        crackPoints.push(new THREE.Vector3(anchor.x, anchor.y, anchor.z));
+      }
+      const curve = new THREE.CatmullRomCurve3(crackPoints);
+      const crackMat = new THREE.MeshStandardMaterial({
+        color: 0x0b1116,
+        roughness: 1,
+        metalness: 0,
+        emissive: 0x0a0f14,
+        emissiveIntensity: 0.2
+      });
+      const bergschrund = new THREE.Mesh(
+        new THREE.TubeGeometry(curve, 48, 0.28, 8, false),
+        crackMat
+      );
+      bergschrund.castShadow = false;
+      bergschrund.receiveShadow = true;
+      this.environmentGroup.add(bergschrund);
+      this.altitudeMarkers.push(bergschrund);
+    }
   }
 
   _buildRope() {

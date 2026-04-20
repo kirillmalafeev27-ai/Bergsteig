@@ -1,17 +1,15 @@
 {
-  "name": "drucker-game",
+  "name": "bergstieg",
   "version": "1.0.0",
-  "description": "Drucker - German learning game with a first-person crusher room",
+  "private": true,
+  "description": "Bergstieg — cinematic German-learning climb. Answer prompts to dodge falling rocks and racing avalanches on the way to the summit.",
   "main": "server.js",
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js"
   },
-  "dependencies": {
-    "@anthropic-ai/sdk": "^0.82.0",
-    "express": "^4.18.2"
-  },
-  "devDependencies": {
-    "fbx2gltf": "^0.9.7-p1"
-  }
+  "dependencies": {}
 }
