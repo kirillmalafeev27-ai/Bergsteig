@@ -52,7 +52,10 @@ button {
 
 .screen {
   position: absolute;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   display: none;
 }
 
@@ -540,7 +543,10 @@ input[type="text"]:focus {
 #game-screen::after {
   content: "";
   position: absolute;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   pointer-events: none;
   z-index: 1;
 }
@@ -562,7 +568,10 @@ input[type="text"]:focus {
 #storm-overlay,
 #lens-overlay {
   position: absolute;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
 }
 
 #game-canvas {
@@ -660,7 +669,7 @@ input[type="text"]:focus {
 #direction-panel,
 #control-hint,
 #message-banner {
-  position: absolute;
+  position: fixed;
   z-index: 4;
 }
 
