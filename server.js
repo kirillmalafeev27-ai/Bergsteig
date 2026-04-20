@@ -1,155 +1,92 @@
-const express = require('express');
+const http = require('http');
+const fs = require('fs');
 const path = require('path');
-const Anthropic = require('@anthropic-ai/sdk');
 
-const app = express();
 const PORT = process.env.PORT || 3000;
-const MODEL_NAME = process.env.ANTHROPIC_MODEL || 'claude-haiku-4-5-20251001';
-const publicDir = path.join(__dirname, 'public');
+const PUBLIC_DIR = path.join(__dirname, 'public');
 
-app.use(express.json({ limit: '1mb' }));
-app.use(express.static(publicDir));
+const CONTENT_TYPES = {
+  '.css': 'text/css; charset=utf-8',
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'application/javascript; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.svg': 'image/svg+xml',
+  '.ico': 'image/x-icon',
+  '.map': 'application/json; charset=utf-8'
+};
 
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY
-});
-
-const questionPool = Object.create(null);
-
-function isValidQuestion(question) {
-  return Boolean(
-    question
-      && typeof question.text === 'string'
-      && typeof question.display === 'string'
-      && Array.isArray(question.options)
-      && question.options.length === 4
-      && Number.isInteger(question.correct)
-      && question.correct >= 0
-      && question.correct <= 3
-  );
+function sendJson(res, statusCode, payload) {
+  const body = JSON.stringify(payload);
+  res.writeHead(statusCode, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Content-Length': Buffer.byteLength(body)
+  });
+  res.end(body);
 }
 
-function buildTaskDescription({ questionsCount, lexicalTopic, grammarTopic, isWortstellung }) {
-  if (isWortstellung) {
-    return `Создай ${questionsCount} упражнений на порядок слов (Wortstellung) в немецком языке.
-Грамматическая тема: ${grammarTopic}.
-${lexicalTopic ? `Лексическая тема: ${lexicalTopic}. Все предложения должны использовать слова из этой темы.` : ''}
-Формат:
-- text: инструкция на русском языке.
-- display: немецкие слова или фразы через " / " в перемешанном порядке.
-- options: 4 полных немецких предложения.
-
-Критично:
-- display обязан быть перемешан и не может совпадать с правильным ответом.
-- У задания должен быть ровно один правильный вариант.
-- Если инверсия тоже грамматически правильна, не используй её как ошибочный вариант.
-- Неправильные варианты должны содержать реальную ошибку порядка слов.
-- Все предложения должны быть естественными и разными.`;
-  }
-
-  return `Создай ${questionsCount} упражнений по немецкой грамматике.
-Грамматическая тема: ${grammarTopic}.
-${lexicalTopic ? `Лексическая тема: ${lexicalTopic}. Все предложения должны использовать слова из этой темы.` : ''}
-Формат:
-- text: инструкция на русском языке.
-- display: немецкое предложение с пропуском ___ или учебной заготовкой.
-- options: 4 варианта на немецком языке.
-
-Критично:
-- У задания должен быть ровно один правильный вариант.
-- Неправильные варианты должны содержать одну ясную грамматическую ошибку.
-- Все предложения должны быть естественными и разными.`;
-}
-
-function buildPrompt({ level, lexicalTopic, grammarTopic, isWortstellung, questionsCount, exclude }) {
-  const excludeNote = Array.isArray(exclude) && exclude.length
-    ? `\nНе используй эти display-предложения: ${exclude.slice(-10).map((item) => `"${item}"`).join(', ')}`
-    : '';
-
-  return `Ты — опытный преподаватель немецкого языка. Создаёшь упражнения для игроков.
-
-${buildTaskDescription({ questionsCount, lexicalTopic, grammarTopic, isWortstellung })}
-
-Уровень CEFR: ${level}. Строго соблюдай уровень. Не используй грамматику и лексику выше ${level}.${excludeNote}
-
-Критические правила:
-1. Правильный ответ должен быть безупречно грамматическим.
-2. Каждое предложение должно быть полным и естественным.
-3. Неправильные варианты не должны быть абсурдными.
-4. correct — индекс правильного ответа от 0 до 3.
-5. Распределяй правильные ответы по позициям равномерно.
-6. Все ${questionsCount} заданий должны быть уникальными.
-
-Ответь только валидным JSON-массивом без markdown и без пояснений:
-[{"text":"Инструкция на русском","display":"Немецкий текст","options":["A","B","C","D"],"correct":0}]`;
-}
-
-app.get('/healthz', (req, res) => {
-  res.json({ ok: true });
-});
-
-app.post('/api/generate-questions', async (req, res) => {
-  const { level, lexicalTopic, grammarTopic, isWortstellung, count, exclude } = req.body || {};
-
-  if (!level || !grammarTopic) {
-    return res.status(400).json({ error: 'level and grammarTopic are required' });
-  }
-
-  if (!process.env.ANTHROPIC_API_KEY) {
-    return res.status(503).json({ error: 'ANTHROPIC_API_KEY is not configured' });
-  }
-
-  const questionsCount = Math.max(1, Math.min(50, Number(count) || 12));
-  const cacheKey = `${level}:${grammarTopic}:${lexicalTopic || ''}:${isWortstellung ? 'w' : 'g'}`;
-
-  if (questionPool[cacheKey] && questionPool[cacheKey].length >= questionsCount) {
-    const cached = questionPool[cacheKey].splice(0, questionsCount);
-    return res.json({ questions: cached });
-  }
-
-  try {
-    const message = await anthropic.messages.create({
-      model: MODEL_NAME,
-      max_tokens: 8192,
-      messages: [
-        {
-          role: 'user',
-          content: buildPrompt({
-            level,
-            lexicalTopic,
-            grammarTopic,
-            isWortstellung,
-            questionsCount,
-            exclude
-          })
-        }
-      ]
-    });
-
-    const rawText = message.content?.[0]?.text?.trim() || '[]';
-    const jsonMatch = rawText.match(/\[[\s\S]*\]/);
-    const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : rawText);
-    const validQuestions = Array.isArray(parsed) ? parsed.filter(isValidQuestion) : [];
-
-    if (validQuestions.length > questionsCount) {
-      questionPool[cacheKey] = questionPool[cacheKey] || [];
-      questionPool[cacheKey].push(...validQuestions.slice(questionsCount));
+function sendFile(res, filePath) {
+  fs.readFile(filePath, (error, buffer) => {
+    if (error) {
+      sendJson(res, 500, { error: 'Failed to read file' });
+      return;
     }
 
-    return res.json({ questions: validQuestions.slice(0, questionsCount) });
-  } catch (error) {
-    console.error('Question generation failed:', error);
-    return res.status(500).json({
-      error: 'Failed to generate questions',
-      detail: error.message
+    const ext = path.extname(filePath).toLowerCase();
+    res.writeHead(200, {
+      'Content-Type': CONTENT_TYPES[ext] || 'application/octet-stream',
+      'Content-Length': buffer.length
     });
+    res.end(buffer);
+  });
+}
+
+function resolveRequestedFile(urlPath) {
+  const cleanPath = decodeURIComponent(urlPath.split('?')[0]);
+  const requestedPath = cleanPath === '/' ? '/index.html' : cleanPath;
+  const resolvedPath = path.normalize(path.join(PUBLIC_DIR, requestedPath));
+
+  if (!resolvedPath.startsWith(PUBLIC_DIR)) {
+    return null;
   }
+
+  return resolvedPath;
+}
+
+const server = http.createServer((req, res) => {
+  const pathname = req.url || '/';
+
+  if (pathname === '/healthz') {
+    sendJson(res, 200, { ok: true });
+    return;
+  }
+
+  const resolvedPath = resolveRequestedFile(pathname);
+  if (!resolvedPath) {
+    sendJson(res, 403, { error: 'Forbidden' });
+    return;
+  }
+
+  fs.stat(resolvedPath, (error, stats) => {
+    if (!error && stats.isFile()) {
+      sendFile(res, resolvedPath);
+      return;
+    }
+
+    const fallback = path.join(PUBLIC_DIR, 'index.html');
+    fs.stat(fallback, (fallbackError, fallbackStats) => {
+      if (fallbackError || !fallbackStats.isFile()) {
+        sendJson(res, 404, { error: 'Not found' });
+        return;
+      }
+
+      sendFile(res, fallback);
+    });
+  });
 });
 
-app.get('*', (req, res) => {
-  res.sendFile(path.join(publicDir, 'index.html'));
-});
-
-app.listen(PORT, () => {
-  console.log(`Sklon prototype running on port ${PORT}`);
+server.listen(PORT, () => {
+  console.log(`BERGSTIEG running on http://127.0.0.1:${PORT}`);
 });
