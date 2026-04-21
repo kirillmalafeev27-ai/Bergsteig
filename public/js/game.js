@@ -282,7 +282,7 @@ class Game {
       nearMisses: 0
     };
 
-    this.nextRockSpawnAt = this.startedAt + 6500;
+    this.nextRockSpawnAt = this.startedAt + 13000;
     this.nextAvalancheSpawnAt = this.startedAt + 16000;
 
     this.currentQuestion = null;
@@ -616,8 +616,8 @@ class Game {
       });
     }
 
-    const cadence = randomRange(2000, 3200) - phaseRatio * 320 - rampUp * 500;
-    this.nextRockSpawnAt = now + Math.max(1400, cadence);
+    const cadence = randomRange(4000, 6400) - phaseRatio * 640 - rampUp * 1000;
+    this.nextRockSpawnAt = now + Math.max(2800, cadence);
   }
 
   _spawnAvalanche(now) {

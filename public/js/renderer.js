@@ -580,7 +580,7 @@ class BergRenderer {
     const peakPositions = [-148, -118, -92, -70, 72, 94, 120, 150];
     peakPositions.forEach((x, index) => {
       const peak = new THREE.Mesh(
-        new THREE.ConeGeometry(14 + (index % 3) * 4, 42 + (index % 4) * 14, 5 + (index % 2)),
+        new THREE.ConeGeometry(14 + (index % 3) * 4, 42 + (index % 4) * 14, 16 + (index % 3) * 4, 3),
         this.materials.peakShadow.clone()
       );
       peak.position.set(x, 32 + (index % 3) * 14, -130 - (index % 2) * 18);
@@ -754,6 +754,38 @@ class BergRenderer {
     };
   }
 
+  // Craggy boulder: start from a smooth subdivided icosahedron, then push each
+  // vertex in/out along its own normal. Two octaves of noise give big facet
+  // breaks plus fine surface grain; normals recompute so lighting stays honest.
+  _buildBoulderGeometry(radius, detail = 2, jitterAmount = 0.22) {
+    const geometry = new THREE.IcosahedronGeometry(radius, detail);
+    const positions = geometry.attributes.position;
+    const temp = new THREE.Vector3();
+
+    for (let v = 0; v < positions.count; v += 1) {
+      temp.set(positions.getX(v), positions.getY(v), positions.getZ(v));
+      const length = temp.length() || 1;
+      temp.multiplyScalar(1 / length);
+
+      // two octaves: a broad facet variation plus a finer chip-level grain
+      const coarse =
+        Math.sin(temp.x * 2.4 + temp.y * 3.1) * 0.6 +
+        Math.cos(temp.y * 2.7 + temp.z * 2.2) * 0.4 +
+        (Math.random() - 0.5) * 0.4;
+      const fine =
+        Math.sin(temp.x * 9.3 + temp.z * 7.1) * 0.5 +
+        Math.cos(temp.y * 8.6) * 0.3 +
+        (Math.random() - 0.5) * 0.5;
+      const offset = coarse * jitterAmount + fine * jitterAmount * 0.4;
+      const scale = length * (1 + offset);
+
+      positions.setXYZ(v, temp.x * scale, temp.y * scale, temp.z * scale);
+    }
+
+    geometry.computeVertexNormals();
+    return geometry;
+  }
+
   _buildEnvironment() {
     this.environmentGroup = new THREE.Group();
     this.root.add(this.environmentGroup);
@@ -857,9 +889,9 @@ class BergRenderer {
     // _faceAnchor, then sinks into the slope so it reads as fractured rock
     // growing out of the mountain rather than beads floating in the air.
     this._boulderMats = [
-      new THREE.MeshStandardMaterial({ map: this.materials.cliffShadow.map, color: 0x556673, roughness: 0.96, metalness: 0.05, flatShading: true }),
-      new THREE.MeshStandardMaterial({ map: this.materials.cliffShadow.map, color: 0x3d4954, roughness: 1, metalness: 0.03, flatShading: true }),
-      new THREE.MeshStandardMaterial({ color: 0x788c98, roughness: 0.85, metalness: 0.04, flatShading: true })
+      new THREE.MeshStandardMaterial({ map: this.materials.cliffShadow.map, color: 0x556673, roughness: 0.92, metalness: 0.06 }),
+      new THREE.MeshStandardMaterial({ map: this.materials.cliffShadow.map, color: 0x3d4954, roughness: 0.98, metalness: 0.04 }),
+      new THREE.MeshStandardMaterial({ color: 0x788c98, roughness: 0.82, metalness: 0.05 })
     ];
 
     const placeBoulder = ({ baseX, worldY, radius, matIndex, wide = 1.05, tall = 0.58, depth = 0.75 }) => {
@@ -867,20 +899,10 @@ class BergRenderer {
       // reads as an outcrop, not a pebble glued onto the face.
       const embed = radius * tall * 0.62 + 0.35;
       const anchor = this._faceAnchor(baseX, worldY, embed);
-      // Unit icosahedron scaled per instance — consistent silhouette across the
-      // scatter, no mixed crystalline dodecahedrons.
-      const geometry = new THREE.IcosahedronGeometry(1, 1);
-      const jitter = geometry.attributes.position;
-      for (let v = 0; v < jitter.count; v += 1) {
-        const offset = 0.08 + Math.random() * 0.22;
-        jitter.setXYZ(
-          v,
-          jitter.getX(v) * (1 + (Math.random() - 0.5) * offset),
-          jitter.getY(v) * (1 + (Math.random() - 0.5) * offset),
-          jitter.getZ(v) * (1 + (Math.random() - 0.5) * offset)
-        );
-      }
-      geometry.computeVertexNormals();
+      // Smaller boulders don't need the full subdivision budget; bigger ones
+      // earn detail 3 so the silhouette stays craggy when camera passes close.
+      const detail = radius > 1.25 ? 3 : 2;
+      const geometry = this._buildBoulderGeometry(1, detail, 0.2 + Math.random() * 0.08);
 
       const boulder = new THREE.Mesh(geometry, this._boulderMats[matIndex % this._boulderMats.length]);
       boulder.position.set(anchor.x, anchor.y, anchor.z);
@@ -935,7 +957,7 @@ class BergRenderer {
 
     // Massive background silhouette — a single broad pyramid behind the climb
     // face that gives the mountain its iconic triangular profile against the sky.
-    const backMassGeometry = new THREE.ConeGeometry(96, 330, 7, 4, false);
+    const backMassGeometry = new THREE.ConeGeometry(96, 330, 22, 8, false);
     const backMassPositions = backMassGeometry.attributes.position;
     for (let i = 0; i < backMassPositions.count; i += 1) {
       const px = backMassPositions.getX(i);
@@ -958,7 +980,7 @@ class BergRenderer {
     // Two flanking sub-peaks spreading outward so the ridge feels broad.
     this.backFlankMeshes = [];
     [-1, 1].forEach((side) => {
-      const flankGeom = new THREE.ConeGeometry(42, 230, 6, 2, false);
+      const flankGeom = new THREE.ConeGeometry(42, 230, 18, 5, false);
       const flank = new THREE.Mesh(flankGeom, this.materials.peakShadow.clone());
       flank.material.color.setHex(0x323e4b);
       flank.position.set(side * 62, 72, -44);
@@ -973,7 +995,7 @@ class BergRenderer {
     for (let index = 0; index < 14; index += 1) {
       const side = index % 2 === 0 ? -1 : 1;
       const spire = new THREE.Mesh(
-        new THREE.ConeGeometry(2.8 + Math.random() * 2.2, 18 + Math.random() * 22, 5),
+        new THREE.ConeGeometry(2.8 + Math.random() * 2.2, 18 + Math.random() * 22, 12, 3),
         this.materials.cliffShadow.clone()
       );
       spire.position.set(
@@ -1003,26 +1025,26 @@ class BergRenderer {
     this.summitGroup = new THREE.Group();
     this.environmentGroup.add(this.summitGroup);
 
-    const crownShadow = new THREE.Mesh(new THREE.ConeGeometry(13.5, 24, 8), this.materials.peakShadow.clone());
+    const crownShadow = new THREE.Mesh(new THREE.ConeGeometry(13.5, 24, 20, 4), this.materials.peakShadow.clone());
     crownShadow.position.set(0, 228, -7.4);
     crownShadow.scale.set(1.3, 1, 1.05);
     crownShadow.castShadow = true;
     this.summitGroup.add(crownShadow);
 
-    const peak = new THREE.Mesh(new THREE.ConeGeometry(8.5, 20, 7), this.materials.summit);
+    const peak = new THREE.Mesh(new THREE.ConeGeometry(8.5, 20, 20, 4), this.materials.summit);
     peak.position.set(0, 230, -2.8);
     peak.castShadow = true;
     this.summitGroup.add(peak);
 
     [-1, 1].forEach((side) => {
-      const shoulder = new THREE.Mesh(new THREE.ConeGeometry(4.6, 10.5, 6), this.materials.summit.clone());
+      const shoulder = new THREE.Mesh(new THREE.ConeGeometry(4.6, 10.5, 18, 3), this.materials.summit.clone());
       shoulder.position.set(side * 5.1, 226.4, -4.2);
       shoulder.rotation.z = side * 0.12;
       shoulder.castShadow = true;
       this.summitGroup.add(shoulder);
     });
 
-    const tower = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.28, 8.5, 8), this.materials.anchorMetal);
+    const tower = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.28, 8.5, 20, 4), this.materials.anchorMetal);
     tower.position.set(0, 240, -1.2);
     this.summitGroup.add(tower);
 
@@ -1061,7 +1083,7 @@ class BergRenderer {
 
     crackCurves.forEach((points, index) => {
       const curve = new THREE.CatmullRomCurve3(points);
-      const tube = new THREE.Mesh(new THREE.TubeGeometry(curve, 60, 0.09 + index * 0.02, 6, false), this.materials.crack.clone());
+      const tube = new THREE.Mesh(new THREE.TubeGeometry(curve, 80, 0.09 + index * 0.02, 14, false), this.materials.crack.clone());
       this.environmentGroup.add(tube);
 
       const glow = new THREE.Sprite(this.materials.halo.clone());
@@ -1111,7 +1133,7 @@ class BergRenderer {
     {
       const anchor = this._faceAnchor(2.6, 120, 0.8);
       const serac = new THREE.Mesh(
-        new THREE.ConeGeometry(1.6, 5, 5, 1, false),
+        new THREE.ConeGeometry(1.6, 5, 14, 4, false),
         ledgeMat.clone()
       );
       serac.material.color.setHex(0xb9dff0);
@@ -1128,7 +1150,7 @@ class BergRenderer {
     {
       const anchor = this._faceAnchor(-2.2, 158, 0.15);
       const oldRope = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.08, 0.08, 2.6, 6),
+        new THREE.CylinderGeometry(0.08, 0.08, 2.6, 14),
         new THREE.MeshStandardMaterial({ color: 0x7a2a2a, roughness: 0.95 })
       );
       oldRope.position.set(anchor.x, anchor.y, anchor.z);
@@ -1171,7 +1193,7 @@ class BergRenderer {
       curtainMat.opacity = 0.82;
       curtainMat.transparent = true;
       [[-0.9, 0, 1.0, 4.2], [0.3, -0.4, 0.78, 3.4], [1.4, 0.1, 0.62, 2.6]].forEach(([offsetX, offsetY, radius, length]) => {
-        const icicle = new THREE.Mesh(new THREE.ConeGeometry(radius, length, 5, 1, false), curtainMat.clone());
+        const icicle = new THREE.Mesh(new THREE.ConeGeometry(radius, length, 14, 4, false), curtainMat.clone());
         icicle.position.set(offsetX, offsetY - length * 0.5, 0.1 + offsetX * 0.12);
         icicle.rotation.x = Math.PI;   // point down
         icicle.rotation.z = 0.08 + offsetX * 0.04;
@@ -1226,7 +1248,7 @@ class BergRenderer {
     this.ropeLine = new THREE.Line(this.ropeGeometry, this.materials.ropeLine);
     this.environmentGroup.add(this.ropeLine);
 
-    const ropeSegmentGeometry = new THREE.CylinderGeometry(0.08, 0.08, 1, 8, 1, false);
+    const ropeSegmentGeometry = new THREE.CylinderGeometry(0.08, 0.08, 1, 16, 1, false);
     for (let index = 0; index < this.ropePointCount - 1; index += 1) {
       const segment = new THREE.Mesh(ropeSegmentGeometry, this.materials.rope);
       segment.castShadow = true;
@@ -1245,12 +1267,12 @@ class BergRenderer {
     // Denser anchor ladder so the climber measures progress against it.
     [14, 32, 52, 72, 92, 112, 132, 152, 172, 192, 212, 228].forEach((y, index) => {
       const sideSign = index % 2 === 0 ? -1 : 1;
-      const screw = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.14, 1.4, 10), this.materials.anchorMetal);
+      const screw = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.14, 1.4, 18), this.materials.anchorMetal);
       screw.position.set(sideSign * 0.8, y, 0.34);
       screw.rotation.z = Math.PI / 2;
       this.environmentGroup.add(screw);
 
-      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.34, 0.06, 10, 18), this.materials.anchorMetal);
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.34, 0.06, 18, 32), this.materials.anchorMetal);
       ring.position.set(sideSign * 0.1, y, 0.98);
       this.environmentGroup.add(ring);
 
@@ -1302,17 +1324,17 @@ class BergRenderer {
     backpack.castShadow = true;
     this.playerGroup.add(backpack);
 
-    const hood = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.46, 0.42, 18), this.materials.bodyAccent);
+    const hood = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.46, 0.42, 28), this.materials.bodyAccent);
     hood.position.set(0, 2.1, -0.1);
     hood.castShadow = true;
     this.playerGroup.add(hood);
 
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.42, 18, 18), this.materials.skin);
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.42, 28, 22), this.materials.skin);
     head.position.set(0, 2.28, 0.06);
     head.castShadow = true;
     this.playerGroup.add(head);
 
-    const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.47, 18, 18, 0, Math.PI * 2, 0, Math.PI * 0.62), this.materials.helmet);
+    const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.47, 32, 24, 0, Math.PI * 2, 0, Math.PI * 0.62), this.materials.helmet);
     helmet.position.set(0, 2.46, 0.02);
     helmet.rotation.x = 0.18;
     helmet.castShadow = true;
@@ -1335,7 +1357,7 @@ class BergRenderer {
     belt.castShadow = true;
     this.playerGroup.add(belt);
 
-    const harnessLoop = new THREE.Mesh(new THREE.TorusGeometry(0.22, 0.04, 10, 20), this.materials.metal);
+    const harnessLoop = new THREE.Mesh(new THREE.TorusGeometry(0.22, 0.04, 16, 32), this.materials.metal);
     harnessLoop.position.set(0, 0.05, 0.2);
     harnessLoop.rotation.x = Math.PI / 2;
     this.playerGroup.add(harnessLoop);
@@ -1343,40 +1365,40 @@ class BergRenderer {
     this.leftArmPivot = new THREE.Group();
     this.leftArmPivot.position.set(-0.72, 1.58, 0.06);
     this.playerGroup.add(this.leftArmPivot);
-    const leftUpperArm = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.16, 1.04, 10), this.materials.bodyAccent);
+    const leftUpperArm = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.16, 1.04, 18), this.materials.bodyAccent);
     leftUpperArm.position.y = -0.5;
     leftUpperArm.castShadow = true;
     this.leftArmPivot.add(leftUpperArm);
     this.leftForearmPivot = new THREE.Group();
     this.leftForearmPivot.position.set(0, -1.02, 0);
     this.leftArmPivot.add(this.leftForearmPivot);
-    const leftForearm = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.14, 0.94, 10), this.materials.bodySoft);
+    const leftForearm = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.14, 0.94, 18), this.materials.bodySoft);
     leftForearm.position.y = -0.48;
     leftForearm.castShadow = true;
     this.leftForearmPivot.add(leftForearm);
-    const leftHand = new THREE.Mesh(new THREE.SphereGeometry(0.13, 12, 12), this.materials.gloves);
+    const leftHand = new THREE.Mesh(new THREE.SphereGeometry(0.13, 20, 18), this.materials.gloves);
     leftHand.position.set(0, -0.96, 0.02);
     this.leftForearmPivot.add(leftHand);
 
     this.rightArmPivot = new THREE.Group();
     this.rightArmPivot.position.set(0.72, 1.58, 0.06);
     this.playerGroup.add(this.rightArmPivot);
-    const rightUpperArm = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.16, 1.04, 10), this.materials.bodyAccent);
+    const rightUpperArm = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.16, 1.04, 18), this.materials.bodyAccent);
     rightUpperArm.position.y = -0.5;
     rightUpperArm.castShadow = true;
     this.rightArmPivot.add(rightUpperArm);
     this.rightForearmPivot = new THREE.Group();
     this.rightForearmPivot.position.set(0, -1.02, 0);
     this.rightArmPivot.add(this.rightForearmPivot);
-    const rightForearm = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.14, 0.94, 10), this.materials.bodySoft);
+    const rightForearm = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.14, 0.94, 18), this.materials.bodySoft);
     rightForearm.position.y = -0.48;
     rightForearm.castShadow = true;
     this.rightForearmPivot.add(rightForearm);
-    const rightHand = new THREE.Mesh(new THREE.SphereGeometry(0.13, 12, 12), this.materials.gloves);
+    const rightHand = new THREE.Mesh(new THREE.SphereGeometry(0.13, 20, 18), this.materials.gloves);
     rightHand.position.set(0, -0.96, 0.02);
     this.rightForearmPivot.add(rightHand);
 
-    const axeShaft = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 1.2, 10), this.materials.iceTool);
+    const axeShaft = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 1.2, 16), this.materials.iceTool);
     axeShaft.position.set(0, -0.58, 0.12);
     axeShaft.rotation.z = 0.18;
     this.rightForearmPivot.add(axeShaft);
@@ -1388,14 +1410,14 @@ class BergRenderer {
     this.leftLegPivot = new THREE.Group();
     this.leftLegPivot.position.set(-0.34, -0.48, 0.04);
     this.playerGroup.add(this.leftLegPivot);
-    const leftThigh = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.18, 1.18, 12), this.materials.body);
+    const leftThigh = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.18, 1.18, 20), this.materials.body);
     leftThigh.position.y = -0.58;
     leftThigh.castShadow = true;
     this.leftLegPivot.add(leftThigh);
     this.leftShinPivot = new THREE.Group();
     this.leftShinPivot.position.set(0, -1.12, 0.04);
     this.leftLegPivot.add(this.leftShinPivot);
-    const leftShin = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.15, 1.12, 12), this.materials.bodySoft);
+    const leftShin = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.15, 1.12, 20), this.materials.bodySoft);
     leftShin.position.y = -0.56;
     leftShin.castShadow = true;
     this.leftShinPivot.add(leftShin);
@@ -1423,7 +1445,7 @@ class BergRenderer {
     this.shieldBillboard.visible = false;
     this.playerGroup.add(this.shieldBillboard);
 
-    this.shieldRing = new THREE.Mesh(new THREE.TorusGeometry(1.1, 0.06, 12, 36), this.materials.metal.clone());
+    this.shieldRing = new THREE.Mesh(new THREE.TorusGeometry(1.1, 0.06, 20, 64), this.materials.metal.clone());
     this.shieldRing.material.transparent = true;
     this.shieldRing.material.opacity = 0;
     this.shieldRing.rotation.x = Math.PI / 2;
@@ -1856,14 +1878,14 @@ class BergRenderer {
 
       if (!node) {
         const group = new THREE.Group();
+        const coreGeom = this._buildBoulderGeometry(1.55, 3, 0.18);
         const core = new THREE.Mesh(
-          new THREE.DodecahedronGeometry(1.55, 0),
+          coreGeom,
           new THREE.MeshStandardMaterial({
             map: this.materials.rock.map,
             color: 0x697782,
-            roughness: 1,
-            metalness: 0.06,
-            flatShading: true
+            roughness: 0.94,
+            metalness: 0.08
           })
         );
         core.castShadow = true;
@@ -1871,7 +1893,7 @@ class BergRenderer {
         group.add(core);
 
         const shell = new THREE.Mesh(
-          new THREE.IcosahedronGeometry(1.75, 0),
+          new THREE.IcosahedronGeometry(1.75, 2),
           new THREE.MeshBasicMaterial({
             color: 0xfff0c6,
             transparent: true,
@@ -1894,8 +1916,9 @@ class BergRenderer {
 
         const chips = [];
         for (let chipIndex = 0; chipIndex < 4; chipIndex += 1) {
+          const chipRadius = 0.26 + chipIndex * 0.08;
           const chip = new THREE.Mesh(
-            new THREE.IcosahedronGeometry(0.26 + chipIndex * 0.08, 0),
+            this._buildBoulderGeometry(chipRadius, 2, 0.24),
             core.material
           );
           chip.position.set(
@@ -1908,7 +1931,7 @@ class BergRenderer {
         }
 
         // landing telegraph on the slope
-        const targetGeom = new THREE.RingGeometry(1.1, 1.45, 28);
+        const targetGeom = new THREE.RingGeometry(1.1, 1.45, 48);
         const targetMat = new THREE.MeshBasicMaterial({
           color: 0xffb070,
           transparent: true,
@@ -1921,7 +1944,7 @@ class BergRenderer {
         this.dynamicHazards.add(target);
 
         const targetCore = new THREE.Mesh(
-          new THREE.CircleGeometry(0.9, 24),
+          new THREE.CircleGeometry(0.9, 40),
           new THREE.MeshBasicMaterial({
             color: 0xff6a3d,
             transparent: true,
