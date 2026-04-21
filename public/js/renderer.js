@@ -376,6 +376,59 @@ class BergRenderer {
         depthWrite: false,
         side: THREE.DoubleSide
       }),
+      // Volumetric avalanche puff: overlapping subdivided spheres that read
+      // as dense powder when stacked. Cloned once per avalanche so opacity
+      // can pulse with intensity without touching the shared base.
+      avalancheBlob: new THREE.MeshStandardMaterial({
+        color: 0xe6f1fb,
+        emissive: 0x7dabd0,
+        emissiveIntensity: 0.28,
+        roughness: 1,
+        metalness: 0,
+        transparent: true,
+        opacity: 0.78,
+        depthWrite: false
+      }),
+      // Brighter foam crown riding on top of the main mass.
+      avalancheCrest: new THREE.MeshStandardMaterial({
+        color: 0xffffff,
+        emissive: 0xd0e6ff,
+        emissiveIntensity: 0.42,
+        roughness: 1,
+        metalness: 0,
+        transparent: true,
+        opacity: 0.88,
+        depthWrite: false
+      }),
+      // Soft additive halo behind the mass so the silhouette is backlit
+      // by a diffuse glow rather than a hard cut-out edge.
+      avalancheGlow: new THREE.SpriteMaterial({
+        map: cloudMap,
+        color: 0xe3efff,
+        transparent: true,
+        opacity: 0.35,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending
+      }),
+      // Powder trail cards streaming out behind the avalanche.
+      avalancheTrail: new THREE.SpriteMaterial({
+        map: cloudMap,
+        color: 0xf5fbff,
+        transparent: true,
+        opacity: 0.2,
+        depthWrite: false
+      }),
+      // Ice-crystal spray points blown off the leading edge.
+      avalancheSpray: new THREE.PointsMaterial({
+        map: spriteMap,
+        color: 0xffffff,
+        size: 0.52,
+        transparent: true,
+        opacity: 0.78,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        sizeAttenuation: true
+      }),
       snowFar: new THREE.PointsMaterial({
         map: spriteMap,
         color: 0xe9f8ff,
@@ -780,6 +833,30 @@ class BergRenderer {
       const scale = length * (1 + offset);
 
       positions.setXYZ(v, temp.x * scale, temp.y * scale, temp.z * scale);
+    }
+
+    geometry.computeVertexNormals();
+    return geometry;
+  }
+
+  // Snow puff: smooth UV sphere softly distorted along its normal so it reads
+  // as a pillowy cloud instead of a billiard ball. Lower jitter than a rock
+  // on purpose — powder wants gentle undulation, not craggy facets.
+  _buildSnowPuffGeometry(radius, jitter = 0.12) {
+    const geometry = new THREE.SphereGeometry(radius, 20, 14);
+    const positions = geometry.attributes.position;
+    const temp = new THREE.Vector3();
+
+    for (let v = 0; v < positions.count; v += 1) {
+      temp.set(positions.getX(v), positions.getY(v), positions.getZ(v));
+      const length = temp.length() || 1;
+      const n = temp.clone().multiplyScalar(1 / length);
+      const wave =
+        Math.sin(n.x * 2.1 + n.y * 2.7) * 0.6 +
+        Math.cos(n.y * 1.8 + n.z * 2.4) * 0.4 +
+        (Math.random() - 0.5) * 0.35;
+      const scaled = length * (1 + wave * jitter);
+      positions.setXYZ(v, n.x * scaled, n.y * scaled, n.z * scaled);
     }
 
     geometry.computeVertexNormals();
@@ -2024,45 +2101,208 @@ class BergRenderer {
       let node = this.avalancheMeshes.get(avalanche.id);
 
       if (!node) {
-        const group = new THREE.Group();
-        const back = new THREE.Mesh(new THREE.PlaneGeometry(28, 8), this.materials.avalanche.clone());
-        const core = new THREE.Mesh(new THREE.PlaneGeometry(26, 6.2), this.materials.avalancheCore.clone());
-        const foam = new THREE.Mesh(new THREE.PlaneGeometry(30, 5.2), this.materials.avalanche.clone());
-        foam.position.z = 0.6;
-        core.position.z = 0.3;
-        group.add(back);
-        group.add(core);
-        group.add(foam);
-        this.avalancheGroup.add(group);
-        node = { group, back, core, foam };
+        node = this._createAvalancheNode();
+        this.avalancheGroup.add(node.group);
         this.avalancheMeshes.set(avalanche.id, node);
       }
 
-      const sway = Math.sin(this.elapsed * 2.2 + index) * 0.6;
-      node.group.position.set(sway, avalanche.y, 3.5);
-      node.group.rotation.z = Math.sin(this.elapsed * 2.8 + index) * 0.07;
-      node.back.scale.set(1, avalanche.heightScale * 1.16, 1);
-      node.core.scale.set(1, avalanche.heightScale, 1);
-      node.foam.scale.set(1, avalanche.heightScale * 0.88, 1);
-      node.back.material.opacity = 0.14 + avalanche.intensity * 0.18;
-      node.core.material.opacity = 0.08 + avalanche.intensity * 0.16;
-      node.foam.material.opacity = 0.12 + avalanche.intensity * 0.16;
+      this._updateAvalancheNode(node, avalanche, index, dt);
     });
 
     Array.from(this.avalancheMeshes.entries()).forEach(([id, node]) => {
       if (!nextAvalancheIds.has(id)) {
         this.avalancheGroup.remove(node.group);
-        node.group.traverse((child) => {
-          if (child.geometry) {
-            child.geometry.dispose();
-          }
-          if (child.material) {
-            child.material.dispose();
-          }
-        });
+        this._disposeAvalancheNode(node);
         this.avalancheMeshes.delete(id);
       }
     });
+  }
+
+  _createAvalancheNode() {
+    const group = new THREE.Group();
+
+    // Shared per-avalanche materials — cloned once so per-frame opacity
+    // pulses don't touch the base material and we don't leak 30+ clones.
+    const blobMat = this.materials.avalancheBlob.clone();
+    const crestMat = this.materials.avalancheCrest.clone();
+    const trailMat = this.materials.avalancheTrail.clone();
+    const sprayMat = this.materials.avalancheSpray.clone();
+    const haloMat = this.materials.avalancheGlow.clone();
+
+    // Backlit halo: wide additive card behind the mass so the silhouette
+    // is framed by a diffuse glow instead of a hard cut-out.
+    const halo = new THREE.Sprite(haloMat);
+    halo.scale.set(44, 18, 1);
+    halo.position.set(0, 0.4, -2.2);
+    group.add(halo);
+
+    // Main billow: many overlapping displaced puffs read as a dense cloud
+    // of powder. Detail 20×14 keeps sphere silhouettes smooth when the
+    // camera passes close; stacking ~18 of them hides any single shape.
+    const blobs = [];
+    const blobCount = 18;
+    for (let i = 0; i < blobCount; i += 1) {
+      const radius = 1.8 + Math.random() * 2.4;
+      const mesh = new THREE.Mesh(this._buildSnowPuffGeometry(radius, 0.11), blobMat);
+      const anchorX = (Math.random() - 0.5) * 22;
+      // Concentrate body slightly below centre; leaves room above for crest.
+      const anchorY = -0.2 + (Math.random() - 0.6) * 4.2;
+      const anchorZ = (Math.random() - 0.5) * 3.2;
+      mesh.position.set(anchorX, anchorY, anchorZ);
+      mesh.userData = {
+        anchor: new THREE.Vector3(anchorX, anchorY, anchorZ),
+        spinX: (Math.random() - 0.5) * 0.4,
+        spinY: (Math.random() - 0.3) * 0.6,
+        drift: 0.9 + Math.random() * 0.7,
+        phase: Math.random() * Math.PI * 2
+      };
+      group.add(mesh);
+      blobs.push(mesh);
+    }
+
+    // Crest: smaller brighter puffs hugging the top edge — the foam crown
+    // that catches the rim-light and sells the direction of motion.
+    const crest = [];
+    const crestCount = 11;
+    for (let i = 0; i < crestCount; i += 1) {
+      const radius = 0.7 + Math.random() * 0.9;
+      const mesh = new THREE.Mesh(this._buildSnowPuffGeometry(radius, 0.18), crestMat);
+      const anchorX = (Math.random() - 0.5) * 20;
+      const anchorY = 2.6 + Math.random() * 2.6;
+      const anchorZ = (Math.random() - 0.5) * 2.2;
+      mesh.position.set(anchorX, anchorY, anchorZ);
+      mesh.userData = {
+        anchor: new THREE.Vector3(anchorX, anchorY, anchorZ),
+        phase: Math.random() * Math.PI * 2
+      };
+      group.add(mesh);
+      crest.push(mesh);
+    }
+
+    // Ice-crystal spray: point particles launched from the leading edge
+    // that drift downward and recycle. Additive blending so they pop
+    // brightly against the cliff without over-whitening the mass behind.
+    const sprayCount = 160;
+    const sprayGeom = new THREE.BufferGeometry();
+    const sprayPos = new Float32Array(sprayCount * 3);
+    const sprayState = new Array(sprayCount);
+    for (let i = 0; i < sprayCount; i += 1) {
+      const { x, y, z, vx, vy, vz, life } = this._seedAvalancheSprayParticle(true);
+      sprayPos[i * 3] = x;
+      sprayPos[i * 3 + 1] = y;
+      sprayPos[i * 3 + 2] = z;
+      sprayState[i] = { vx, vy, vz, life, lifespan: 1.4 + Math.random() * 1.4 };
+    }
+    sprayGeom.setAttribute('position', new THREE.BufferAttribute(sprayPos, 3));
+    const spray = new THREE.Points(sprayGeom, sprayMat);
+    group.add(spray);
+
+    // Powder trail cards behind the mass so the storm reads as pulling
+    // its own debris cloud along with it.
+    const trails = [];
+    const trailCount = 5;
+    for (let i = 0; i < trailCount; i += 1) {
+      const trail = new THREE.Sprite(trailMat);
+      trail.scale.set(17 + Math.random() * 8, 5 + Math.random() * 3, 1);
+      trail.position.set((Math.random() - 0.5) * 18, 1.2 + Math.random() * 2, -3.2 - i * 0.7);
+      trail.userData = { phase: Math.random() * Math.PI * 2 };
+      group.add(trail);
+      trails.push(trail);
+    }
+
+    return { group, halo, blobs, crest, spray, sprayState, trails, blobMat, crestMat, trailMat, sprayMat, haloMat };
+  }
+
+  _seedAvalancheSprayParticle(initial) {
+    // When initial, scatter across the whole front; otherwise re-emit from
+    // the leading edge so recycled particles look fresh off the crest.
+    const x = (Math.random() - 0.5) * 24;
+    const y = initial ? 3 + Math.random() * 2 : 2.4 + Math.random() * 2.4;
+    const z = (Math.random() - 0.5) * 3.4;
+    return {
+      x,
+      y,
+      z,
+      vx: (Math.random() - 0.5) * 1.8,
+      vy: -1.6 - Math.random() * 2.4,
+      vz: (Math.random() - 0.5) * 0.6,
+      life: initial ? Math.random() * 1.2 : 0
+    };
+  }
+
+  _updateAvalancheNode(node, avalanche, index, dt) {
+    const t = this.elapsed;
+    const sway = Math.sin(t * 1.6 + index) * 0.5;
+    node.group.position.set(sway, avalanche.y, 3.4);
+    node.group.rotation.z = Math.sin(t * 1.9 + index) * 0.04;
+    node.group.scale.y = avalanche.heightScale * 1.35;
+    node.group.scale.x = 1 + (avalanche.heightScale - 1) * 0.18;
+
+    const base = 0.58 + avalanche.intensity * 0.32;
+
+    // Animate blobs: lazy drift around each anchor + slow tumble.
+    node.blobs.forEach((blob) => {
+      const u = blob.userData;
+      blob.position.x = u.anchor.x + Math.sin(t * 1.05 * u.drift + u.phase) * 0.55;
+      blob.position.y = u.anchor.y + Math.cos(t * 0.9 * u.drift + u.phase) * 0.42;
+      blob.position.z = u.anchor.z + Math.sin(t * 0.6 + u.phase) * 0.28;
+      blob.rotation.y += u.spinY * dt;
+      blob.rotation.x += u.spinX * dt;
+    });
+    node.blobMat.opacity = base;
+
+    // Crest foam: tighter, faster undulation for visible turbulence.
+    node.crest.forEach((blob) => {
+      const u = blob.userData;
+      blob.position.x = u.anchor.x + Math.sin(t * 2.2 + u.phase) * 0.32;
+      blob.position.y = u.anchor.y + Math.cos(t * 1.6 + u.phase) * 0.22;
+      blob.rotation.z += 0.6 * dt;
+    });
+    node.crestMat.opacity = Math.min(0.96, 0.68 + avalanche.intensity * 0.32);
+
+    // Spray particles: integrate velocity, recycle when they drop below
+    // the mass or exceed their lifespan.
+    const pos = node.spray.geometry.attributes.position;
+    for (let i = 0; i < node.sprayState.length; i += 1) {
+      const s = node.sprayState[i];
+      let x = pos.getX(i) + s.vx * dt;
+      let y = pos.getY(i) + s.vy * dt;
+      let z = pos.getZ(i) + s.vz * dt;
+      s.life += dt;
+      if (y < -7 || s.life > s.lifespan) {
+        const seed = this._seedAvalancheSprayParticle(false);
+        x = seed.x;
+        y = seed.y;
+        z = seed.z;
+        s.vx = seed.vx;
+        s.vy = seed.vy;
+        s.vz = seed.vz;
+        s.life = 0;
+        s.lifespan = 1.4 + Math.random() * 1.4;
+      }
+      pos.setXYZ(i, x, y, z);
+    }
+    pos.needsUpdate = true;
+    node.sprayMat.opacity = 0.55 + avalanche.intensity * 0.34;
+    node.sprayMat.size = 0.48 + avalanche.intensity * 0.14;
+
+    // Back halo + trailing powder cards.
+    node.haloMat.opacity = 0.26 + avalanche.intensity * 0.32;
+    node.trails.forEach((trail, ti) => {
+      const phase = trail.userData.phase;
+      trail.material.opacity = (0.1 + avalanche.intensity * 0.12) * (0.7 + 0.3 * Math.sin(t * 1.4 + phase + ti));
+    });
+  }
+
+  _disposeAvalancheNode(node) {
+    node.blobs.forEach((blob) => blob.geometry.dispose());
+    node.crest.forEach((blob) => blob.geometry.dispose());
+    node.spray.geometry.dispose();
+    node.blobMat.dispose();
+    node.crestMat.dispose();
+    node.trailMat.dispose();
+    node.sprayMat.dispose();
+    node.haloMat.dispose();
   }
 
   _updateFootprints(snapshot) {
