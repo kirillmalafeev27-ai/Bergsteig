@@ -1250,39 +1250,119 @@ body.paused #lens-overlay {
     font-size: 2.8rem;
   }
 
-  #hud {
-    top: 10px;
-    left: 10px;
-    right: 10px;
-    grid-template-columns: 1fr;
+  /* Mobile game view: strip the HUD down to the task flow only.
+     Altitude, hazard feed, phase breakdown and desktop action bar all hide
+     — the player focuses on picking a topic and answering the question.
+     Atmospheric overlays (vignette, storm, lens) are kept because they
+     are visual framing, not HUD chrome. */
+  #hud,
+  #hud-actions,
+  #hazard-feed,
+  #control-hint,
+  #message-banner {
+    display: none !important;
   }
 
-  #hazard-feed {
-    top: auto;
-    bottom: 274px;
-    left: 10px;
-    right: 10px;
-    width: auto;
-  }
-
+  /* Full-width bottom sheets honouring the safe-area inset on notched
+     devices; scroll when the content would otherwise overflow. */
   #topic-panel,
   #question-panel,
   #direction-panel {
-    left: 10px;
-    right: 10px;
-  }
-
-  #control-hint {
-    left: 10px;
-    right: 10px;
+    left: 8px;
+    right: 8px;
     width: auto;
+    bottom: 8px;
+    top: auto;
     transform: none;
-    bottom: 10px;
+    padding: 16px 16px max(16px, env(safe-area-inset-bottom));
+    border-radius: 24px;
+    max-height: calc(100vh - 20px);
+    overflow-y: auto;
   }
 
-  #topic-panel:not(.hidden) ~ #control-hint,
-  #question-panel:not(.hidden) ~ #control-hint,
-  #direction-panel:not(.hidden) ~ #control-hint {
-    bottom: 242px;
+  /* Single-focus flow: when a question or direction picker is up, the
+     topic grid collapses so the player sees one surface at a time. */
+  #game-screen:has(#question-panel:not(.hidden)) #topic-panel,
+  #game-screen:has(#direction-panel:not(.hidden)) #topic-panel {
+    display: none !important;
+  }
+
+  /* Tap-through prevention: while a modal surface is open, lane tap
+     zones stop fighting the buttons for touches. */
+  #game-screen:has(#question-panel:not(.hidden)) #touch-zones,
+  #game-screen:has(#direction-panel:not(.hidden)) #touch-zones,
+  #game-screen:has(#pause-overlay:not(.hidden)) #touch-zones {
+    pointer-events: none;
+    opacity: 0;
+  }
+
+  /* Thumb-friendly type and hit-areas for the task panels. */
+  .panel-topline {
+    margin-bottom: 14px;
+  }
+
+  .panel-title {
+    font-size: 1.14rem;
+  }
+
+  .panel-kicker {
+    font-size: 0.72rem;
+    letter-spacing: 0.18em;
+  }
+
+  .topic-btn {
+    min-height: 72px;
+    padding: 14px;
+    grid-template-columns: 38px minmax(0, 1fr) auto;
+    gap: 12px;
+  }
+
+  .topic-index {
+    width: 38px;
+    height: 38px;
+    border-radius: 14px;
+    font-size: 1.08rem;
+  }
+
+  .topic-name {
+    font-size: 1.02rem;
+  }
+
+  .topic-bonus {
+    font-size: 0.88rem;
+  }
+
+  .topic-status {
+    font-size: 0.82rem;
+  }
+
+  .question-text {
+    font-size: 1.05rem;
+    line-height: 1.58;
+  }
+
+  .question-display {
+    padding: 16px;
+    border-radius: 20px;
+    font-size: 1.1rem;
+  }
+
+  .option-btn {
+    min-height: 60px;
+    padding: 16px;
+    border-radius: 18px;
+    font-size: 1rem;
+  }
+
+  .direction-btn {
+    min-height: 96px;
+    border-radius: 22px;
+    font-size: 1.18rem;
+  }
+
+  .question-feedback {
+    font-size: 0.98rem;
+    padding: 14px 16px;
+    border-radius: 16px;
   }
 }
