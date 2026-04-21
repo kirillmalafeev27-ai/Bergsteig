@@ -714,8 +714,8 @@ class BergRenderer {
   _mountainMeta() {
     const LANE_X = 2.85;
     const ROUTE_HALF = LANE_X * 1.5 + 0.35;
-    const MOUNT_WIDTH = 150;
-    const MOUNT_HEIGHT = 290;
+    const MOUNT_WIDTH = 240;
+    const MOUNT_HEIGHT = 320;
     return {
       LANE_X,
       ROUTE_HALF,
@@ -751,21 +751,27 @@ class BergRenderer {
     const absX = Math.abs(x);
     const outsideCorridor = absX > m.ROUTE_HALF;
     const insideRoute = !outsideCorridor;
+    const flankFrac = outsideCorridor ? clamp01((absX - m.ROUTE_HALF) / m.FLANK_SPAN) : 0;
+    // Soft falloff mask for the far flanks so noise and crags ease off before
+    // the plane edge — prevents sharp "holes" when the silhouette recedes.
+    const edgeFalloff = 1 - smoothStep(0.72, 1, flankFrac);
 
     const noise = (nx, ny, fx, fy) =>
       Math.sin(nx * fx + ny * fy * 1.3) * Math.cos(ny * fx * 1.1 - nx * fy * 0.7);
 
     const spineBank = Math.pow(Math.max(0, 1 - absX / 22), 1.3) * 3.1;
-    const terrace = Math.sin(meshY * 0.085) * 1.35 + Math.sin(meshY * 0.04 - x * 0.18) * 0.9;
+    const terrace = (Math.sin(meshY * 0.085) * 1.35 + Math.sin(meshY * 0.04 - x * 0.18) * 0.9) * edgeFalloff;
     const crags =
       noise(x, meshY, 0.32, 0.22) * 1.4 +
       noise(x, meshY, 0.78, 0.61) * 0.85 +
-      noise(x, meshY, 1.6, 1.1) * 0.38;
-    const sideMass = smoothStep(m.ROUTE_HALF + 2, m.ROUTE_HALF + 16, absX) * (3.4 + Math.sin(meshY * 0.14) * 0.7);
-    const shoulderRise = Math.sin(slopeRatio * Math.PI) * smoothStep(m.ROUTE_HALF, m.ROUTE_HALF + 14, absX) * 1.6;
+      noise(x, meshY, 1.6, 1.1) * 0.38 +
+      noise(x, meshY, 3.1, 2.3) * 0.22;
+    const sideMass = smoothStep(m.ROUTE_HALF + 2, m.ROUTE_HALF + 14, absX) * (3.2 + Math.sin(meshY * 0.14) * 0.6) * edgeFalloff;
+    const shoulderRise = Math.sin(slopeRatio * Math.PI) * smoothStep(m.ROUTE_HALF, m.ROUTE_HALF + 14, absX) * 1.6 * edgeFalloff;
     const crownLift = smoothStep(0.7, 1, slopeRatio) * Math.max(0, 6.2 - absX * 0.32);
-    const flankFrac = outsideCorridor ? clamp01((absX - m.ROUTE_HALF) / m.FLANK_SPAN) : 0;
-    const flankRecession = -Math.pow(flankFrac, 1.35) * 22;
+    // Smooth, deep recession into the distance with a cubic taper so the far
+    // silhouette fades into the horizon instead of ending in a cliff edge.
+    const flankRecession = -(Math.pow(flankFrac, 1.25) * 26 + Math.pow(flankFrac, 3) * 14);
     const couloirDepth = insideRoute
       ? smoothStep(0, m.ROUTE_HALF, m.ROUTE_HALF - absX) * (0.78 + Math.sin(meshY * 0.22) * 0.1)
       : 0;
@@ -776,7 +782,7 @@ class BergRenderer {
       -2.8 +
       spineBank +
       terrace +
-      crags * (insideRoute ? 0.48 : 0.9) +
+      crags * (insideRoute ? 0.48 : 0.7 * edgeFalloff) +
       sideMass +
       shoulderRise +
       crownLift +
@@ -873,7 +879,7 @@ class BergRenderer {
     // Wider, taller plane so the mountain reads as a real peak, not a strip.
     // Vertex displacement runs through _mountainProfile so boulders and
     // markers placed via _faceAnchor share the exact same surface math.
-    const mountainGeometry = new THREE.PlaneGeometry(MOUNT_WIDTH, MOUNT_HEIGHT, 180, 340);
+    const mountainGeometry = new THREE.PlaneGeometry(MOUNT_WIDTH, MOUNT_HEIGHT, 260, 420);
     const positions = mountainGeometry.attributes.position;
     const colors = new Float32Array(positions.count * 3);
     const snowTone = new THREE.Color(0xe5f0f7);
@@ -926,42 +932,6 @@ class BergRenderer {
     this.glacierSheen.position.z += 0.05;
     this.environmentGroup.add(this.glacierSheen);
 
-    // lane markers: three painted chalk strips along the route
-    const laneOffsets = [-LANE_X, 0, LANE_X];
-    laneOffsets.forEach((laneOffsetX, laneIndex) => {
-      const laneGeom = new THREE.PlaneGeometry(0.42, 240, 1, 40);
-      const lanePositions = laneGeom.attributes.position;
-      for (let i = 0; i < lanePositions.count; i += 1) {
-        const py = lanePositions.getY(i);
-        lanePositions.setZ(i, Math.sin(py * 0.3 + laneIndex) * 0.04);
-      }
-      const laneMat = new THREE.MeshBasicMaterial({
-        color: laneIndex === 1 ? 0xf4c88a : 0xbcd6e4,
-        transparent: true,
-        opacity: 0.34,
-        depthWrite: false
-      });
-      const laneStrip = new THREE.Mesh(laneGeom, laneMat);
-      laneStrip.position.set(laneOffsetX, 110, 1.38);
-      this.environmentGroup.add(laneStrip);
-
-      // dashed rungs across each lane every few meters
-      for (let rung = 0; rung < 44; rung += 1) {
-        const rungY = -6 + rung * 6 + (laneIndex - 1) * 0.8;
-        const rungMesh = new THREE.Mesh(
-          new THREE.PlaneGeometry(1.4, 0.12),
-          new THREE.MeshBasicMaterial({
-            color: 0xffe7b8,
-            transparent: true,
-            opacity: 0.24 + (rung % 2) * 0.12,
-            depthWrite: false
-          })
-        );
-        rungMesh.position.set(laneOffsetX, rungY, 1.4);
-        this.environmentGroup.add(rungMesh);
-      }
-    });
-
     // Embedded boulders and flank crags. Every boulder snaps to the face via
     // _faceAnchor, then sinks into the slope so it reads as fractured rock
     // growing out of the mountain rather than beads floating in the air.
@@ -995,11 +965,11 @@ class BergRenderer {
     };
 
     // Flanking scatter: tapers with slope ratio so the summit stays clean.
-    const flankCount = 54;
+    const flankCount = 78;
     for (let index = 0; index < flankCount; index += 1) {
       const side = index % 2 === 0 ? -1 : 1;
       const slopeFrac = Math.pow(Math.random(), 0.85);  // bias toward lower/mid slopes
-      const lateralReach = Math.max(2.4, (1 - slopeFrac * 0.75) * 26);
+      const lateralReach = Math.max(2.4, (1 - slopeFrac * 0.75) * 44);
       const baseX = side * (ROUTE_HALF + 0.6 + Math.random() * lateralReach);
       const worldY = -8 + slopeFrac * 246;
       const radius = 0.9 + Math.random() * 1.9 * (1 - slopeFrac * 0.35);
@@ -1034,7 +1004,7 @@ class BergRenderer {
 
     // Massive background silhouette — a single broad pyramid behind the climb
     // face that gives the mountain its iconic triangular profile against the sky.
-    const backMassGeometry = new THREE.ConeGeometry(96, 330, 22, 8, false);
+    const backMassGeometry = new THREE.ConeGeometry(132, 360, 28, 10, false);
     const backMassPositions = backMassGeometry.attributes.position;
     for (let i = 0; i < backMassPositions.count; i += 1) {
       const px = backMassPositions.getX(i);
@@ -1048,7 +1018,7 @@ class BergRenderer {
     backMassGeometry.computeVertexNormals();
     const backMass = new THREE.Mesh(backMassGeometry, this.materials.peakShadow.clone());
     backMass.material.color.setHex(0x2a3643);
-    backMass.position.set(0, 108, -52);
+    backMass.position.set(0, 114, -64);
     backMass.receiveShadow = true;
     backMass.castShadow = false;
     this.environmentGroup.add(backMass);
@@ -1057,28 +1027,105 @@ class BergRenderer {
     // Two flanking sub-peaks spreading outward so the ridge feels broad.
     this.backFlankMeshes = [];
     [-1, 1].forEach((side) => {
-      const flankGeom = new THREE.ConeGeometry(42, 230, 18, 5, false);
+      const flankGeom = new THREE.ConeGeometry(48, 250, 22, 7, false);
+      const flankPositions = flankGeom.attributes.position;
+      for (let i = 0; i < flankPositions.count; i += 1) {
+        const px = flankPositions.getX(i);
+        const py = flankPositions.getY(i);
+        const pz = flankPositions.getZ(i);
+        const n = Math.sin(px * 0.18 + py * 0.09) * Math.cos(pz * 0.24 - py * 0.07);
+        flankPositions.setX(i, px + n * 2.4);
+        flankPositions.setZ(i, pz + Math.cos(px * 0.14 + py * 0.08) * 2.1);
+      }
+      flankGeom.computeVertexNormals();
       const flank = new THREE.Mesh(flankGeom, this.materials.peakShadow.clone());
-      flank.material.color.setHex(0x323e4b);
-      flank.position.set(side * 62, 72, -44);
+      flank.material.color.setHex(0x2d3947);
+      flank.position.set(side * 68, 78, -46);
       flank.rotation.z = side * 0.18;
       flank.receiveShadow = true;
       this.environmentGroup.add(flank);
       this.backFlankMeshes.push(flank);
     });
 
+    // A ring of neighbouring peaks at varying distances + heights so the
+    // primary mountain reads as part of a range, not a lonely wedge.
+    const distantPeaks = [
+      { side: -1, x: 132, z: -92, radius: 46, height: 210, tint: 0x22303d, noise: 3.2 },
+      { side: -1, x: 188, z: -128, radius: 52, height: 172, tint: 0x1c2631, noise: 2.6 },
+      { side: 1, x: 142, z: -104, radius: 50, height: 230, tint: 0x24303b, noise: 3.0 },
+      { side: 1, x: 204, z: -148, radius: 58, height: 186, tint: 0x1a242e, noise: 2.4 },
+      { side: -1, x: 96, z: -78, radius: 34, height: 150, tint: 0x2a3542, noise: 2.8 },
+      { side: 1, x: 104, z: -86, radius: 38, height: 158, tint: 0x263240, noise: 2.6 },
+      { side: -1, x: 238, z: -178, radius: 62, height: 140, tint: 0x141d25, noise: 2.0 },
+      { side: 1, x: 252, z: -186, radius: 66, height: 132, tint: 0x131b23, noise: 1.9 }
+    ];
+    distantPeaks.forEach((peak, idx) => {
+      const geom = new THREE.ConeGeometry(peak.radius, peak.height, 22, 7, false);
+      const pos = geom.attributes.position;
+      for (let i = 0; i < pos.count; i += 1) {
+        const px = pos.getX(i);
+        const py = pos.getY(i);
+        const pz = pos.getZ(i);
+        const n = Math.sin(px * 0.14 + py * 0.1 + idx) * Math.cos(pz * 0.2 - py * 0.07);
+        pos.setX(i, px + n * peak.noise);
+        pos.setZ(i, pz + Math.cos(px * 0.11 + py * 0.09 + idx) * peak.noise * 0.8);
+      }
+      geom.computeVertexNormals();
+      const mesh = new THREE.Mesh(geom, this.materials.peakShadow.clone());
+      mesh.material.color.setHex(peak.tint);
+      mesh.position.set(peak.side * peak.x, peak.height * 0.25 + 12, peak.z);
+      mesh.rotation.z = peak.side * (0.08 + Math.random() * 0.1);
+      mesh.rotation.y = Math.random() * Math.PI * 2;
+      mesh.receiveShadow = true;
+      this.environmentGroup.add(mesh);
+    });
+
+    // Low horizon ridges: broad, short, far-away silhouettes that stretch
+    // laterally behind the peaks so the bottom of the sky reads as a range.
+    [-1, 1].forEach((side) => {
+      for (let i = 0; i < 3; i += 1) {
+        const ridgeGeom = new THREE.ConeGeometry(72 + i * 18, 82 - i * 16, 18, 4, false);
+        const ridgePos = ridgeGeom.attributes.position;
+        for (let v = 0; v < ridgePos.count; v += 1) {
+          const px = ridgePos.getX(v);
+          const py = ridgePos.getY(v);
+          const pz = ridgePos.getZ(v);
+          const n = Math.sin(px * 0.1 + py * 0.07 + i) * 1.6;
+          ridgePos.setX(v, px + n);
+          ridgePos.setZ(v, pz + Math.cos(px * 0.09 + i) * 1.2);
+        }
+        ridgeGeom.computeVertexNormals();
+        const ridge = new THREE.Mesh(ridgeGeom, this.materials.peakShadow.clone());
+        ridge.material.color.setHex([0x0e161e, 0x0a1218, 0x060b11][i]);
+        ridge.position.set(side * (150 + i * 56), 6 + i * 4, -210 - i * 28);
+        ridge.scale.set(1.3 + i * 0.2, 1, 0.9);
+        ridge.rotation.z = side * (0.05 + Math.random() * 0.06);
+        ridge.receiveShadow = false;
+        this.environmentGroup.add(ridge);
+      }
+    });
+
     // Jagged ridgeline spires on each flank — further out now that the
-    // mountain itself is wide.
-    for (let index = 0; index < 14; index += 1) {
+    // mountain itself is wide. Bumped segment count + subtle noise so they
+    // don't read as naked cones.
+    for (let index = 0; index < 18; index += 1) {
       const side = index % 2 === 0 ? -1 : 1;
-      const spire = new THREE.Mesh(
-        new THREE.ConeGeometry(2.8 + Math.random() * 2.2, 18 + Math.random() * 22, 12, 3),
-        this.materials.cliffShadow.clone()
-      );
+      const spireGeom = new THREE.ConeGeometry(2.8 + Math.random() * 2.2, 18 + Math.random() * 22, 14, 4);
+      const spirePos = spireGeom.attributes.position;
+      for (let v = 0; v < spirePos.count; v += 1) {
+        const px = spirePos.getX(v);
+        const py = spirePos.getY(v);
+        const pz = spirePos.getZ(v);
+        const n = Math.sin(px * 1.4 + py * 0.7 + index) * 0.22;
+        spirePos.setX(v, px + n);
+        spirePos.setZ(v, pz + Math.cos(px * 1.2 + py * 0.5) * 0.22);
+      }
+      spireGeom.computeVertexNormals();
+      const spire = new THREE.Mesh(spireGeom, this.materials.cliffShadow.clone());
       spire.position.set(
-        side * (58 + Math.random() * 18),
-        -2 + index * 20 + Math.random() * 6,
-        -18 - Math.random() * 10
+        side * (82 + Math.random() * 28),
+        -2 + index * 16 + Math.random() * 6,
+        -28 - Math.random() * 14
       );
       spire.rotation.z = side * (0.08 + Math.random() * 0.14);
       spire.castShadow = true;
@@ -1087,17 +1134,33 @@ class BergRenderer {
     }
 
     const lowerMist = new THREE.Mesh(
-      new THREE.PlaneGeometry(120, 48),
+      new THREE.PlaneGeometry(240, 60),
       new THREE.MeshBasicMaterial({
         map: this.materials.cloud.map,
         color: 0xdff3ff,
         transparent: true,
-        opacity: 0.18,
+        opacity: 0.22,
         depthWrite: false
       })
     );
     lowerMist.position.set(0, -14, 18);
     this.environmentGroup.add(lowerMist);
+
+    // A far atmospheric haze plane behind the distant peaks that fades the
+    // range into the sky, preventing the mountain silhouettes from cutting
+    // a hard horizon line.
+    const horizonHaze = new THREE.Mesh(
+      new THREE.PlaneGeometry(640, 180),
+      new THREE.MeshBasicMaterial({
+        map: this.materials.cloud.map,
+        color: 0xc7d9e8,
+        transparent: true,
+        opacity: 0.28,
+        depthWrite: false
+      })
+    );
+    horizonHaze.position.set(0, 72, -240);
+    this.environmentGroup.add(horizonHaze);
 
     this.summitGroup = new THREE.Group();
     this.environmentGroup.add(this.summitGroup);
@@ -1349,10 +1412,6 @@ class BergRenderer {
       screw.rotation.z = Math.PI / 2;
       this.environmentGroup.add(screw);
 
-      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.34, 0.06, 18, 32), this.materials.anchorMetal);
-      ring.position.set(sideSign * 0.1, y, 0.98);
-      this.environmentGroup.add(ring);
-
       // Faded ribbon flag on every third anchor — visible "altitude marker".
       let ribbon = null;
       if (index % 3 === 0) {
@@ -1373,7 +1432,7 @@ class BergRenderer {
       pulse.material.opacity = 0;
       this.environmentGroup.add(pulse);
 
-      this.anchorNodes.push({ screw, ring, ribbon, pulse, baseY: y, triggeredAt: -1e9 });
+      this.anchorNodes.push({ screw, ribbon, pulse, baseY: y, triggeredAt: -1e9 });
     });
   }
 
@@ -1921,8 +1980,8 @@ class BergRenderer {
 
     const playerSceneY = snapshot.player.y;
     this.anchorNodes.forEach((node) => {
-      node.ring.rotation.x = Math.PI / 2 + Math.sin(this.elapsed * 1.2 + node.baseY * 0.01) * 0.06;
-      node.ring.rotation.y = Math.sin(this.elapsed * 0.9 + node.baseY * 0.008) * 0.14;
+      // Screws bob softly with altitude-driven noise so the ladder feels alive.
+      node.screw.rotation.y = Math.sin(this.elapsed * 0.9 + node.baseY * 0.008) * 0.12;
 
       // Trigger a pulse the first frame the climber rises past the anchor.
       if (node.triggeredAt < 0 && playerSceneY >= node.baseY - 1.2) {
