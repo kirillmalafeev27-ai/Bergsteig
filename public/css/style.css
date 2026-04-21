@@ -663,14 +663,70 @@ input[type="text"]:focus {
 }
 
 #hud,
+#hud-actions,
 #hazard-feed,
 #topic-panel,
 #question-panel,
 #direction-panel,
 #control-hint,
-#message-banner {
+#message-banner,
+.overlay-screen {
   position: fixed;
   z-index: 4;
+}
+
+#touch-zones {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 2;
+  display: none;
+  pointer-events: none;
+}
+
+.touch-zone {
+  position: absolute;
+  top: 15%;
+  bottom: 28%;
+  width: 28%;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  -webkit-tap-highlight-color: rgba(141, 211, 255, 0.16);
+  pointer-events: auto;
+  transition: background 140ms ease;
+}
+
+.touch-zone-left {
+  left: 0;
+}
+
+.touch-zone-right {
+  right: 0;
+}
+
+.touch-zone:active {
+  background: radial-gradient(circle, rgba(141, 211, 255, 0.22), rgba(141, 211, 255, 0) 68%);
+}
+
+body.touch #touch-zones {
+  display: block;
+}
+
+body.touch .control-hint-desktop {
+  display: none;
+}
+
+body:not(.touch) .control-hint-touch {
+  display: none;
+}
+
+body.paused #game-canvas,
+body.paused #storm-overlay,
+body.paused #lens-overlay {
+  filter: saturate(0.6) brightness(0.72);
 }
 
 #hud {
@@ -680,6 +736,67 @@ input[type="text"]:focus {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 10px;
+}
+
+#hud-actions {
+  top: 122px;
+  right: 16px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.hud-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 10px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background:
+    linear-gradient(180deg, rgba(16, 27, 38, 0.96), rgba(8, 14, 21, 0.96));
+  color: #e6eff7;
+  font-size: 0.92rem;
+  cursor: pointer;
+  backdrop-filter: blur(10px);
+  transition: border-color 140ms ease, transform 140ms ease, background 160ms ease;
+}
+
+.hud-action-btn:hover {
+  transform: translateY(-1px);
+  border-color: rgba(141, 211, 255, 0.38);
+}
+
+.hud-action-btn:focus-visible {
+  outline: 2px solid rgba(141, 211, 255, 0.7);
+  outline-offset: 2px;
+}
+
+.hud-action-btn.active {
+  border-color: rgba(141, 211, 255, 0.48);
+  background:
+    linear-gradient(180deg, rgba(41, 76, 102, 0.8), rgba(14, 27, 39, 0.96));
+}
+
+.hud-action-btn.hud-action-danger {
+  border-color: rgba(255, 107, 94, 0.32);
+  color: #ffcfc9;
+}
+
+.hud-action-btn.hud-action-danger:hover {
+  border-color: rgba(255, 107, 94, 0.55);
+}
+
+.hud-action-icon {
+  font-size: 1.04rem;
+  line-height: 1;
+}
+
+.hud-action-label {
+  font-weight: 600;
+  letter-spacing: 0.02em;
 }
 
 .hud-card,
@@ -994,6 +1111,45 @@ input[type="text"]:focus {
   line-height: 1.62;
 }
 
+.overlay-screen {
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    radial-gradient(circle at center, rgba(10, 20, 28, 0.72), rgba(4, 8, 12, 0.92)),
+    rgba(4, 8, 12, 0.55);
+  backdrop-filter: blur(12px);
+  z-index: 6;
+}
+
+.overlay-card {
+  width: min(520px, calc(100% - 32px));
+  padding: 28px 26px;
+  border-radius: 24px;
+  border: 1px solid var(--line);
+  background:
+    linear-gradient(180deg, rgba(10, 18, 26, 0.94), rgba(5, 10, 16, 0.96)),
+    radial-gradient(circle at top, rgba(141, 211, 255, 0.12), transparent 38%);
+  box-shadow: var(--shadow);
+  text-align: center;
+}
+
+.overlay-card h2 {
+  margin-bottom: 12px;
+  font-family: "Palatino Linotype", "Book Antiqua", Georgia, serif;
+  color: #f8fcff;
+  font-size: clamp(1.8rem, 5vw, 2.6rem);
+}
+
+.overlay-card p {
+  color: #d1e1ef;
+  line-height: 1.58;
+}
+
 @media (max-width: 1180px) {
   .menu-layout {
     grid-template-columns: 1fr;
@@ -1023,6 +1179,25 @@ input[type="text"]:focus {
 
   #hud {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  #hud-actions {
+    top: 10px;
+    right: 10px;
+    gap: 6px;
+  }
+
+  .hud-action-label {
+    display: none;
+  }
+
+  .hud-action-btn {
+    padding: 10px 12px;
+  }
+
+  .option-btn,
+  .direction-btn {
+    min-height: 52px;
   }
 
   #topic-panel,

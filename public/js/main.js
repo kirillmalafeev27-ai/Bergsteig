@@ -1,6 +1,9 @@
 const STORAGE_KEYS = {
   playerName: 'bergstieg_player_name',
-  level: 'bergstieg_lang_level'
+  level: 'bergstieg_lang_level',
+  lexical: 'bergstieg_lexical_topic',
+  slots: 'bergstieg_slot_assignments',
+  muted: 'bergstieg_muted'
 };
 
 function safeStorageGet(key, fallback = '') {
@@ -21,7 +24,20 @@ function safeStorageSet(key, value) {
   }
 }
 
+function detectTouchDevice() {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+  const coarse = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+  const touch = 'ontouchstart' in window || (navigator.maxTouchPoints || 0) > 0;
+  return Boolean(coarse || touch);
+}
+
 document.addEventListener('DOMContentLoaded', () => {
+  if (detectTouchDevice()) {
+    document.body.classList.add('touch');
+  }
+
   const game = new Game();
 
   const ui = {
@@ -41,13 +57,25 @@ document.addEventListener('DOMContentLoaded', () => {
     loseMessage: document.getElementById('lose-message')
   };
 
-  let currentStep = 1;
   let selectedLevel = safeStorageGet(STORAGE_KEYS.level, DEFAULT_CEFR_LEVEL) || DEFAULT_CEFR_LEVEL;
-  let selectedLexical = null;
+  const storedLexical = safeStorageGet(STORAGE_KEYS.lexical, '');
+  let selectedLexical = LEXICAL_TOPICS.includes(storedLexical) ? storedLexical : null;
   let selectedSlotIndex = 0;
-  const slotAssignments = Array(BONUS_SLOTS.length).fill(null);
+  const slotAssignments = restoreSlotAssignments();
 
   ui.playerName.value = safeStorageGet(STORAGE_KEYS.playerName, '');
+
+  const storedMute = safeStorageGet(STORAGE_KEYS.muted, '0');
+  game.setMuted(storedMute === '1');
+  game.onMuteChange = (muted) => {
+    safeStorageSet(STORAGE_KEYS.muted, muted ? '1' : '0');
+  };
+
+  game.onExit = () => {
+    game.destroy(false);
+    setScreen('menu-screen');
+    showStep(stepForCurrentState());
+  };
 
   game.onWin = (stats) => {
     ui.winStats.textContent =
@@ -96,6 +124,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     safeStorageSet(STORAGE_KEYS.playerName, settings.playerName);
     safeStorageSet(STORAGE_KEYS.level, settings.langLevel);
+    safeStorageSet(STORAGE_KEYS.lexical, settings.lexicalTopic);
+    safeStorageSet(STORAGE_KEYS.slots, JSON.stringify(slotAssignments));
 
     setScreen('game-screen');
     try {
@@ -110,7 +140,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   document.getElementById('win-restart').addEventListener('click', () => {
     game.destroy();
-    resetSessionSelections();
     setScreen('menu-screen');
     showStep(1);
   });
@@ -126,8 +155,17 @@ document.addEventListener('DOMContentLoaded', () => {
     showStep(1);
   });
 
+  function stepForCurrentState() {
+    if (!selectedLexical) {
+      return 2;
+    }
+    if (slotAssignments.some((slot) => !slot)) {
+      return 3;
+    }
+    return 3;
+  }
+
   function showStep(step) {
-    currentStep = step;
     [1, 2, 3].forEach((stepNumber) => {
       const node = document.getElementById(`setup-step${stepNumber}`);
       node.classList.toggle('hidden', stepNumber !== step);
@@ -150,6 +188,7 @@ document.addEventListener('DOMContentLoaded', () => {
     CEFR_LEVELS.forEach((level) => {
       const button = document.createElement('button');
       button.className = 'level-btn';
+      button.type = 'button';
       button.textContent = level;
       button.classList.toggle('active', level === selectedLevel);
       button.addEventListener('click', () => {
@@ -165,6 +204,7 @@ document.addEventListener('DOMContentLoaded', () => {
     LEXICAL_TOPICS.forEach((topic) => {
       const button = document.createElement('button');
       button.className = 'selection-btn';
+      button.type = 'button';
       button.textContent = topic;
       button.classList.toggle('selected', topic === selectedLexical);
       button.addEventListener('click', () => {
@@ -181,6 +221,7 @@ document.addEventListener('DOMContentLoaded', () => {
     BONUS_SLOTS.forEach((slot, index) => {
       const node = document.createElement('button');
       node.className = 'bonus-slot';
+      node.type = 'button';
       if (selectedSlotIndex === index) {
         node.classList.add('selected');
       }
@@ -209,6 +250,7 @@ document.addEventListener('DOMContentLoaded', () => {
     GRAMMAR_TOPICS.forEach((topic) => {
       const button = document.createElement('button');
       button.className = 'selection-btn';
+      button.type = 'button';
       button.textContent = topic;
       if (usedTopics.includes(topic)) {
         button.classList.add('used');
@@ -264,14 +306,32 @@ document.addEventListener('DOMContentLoaded', () => {
     };
   }
 
-  function resetSessionSelections() {
-    selectedLexical = null;
-    selectedSlotIndex = 0;
-    slotAssignments.fill(null);
-    renderLexicalGrid();
-    renderBonusSlots();
-    renderGrammarPicker();
-    updateSelectionCounter();
-    updateStartButton();
+  function restoreSlotAssignments() {
+    const empty = Array(BONUS_SLOTS.length).fill(null);
+    const raw = safeStorageGet(STORAGE_KEYS.slots, '');
+    if (!raw) {
+      return empty;
+    }
+    try {
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) {
+        return empty;
+      }
+      const seen = new Set();
+      return empty.map((_, index) => {
+        const candidate = parsed[index];
+        if (typeof candidate !== 'string') {
+          return null;
+        }
+        if (!GRAMMAR_TOPICS.includes(candidate) || seen.has(candidate)) {
+          return null;
+        }
+        seen.add(candidate);
+        return candidate;
+      });
+    } catch (error) {
+      console.warn('Saved slot assignments could not be restored:', error);
+      return empty;
+    }
   }
 });

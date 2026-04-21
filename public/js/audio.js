@@ -1,3 +1,5 @@
+const AUDIO_MASTER_DEFAULT = 0.22;
+
 class AudioManager {
   constructor() {
     this.ctx = null;
@@ -6,6 +8,8 @@ class AudioManager {
     this.threatGain = null;
     this.nodes = [];
     this.initialized = false;
+    this.muted = false;
+    this.masterLevel = AUDIO_MASTER_DEFAULT;
   }
 
   init() {
@@ -19,7 +23,7 @@ class AudioManager {
     }
 
     this.masterGain = this.ctx.createGain();
-    this.masterGain.gain.value = 0.22;
+    this.masterGain.gain.value = this.muted ? 0 : this.masterLevel;
     this.masterGain.connect(this.ctx.destination);
 
     this.windGain = this.ctx.createGain();
@@ -54,6 +58,29 @@ class AudioManager {
     this.windGain = null;
     this.threatGain = null;
     this.initialized = false;
+  }
+
+  setMuted(flag) {
+    this.muted = Boolean(flag);
+    if (!this.masterGain || !this.ctx) {
+      return;
+    }
+    const target = this.muted ? 0 : this.masterLevel;
+    this.masterGain.gain.setTargetAtTime(target, this.ctx.currentTime, 0.08);
+  }
+
+  isMuted() {
+    return this.muted;
+  }
+
+  setPaused(flag) {
+    if (!this.ctx) {
+      return;
+    }
+    const promise = flag ? this.ctx.suspend() : this.ctx.resume();
+    if (promise && typeof promise.catch === 'function') {
+      promise.catch(() => {});
+    }
   }
 
   setAtmosphere(progressRatio, dangerLevel) {

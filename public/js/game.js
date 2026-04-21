@@ -59,6 +59,11 @@ class Game {
 
     this.onWin = null;
     this.onLose = null;
+    this.onExit = null;
+    this.onMuteChange = null;
+    this.muted = false;
+    this.pausedAt = 0;
+    this.totalPausedMs = 0;
 
     this._bindUi();
   }
@@ -94,7 +99,14 @@ class Game {
       questionFeedback: document.getElementById('question-feedback'),
       directionPanel: document.getElementById('direction-panel'),
       directionTitle: document.getElementById('direction-title'),
-      directionButtons: Array.from(document.querySelectorAll('.direction-btn'))
+      directionButtons: Array.from(document.querySelectorAll('.direction-btn')),
+      pauseBtn: document.getElementById('pause-btn'),
+      muteBtn: document.getElementById('mute-btn'),
+      exitBtn: document.getElementById('exit-btn'),
+      pauseOverlay: document.getElementById('pause-overlay'),
+      resumeBtn: document.getElementById('resume-btn'),
+      pauseExitBtn: document.getElementById('pause-exit-btn'),
+      touchZones: Array.from(document.querySelectorAll('.touch-zone'))
     };
   }
 
@@ -105,8 +117,51 @@ class Game {
       });
     });
 
+    if (this.ui.pauseBtn) {
+      this.ui.pauseBtn.addEventListener('click', () => this.togglePause());
+    }
+    if (this.ui.muteBtn) {
+      this.ui.muteBtn.addEventListener('click', () => this.toggleMute());
+    }
+    if (this.ui.exitBtn) {
+      this.ui.exitBtn.addEventListener('click', () => this._handleExit());
+    }
+    if (this.ui.resumeBtn) {
+      this.ui.resumeBtn.addEventListener('click', () => this.togglePause(false));
+    }
+    if (this.ui.pauseExitBtn) {
+      this.ui.pauseExitBtn.addEventListener('click', () => this._handleExit());
+    }
+
+    this.ui.touchZones.forEach((zone) => {
+      const dir = Number(zone.dataset.touchDir || 0);
+      if (!dir) {
+        return;
+      }
+      zone.addEventListener('pointerdown', (event) => {
+        event.preventDefault();
+        this._handleLaneTap(dir);
+      });
+    });
+
     document.addEventListener('keydown', (event) => {
       if (this.state === 'idle') {
+        return;
+      }
+
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        this.togglePause();
+        return;
+      }
+
+      if (event.key === 'm' || event.key === 'M' || event.key === 'ь' || event.key === 'Ь') {
+        event.preventDefault();
+        this.toggleMute();
+        return;
+      }
+
+      if (this.state === 'paused') {
         return;
       }
 
@@ -138,6 +193,37 @@ class Game {
     });
   }
 
+  _handleLaneTap(dir) {
+    if (this.state !== 'running' || this.player.falling) {
+      return;
+    }
+    if (this.pendingDirection) {
+      this.commitDirection(dir);
+      return;
+    }
+    if (this.currentQuestion) {
+      return;
+    }
+    const previousLane = this.player.baseLane;
+    const nextLane = clamp(previousLane + dir, -1, 1);
+    if (nextLane === previousLane) {
+      this.player.vx += dir * 3.2;
+      return;
+    }
+    this.player.baseLane = nextLane;
+    this.player.vx += dir * 6.2;
+    this._leaveFootprints(this.player.progress + 0.3, 0.6);
+    if (this.audio) {
+      this.audio.playSidestep();
+    }
+  }
+
+  _handleExit() {
+    if (this.onExit) {
+      this.onExit();
+    }
+  }
+
   async init(settings) {
     this.destroy(false);
 
@@ -155,7 +241,11 @@ class Game {
 
     this.renderer = new BergRenderer(this.ui.canvas);
     this.audio = new AudioManager();
+    this.audio.setMuted(this.muted);
     this.audio.init();
+    this._applyMuteUi();
+    this.totalPausedMs = 0;
+    this.pausedAt = 0;
 
     this.player = {
       name: settings.playerName || 'Spieler',
@@ -237,6 +327,13 @@ class Game {
     this._closeQuestionPanel();
     this._closeDirectionPanel();
     this.ui.topicButtons.innerHTML = '';
+    if (this.ui.pauseOverlay) {
+      this.ui.pauseOverlay.classList.add('hidden');
+    }
+    if (this.ui.pauseBtn) {
+      this.ui.pauseBtn.classList.remove('active');
+    }
+    document.body.classList.remove('paused');
 
     if (clearSettings) {
       this.lastSettings = null;
@@ -250,8 +347,103 @@ class Game {
     await this.init(this.lastSettings);
   }
 
+  togglePause(force) {
+    const shouldPause = typeof force === 'boolean' ? force : this.state === 'running';
+
+    if (shouldPause && this.state === 'running') {
+      this.state = 'paused';
+      this.pausedAt = performance.now();
+      if (this.frameId) {
+        cancelAnimationFrame(this.frameId);
+        this.frameId = null;
+      }
+      if (this.audio) {
+        this.audio.setPaused(true);
+      }
+      if (this.ui.pauseOverlay) {
+        this.ui.pauseOverlay.classList.remove('hidden');
+      }
+      if (this.ui.pauseBtn) {
+        this.ui.pauseBtn.classList.add('active');
+      }
+      document.body.classList.add('paused');
+      return;
+    }
+
+    if (!shouldPause && this.state === 'paused') {
+      const pausedDelta = performance.now() - this.pausedAt;
+      this.totalPausedMs += pausedDelta;
+      this.startedAt += pausedDelta;
+      this.nextRockSpawnAt += pausedDelta;
+      this.nextAvalancheSpawnAt += pausedDelta;
+      if (this.player.burst) {
+        this.player.burst.until += pausedDelta;
+      }
+      if (this.player.shieldUntil) {
+        this.player.shieldUntil += pausedDelta;
+      }
+      if (this.player.shieldCooldownUntil) {
+        this.player.shieldCooldownUntil += pausedDelta;
+      }
+      if (this.player.falling) {
+        this.player.fallStartedAt += pausedDelta;
+      }
+      this.state = 'running';
+      this.lastFrameAt = 0;
+      if (this.audio) {
+        this.audio.setPaused(false);
+      }
+      if (this.ui.pauseOverlay) {
+        this.ui.pauseOverlay.classList.add('hidden');
+      }
+      if (this.ui.pauseBtn) {
+        this.ui.pauseBtn.classList.remove('active');
+      }
+      document.body.classList.remove('paused');
+      this.frameId = requestAnimationFrame(this._loop);
+    }
+  }
+
+  setMuted(flag) {
+    this.muted = Boolean(flag);
+    if (this.audio) {
+      this.audio.setMuted(this.muted);
+    }
+    this._applyMuteUi();
+    if (this.onMuteChange) {
+      this.onMuteChange(this.muted);
+    }
+  }
+
+  toggleMute() {
+    this.setMuted(!this.muted);
+  }
+
+  _applyMuteUi() {
+    if (!this.ui.muteBtn) {
+      return;
+    }
+    const icon = this.ui.muteBtn.querySelector('.hud-action-icon');
+    const label = this.ui.muteBtn.querySelector('.hud-action-label');
+    if (this.muted) {
+      if (icon) icon.textContent = '🔇';
+      if (label) label.textContent = 'Mute';
+      this.ui.muteBtn.classList.add('active');
+      this.ui.muteBtn.setAttribute('aria-pressed', 'true');
+      this.ui.muteBtn.setAttribute('aria-label', 'Включить звук (M)');
+      this.ui.muteBtn.setAttribute('title', 'Включить звук (M)');
+    } else {
+      if (icon) icon.textContent = '🔊';
+      if (label) label.textContent = 'Звук';
+      this.ui.muteBtn.classList.remove('active');
+      this.ui.muteBtn.setAttribute('aria-pressed', 'false');
+      this.ui.muteBtn.setAttribute('aria-label', 'Выключить звук (M)');
+      this.ui.muteBtn.setAttribute('title', 'Выключить звук (M)');
+    }
+  }
+
   _loop = (timestamp) => {
-    if (this.state === 'idle') {
+    if (this.state === 'idle' || this.state === 'paused') {
       return;
     }
 
