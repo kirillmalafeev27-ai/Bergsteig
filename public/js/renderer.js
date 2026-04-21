@@ -11,7 +11,9 @@ class BergRenderer {
   constructor(canvas) {
     this.canvas = canvas;
     this.scene = new THREE.Scene();
-    this.scene.fog = new THREE.Fog(0x0e1821, 85, 300);
+    // Tighter, denser atmospheric haze — the far silhouettes now fade into
+    // the sky instead of sitting hard against a cool-black backdrop.
+    this.scene.fog = new THREE.Fog(0x1a2834, 48, 190);
 
     this.routeHeight = 228;
     this.routeScale = this.routeHeight / 100;
@@ -32,7 +34,9 @@ class BergRenderer {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     this.renderer.outputEncoding = THREE.sRGBEncoding;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.04;
+    // Lower exposure + the denser fog give the frame the cold, silvery
+    // quality of north-face stills in alpine documentaries.
+    this.renderer.toneMappingExposure = 0.86;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.physicallyCorrectLights = true;
@@ -305,15 +309,12 @@ class BergRenderer {
       }),
       summit: new THREE.MeshStandardMaterial({
         map: snowMap,
-        color: 0xf7fbff,
-        emissive: 0xffb06f,
-        emissiveIntensity: 0.18,
-        roughness: 0.6
+        color: 0xeaf2f8,
+        roughness: 0.72
       }),
       flag: new THREE.MeshStandardMaterial({
-        color: 0xffcfa1,
-        emissive: 0xff7b46,
-        emissiveIntensity: 0.42,
+        color: 0xc73a36,
+        roughness: 0.84,
         side: THREE.DoubleSide
       }),
       peakShadow: new THREE.MeshStandardMaterial({
@@ -495,18 +496,30 @@ class BergRenderer {
       }),
       body: new THREE.MeshStandardMaterial({
         map: fabricMap,
-        color: 0x2d4250,
-        roughness: 0.88
+        color: 0x1f2d36,
+        roughness: 0.92
       }),
+      // Single saturated alpine red as the character's only hot accent —
+      // the colour that reads from far away on a north face. Replaces the
+      // orange construction-worker jacket the build used to ship with.
       bodyAccent: new THREE.MeshStandardMaterial({
         map: fabricMap,
-        color: 0xe38d46,
-        roughness: 0.72
+        color: 0x8c3630,
+        roughness: 0.78
       }),
       bodySoft: new THREE.MeshStandardMaterial({
         map: fabricMap,
-        color: 0x6fa2c2,
-        roughness: 0.66
+        color: 0x3a4a55,
+        roughness: 0.72
+      }),
+      backpackCanvas: new THREE.MeshStandardMaterial({
+        map: fabricMap,
+        color: 0x2a343d,
+        roughness: 0.95
+      }),
+      strap: new THREE.MeshStandardMaterial({
+        color: 0x12181e,
+        roughness: 0.9
       }),
       gloves: new THREE.MeshStandardMaterial({
         map: fabricMap,
@@ -528,8 +541,8 @@ class BergRenderer {
       }),
       helmet: new THREE.MeshStandardMaterial({
         map: fabricMap,
-        color: 0xf4f8fc,
-        roughness: 0.46
+        color: 0xdce2e8,
+        roughness: 0.58
       }),
       boot: new THREE.MeshStandardMaterial({
         color: 0x11171d,
@@ -604,14 +617,20 @@ class BergRenderer {
     const skyDome = new THREE.Mesh(new THREE.SphereGeometry(190, 32, 24), this.materials.sky);
     this.scene.add(skyDome);
 
+    // Distant cold moon: small, no warm halo. Pushed further back and paler
+    // so it sits in the sky instead of glowing like a lantern in frame.
     this.moonHalo = new THREE.Sprite(this.materials.halo.clone());
-    this.moonHalo.position.set(-38, 150, -120);
-    this.moonHalo.scale.set(36, 36, 1);
+    this.moonHalo.material.color.setHex(0xaecadd);
+    this.moonHalo.material.opacity = 0.08;
+    this.moonHalo.material.blending = THREE.NormalBlending;
+    this.moonHalo.position.set(-62, 148, -150);
+    this.moonHalo.scale.set(12, 12, 1);
     this.scene.add(this.moonHalo);
 
     this.moonDisk = new THREE.Sprite(this.materials.moon.clone());
+    this.moonDisk.material.color.setHex(0xd9e4ec);
     this.moonDisk.position.copy(this.moonHalo.position);
-    this.moonDisk.scale.set(9, 9, 1);
+    this.moonDisk.scale.set(3.4, 3.4, 1);
     this.scene.add(this.moonDisk);
 
     const starPositions = new Float32Array(850 * 3);
@@ -628,19 +647,44 @@ class BergRenderer {
     this.starField = new THREE.Points(starGeometry, this.materials.star);
     this.scene.add(this.starField);
 
+    // Distant ridge silhouettes: extrude a jagged polyline per band so the
+    // horizon reads as an actual mountain chain instead of a row of cones.
+    // Three parallax bands with atmospheric desaturation add real depth.
     this.distantPeaks = new THREE.Group();
     this.root.add(this.distantPeaks);
-    const peakPositions = [-148, -118, -92, -70, 72, 94, 120, 150];
-    peakPositions.forEach((x, index) => {
-      const peak = new THREE.Mesh(
-        new THREE.ConeGeometry(14 + (index % 3) * 4, 42 + (index % 4) * 14, 16 + (index % 3) * 4, 3),
-        this.materials.peakShadow.clone()
-      );
-      peak.position.set(x, 32 + (index % 3) * 14, -130 - (index % 2) * 18);
-      peak.rotation.z = (Math.random() - 0.5) * 0.15;
-      peak.scale.x = 1 + (index % 2) * 0.25;
-      peak.scale.z = 1.2;
-      this.distantPeaks.add(peak);
+
+    const buildRidge = (width, segments, heightRange, roughness) => {
+      const shape = new THREE.Shape();
+      const halfWidth = width / 2;
+      shape.moveTo(-halfWidth, 0);
+      const pts = [];
+      for (let i = 0; i <= segments; i += 1) {
+        const x = -halfWidth + (i / segments) * width;
+        const jitter = (Math.random() - 0.5) * roughness;
+        const envelope = Math.sin((i / segments) * Math.PI);
+        const y = heightRange[0] + envelope * (heightRange[1] - heightRange[0]) + jitter * 6;
+        // Occasional sharp spike for drama
+        const spike = Math.random() < 0.14 ? 5 + Math.random() * 5 : 0;
+        pts.push([x, Math.max(2, y + spike)]);
+      }
+      pts.forEach((p) => shape.lineTo(p[0], p[1]));
+      shape.lineTo(halfWidth, 0);
+      shape.lineTo(-halfWidth, 0);
+      return new THREE.ExtrudeGeometry(shape, { depth: 2.5, bevelEnabled: false });
+    };
+
+    const ridgeBands = [
+      { z: -118, baseY: 30, width: 280, segments: 22, heightRange: [14, 46], roughness: 1.6, tint: 0x52636e, mix: 0.58 },
+      { z: -92,  baseY: 26, width: 240, segments: 18, heightRange: [16, 52], roughness: 1.2, tint: 0x45525d, mix: 0.4 },
+      { z: -68,  baseY: 20, width: 210, segments: 14, heightRange: [18, 58], roughness: 1.0, tint: 0x38434d, mix: 0.22 }
+    ];
+    ridgeBands.forEach((band) => {
+      const geom = buildRidge(band.width, band.segments, band.heightRange, band.roughness);
+      const mat = new THREE.MeshBasicMaterial({ color: band.tint, fog: true });
+      const mesh = new THREE.Mesh(geom, mat);
+      mesh.position.set(0, band.baseY, band.z);
+      mesh.userData.hazeMix = band.mix;
+      this.distantPeaks.add(mesh);
     });
 
     this.cloudGroup = new THREE.Group();
@@ -696,17 +740,11 @@ class BergRenderer {
       this.undercloudGroup.add(cloud);
     }
 
+    // Aurora removed: too fantasy/game-y for the documentary alpine tone.
+    // An empty placeholder group keeps later refs to this.auroraBands
+    // cheap no-ops without special-casing every update call-site.
     this.auroraGroup = new THREE.Group();
     this.root.add(this.auroraGroup);
-    for (let index = 0; index < 3; index += 1) {
-      const material = this.materials.aurora.clone();
-      const band = new THREE.Mesh(new THREE.PlaneGeometry(90, 12, 1, 1), material);
-      band.position.set(index * 26 - 26, 134 + index * 8, -100);
-      band.rotation.x = -0.44;
-      band.rotation.z = -0.16 + index * 0.14;
-      this.auroraBands.push(band);
-      this.auroraGroup.add(band);
-    }
   }
 
   // Named mountain constants shared by the mesh builder and anything that
@@ -1193,9 +1231,14 @@ class BergRenderer {
     this.flagMesh.rotation.y = -0.16;
     this.summitGroup.add(this.flagMesh);
 
+    // The warm summit halo was the single loudest "this is a game" tell.
+    // Replaced by a near-invisible sprite that only exists so the rest of
+    // the update code doesn't have to branch on its presence.
     this.summitAura = new THREE.Sprite(this.materials.halo.clone());
     this.summitAura.position.set(0, 237.5, 0.2);
-    this.summitAura.scale.set(22, 22, 1);
+    this.summitAura.scale.set(0.01, 0.01, 1);
+    this.summitAura.material.opacity = 0;
+    this.summitAura.visible = false;
     this.summitGroup.add(this.summitAura);
 
     for (let index = 0; index < 10; index += 1) {
@@ -1442,153 +1485,262 @@ class BergRenderer {
     this.root.add(this.playerGroup);
 
     this.harnessAnchor = new THREE.Object3D();
-    this.harnessAnchor.position.set(0, 0.32, -0.16);
+    this.harnessAnchor.position.set(0, 0.18, -0.14);
     this.playerGroup.add(this.harnessAnchor);
 
-    const torso = new THREE.Mesh(new THREE.BoxGeometry(1.24, 1.92, 0.72), this.materials.body);
-    torso.position.set(0, 0.95, 0);
+    // Proportions follow a 1.78 m climber: torso ~0.62 m, upper arm 0.34,
+    // forearm 0.30, thigh 0.46, shin 0.44. The old rig made the limbs
+    // longer than the torso — the silhouette read as a stick puppet.
+    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.88, 1.02, 0.52), this.materials.body);
+    torso.position.set(0, 0.92, 0);
     torso.castShadow = true;
     this.playerGroup.add(torso);
 
-    const chest = new THREE.Mesh(new THREE.BoxGeometry(1.08, 1.1, 0.76), this.materials.bodySoft);
-    chest.position.set(0, 1.02, 0.08);
+    // Chest panel: the single red accent. Narrower than the torso so it
+    // reads as an insulated jacket over shell, not a full orange suit.
+    const chest = new THREE.Mesh(new THREE.BoxGeometry(0.76, 0.58, 0.56), this.materials.bodyAccent);
+    chest.position.set(0, 1.12, 0.04);
     chest.castShadow = true;
     this.playerGroup.add(chest);
 
-    const backpack = new THREE.Mesh(new THREE.BoxGeometry(0.86, 1.28, 0.72), this.materials.bodyAccent);
-    backpack.position.set(0, 0.98, -0.66);
+    // Shoulder caps blend the neck into the arms instead of the old
+    // hard shoulder edge.
+    const shoulderCapL = new THREE.Mesh(new THREE.SphereGeometry(0.22, 18, 14), this.materials.body);
+    shoulderCapL.position.set(-0.44, 1.4, 0.02);
+    this.playerGroup.add(shoulderCapL);
+    const shoulderCapR = shoulderCapL.clone();
+    shoulderCapR.position.x = 0.44;
+    this.playerGroup.add(shoulderCapR);
+
+    // Backpack: body + top lid + compression straps. Sits higher on the
+    // back and slightly wider than the old single-box pack.
+    const backpack = new THREE.Mesh(new THREE.BoxGeometry(0.78, 1.02, 0.44), this.materials.backpackCanvas);
+    backpack.position.set(0, 1.02, -0.46);
     backpack.castShadow = true;
     this.playerGroup.add(backpack);
 
-    const hood = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.46, 0.42, 28), this.materials.bodyAccent);
-    hood.position.set(0, 2.1, -0.1);
-    hood.castShadow = true;
-    this.playerGroup.add(hood);
+    const packLid = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.18, 0.46), this.materials.bodyAccent);
+    packLid.position.set(0, 1.58, -0.46);
+    this.playerGroup.add(packLid);
 
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.42, 28, 22), this.materials.skin);
-    head.position.set(0, 2.28, 0.06);
+    const packStrapTop = new THREE.Mesh(new THREE.BoxGeometry(0.82, 0.06, 0.04), this.materials.strap);
+    packStrapTop.position.set(0, 1.18, -0.24);
+    this.playerGroup.add(packStrapTop);
+    const packStrapMid = packStrapTop.clone();
+    packStrapMid.position.y = 0.84;
+    this.playerGroup.add(packStrapMid);
+
+    const packSideL = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.9, 0.48), this.materials.strap);
+    packSideL.position.set(-0.42, 1.02, -0.46);
+    this.playerGroup.add(packSideL);
+    const packSideR = packSideL.clone();
+    packSideR.position.x = 0.42;
+    this.playerGroup.add(packSideR);
+
+    // Shoulder straps visible over the chest — classic harness detail
+    // that sells the backpack without needing a full UV unwrap.
+    const chestStrapL = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.8, 0.04), this.materials.strap);
+    chestStrapL.position.set(-0.22, 1.1, 0.36);
+    this.playerGroup.add(chestStrapL);
+    const chestStrapR = chestStrapL.clone();
+    chestStrapR.position.x = 0.22;
+    this.playerGroup.add(chestStrapR);
+
+    // Head + neck + helmet. Helmet slightly smaller, matte off-white so
+    // it doesn't glow against the sky.
+    const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.16, 0.2, 16), this.materials.bodySoft);
+    neck.position.set(0, 1.56, 0);
+    this.playerGroup.add(neck);
+
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.22, 24, 18), this.materials.skin);
+    head.position.set(0, 1.82, 0.02);
     head.castShadow = true;
     this.playerGroup.add(head);
 
-    const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.47, 32, 24, 0, Math.PI * 2, 0, Math.PI * 0.62), this.materials.helmet);
-    helmet.position.set(0, 2.46, 0.02);
-    helmet.rotation.x = 0.18;
+    const helmet = new THREE.Mesh(
+      new THREE.SphereGeometry(0.26, 28, 20, 0, Math.PI * 2, 0, Math.PI * 0.58),
+      this.materials.helmet
+    );
+    helmet.position.set(0, 1.92, 0.0);
+    helmet.rotation.x = 0.12;
     helmet.castShadow = true;
     this.playerGroup.add(helmet);
 
-    const visor = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.22, 0.18), this.materials.visor);
-    visor.position.set(0, 2.24, 0.34);
+    // Helmet brim: the dark visor band gives the shape its silhouette.
+    const brim = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.05, 0.34), this.materials.strap);
+    brim.position.set(0, 1.82, 0.08);
+    this.playerGroup.add(brim);
+
+    // Chin strap — two thin verticals from helmet to neck.
+    const chinStrapL = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.16, 0.02), this.materials.strap);
+    chinStrapL.position.set(-0.18, 1.75, 0.14);
+    this.playerGroup.add(chinStrapL);
+    const chinStrapR = chinStrapL.clone();
+    chinStrapR.position.x = 0.18;
+    this.playerGroup.add(chinStrapR);
+
+    // Darker visor glass for eyes — avoids the doll-face pale sphere.
+    const visor = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.08, 0.08), this.materials.visor);
+    visor.position.set(0, 1.82, 0.22);
     this.playerGroup.add(visor);
 
-    this.headlamp = new THREE.PointLight(0xc6efff, 2.4, 18, 2);
-    this.headlamp.position.set(0, 2.34, 0.7);
+    this.headlamp = new THREE.PointLight(0xbfe4f2, 1.2, 14, 2);
+    this.headlamp.position.set(0, 1.92, 0.26);
     this.playerGroup.add(this.headlamp);
 
-    const headlampBody = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.14, 0.14), this.materials.metal);
+    const headlampBody = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.08, 0.08), this.materials.metal);
     headlampBody.position.copy(this.headlamp.position);
     this.playerGroup.add(headlampBody);
 
-    const belt = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.2, 0.74), this.materials.gloves);
-    belt.position.set(0, 0.15, 0);
+    const belt = new THREE.Mesh(new THREE.BoxGeometry(0.92, 0.12, 0.58), this.materials.strap);
+    belt.position.set(0, 0.34, 0);
     belt.castShadow = true;
     this.playerGroup.add(belt);
 
-    const harnessLoop = new THREE.Mesh(new THREE.TorusGeometry(0.22, 0.04, 16, 32), this.materials.metal);
-    harnessLoop.position.set(0, 0.05, 0.2);
+    const harnessLoop = new THREE.Mesh(new THREE.TorusGeometry(0.14, 0.022, 12, 24), this.materials.metal);
+    harnessLoop.position.set(0, 0.22, 0.22);
     harnessLoop.rotation.x = Math.PI / 2;
     this.playerGroup.add(harnessLoop);
 
+    // Arm proportions: upper 0.34 m, forearm 0.30 m, hand 0.1 m. Pivots
+    // sit at the shoulder, elbow, wrist — that's how the IK reads clean
+    // through bend without the old ragdoll stretch.
     this.leftArmPivot = new THREE.Group();
-    this.leftArmPivot.position.set(-0.72, 1.58, 0.06);
+    this.leftArmPivot.position.set(-0.48, 1.42, 0.02);
     this.playerGroup.add(this.leftArmPivot);
-    const leftUpperArm = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.16, 1.04, 18), this.materials.bodyAccent);
-    leftUpperArm.position.y = -0.5;
+    const leftUpperArm = new THREE.Mesh(new THREE.CylinderGeometry(0.10, 0.11, 0.56, 14), this.materials.body);
+    leftUpperArm.position.y = -0.28;
     leftUpperArm.castShadow = true;
     this.leftArmPivot.add(leftUpperArm);
     this.leftForearmPivot = new THREE.Group();
-    this.leftForearmPivot.position.set(0, -1.02, 0);
+    this.leftForearmPivot.position.set(0, -0.56, 0);
     this.leftArmPivot.add(this.leftForearmPivot);
-    const leftForearm = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.14, 0.94, 18), this.materials.bodySoft);
-    leftForearm.position.y = -0.48;
+    const leftForearm = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.10, 0.5, 14), this.materials.bodyAccent);
+    leftForearm.position.y = -0.26;
     leftForearm.castShadow = true;
     this.leftForearmPivot.add(leftForearm);
-    const leftHand = new THREE.Mesh(new THREE.SphereGeometry(0.13, 20, 18), this.materials.gloves);
-    leftHand.position.set(0, -0.96, 0.02);
+    const leftHand = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.18, 0.12), this.materials.gloves);
+    leftHand.position.set(0, -0.58, 0.04);
     this.leftForearmPivot.add(leftHand);
 
     this.rightArmPivot = new THREE.Group();
-    this.rightArmPivot.position.set(0.72, 1.58, 0.06);
+    this.rightArmPivot.position.set(0.48, 1.42, 0.02);
     this.playerGroup.add(this.rightArmPivot);
-    const rightUpperArm = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.16, 1.04, 18), this.materials.bodyAccent);
-    rightUpperArm.position.y = -0.5;
+    const rightUpperArm = new THREE.Mesh(new THREE.CylinderGeometry(0.10, 0.11, 0.56, 14), this.materials.body);
+    rightUpperArm.position.y = -0.28;
     rightUpperArm.castShadow = true;
     this.rightArmPivot.add(rightUpperArm);
     this.rightForearmPivot = new THREE.Group();
-    this.rightForearmPivot.position.set(0, -1.02, 0);
+    this.rightForearmPivot.position.set(0, -0.56, 0);
     this.rightArmPivot.add(this.rightForearmPivot);
-    const rightForearm = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.14, 0.94, 18), this.materials.bodySoft);
-    rightForearm.position.y = -0.48;
+    const rightForearm = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.10, 0.5, 14), this.materials.bodyAccent);
+    rightForearm.position.y = -0.26;
     rightForearm.castShadow = true;
     this.rightForearmPivot.add(rightForearm);
-    const rightHand = new THREE.Mesh(new THREE.SphereGeometry(0.13, 20, 18), this.materials.gloves);
-    rightHand.position.set(0, -0.96, 0.02);
+    const rightHand = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.18, 0.12), this.materials.gloves);
+    rightHand.position.set(0, -0.58, 0.04);
     this.rightForearmPivot.add(rightHand);
 
-    const axeShaft = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 1.2, 16), this.materials.iceTool);
-    axeShaft.position.set(0, -0.58, 0.12);
-    axeShaft.rotation.z = 0.18;
+    // Ice axe: shaft + curved pick + adze + leash loop. A shaft-only
+    // stick reads as a walking pole; the pick is what says "mountaineer".
+    const axeShaft = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.028, 0.72, 12), this.materials.iceTool);
+    axeShaft.position.set(0, -0.36, 0.08);
+    axeShaft.rotation.z = 0.12;
     this.rightForearmPivot.add(axeShaft);
-    const axeHead = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.1, 0.14), this.materials.metal);
-    axeHead.position.set(0.12, -1.12, 0.2);
-    axeHead.rotation.z = 0.2;
-    this.rightForearmPivot.add(axeHead);
+    // Pick: tapered box angled down and forward.
+    const axePick = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.04, 0.05), this.materials.metal);
+    axePick.position.set(0.15, -0.72, 0.18);
+    axePick.rotation.z = -0.4;
+    this.rightForearmPivot.add(axePick);
+    // Adze (the blunt counterweight): shorter box on the opposite side.
+    const axeAdze = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.04, 0.08), this.materials.metal);
+    axeAdze.position.set(-0.08, -0.72, 0.15);
+    this.rightForearmPivot.add(axeAdze);
+    // Leash to the wrist — thin dark strap.
+    const axeLeash = new THREE.Mesh(new THREE.BoxGeometry(0.015, 0.22, 0.015), this.materials.strap);
+    axeLeash.position.set(0, -0.52, 0.03);
+    axeLeash.rotation.z = 0.3;
+    this.rightForearmPivot.add(axeLeash);
 
-    this.leftLegPivot = new THREE.Group();
-    this.leftLegPivot.position.set(-0.34, -0.48, 0.04);
-    this.playerGroup.add(this.leftLegPivot);
-    const leftThigh = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.18, 1.18, 20), this.materials.body);
-    leftThigh.position.y = -0.58;
-    leftThigh.castShadow = true;
-    this.leftLegPivot.add(leftThigh);
-    this.leftShinPivot = new THREE.Group();
-    this.leftShinPivot.position.set(0, -1.12, 0.04);
-    this.leftLegPivot.add(this.leftShinPivot);
-    const leftShin = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.15, 1.12, 20), this.materials.bodySoft);
-    leftShin.position.y = -0.56;
-    leftShin.castShadow = true;
-    this.leftShinPivot.add(leftShin);
-    const leftBoot = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.18, 0.72), this.materials.boot);
-    leftBoot.position.set(0, -1.18, 0.14);
-    leftBoot.castShadow = true;
-    this.leftShinPivot.add(leftBoot);
+    // Legs: same proportion fix as arms. Thigh 0.46, shin 0.44, boot 0.22.
+    const buildLeg = (side) => {
+      const legPivot = new THREE.Group();
+      legPivot.position.set(side * 0.22, 0.14, 0.02);
+      this.playerGroup.add(legPivot);
 
-    this.rightLegPivot = new THREE.Group();
-    this.rightLegPivot.position.set(0.34, -0.48, 0.04);
-    this.playerGroup.add(this.rightLegPivot);
-    const rightThigh = leftThigh.clone();
-    this.rightLegPivot.add(rightThigh);
-    this.rightShinPivot = new THREE.Group();
-    this.rightShinPivot.position.set(0, -1.12, 0.04);
-    this.rightLegPivot.add(this.rightShinPivot);
-    const rightShin = leftShin.clone();
-    this.rightShinPivot.add(rightShin);
-    const rightBoot = leftBoot.clone();
-    this.rightShinPivot.add(rightBoot);
+      const thigh = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.14, 0.7, 16), this.materials.body);
+      thigh.position.y = -0.36;
+      thigh.castShadow = true;
+      legPivot.add(thigh);
+
+      const shinPivot = new THREE.Group();
+      shinPivot.position.set(0, -0.7, 0.02);
+      legPivot.add(shinPivot);
+
+      const shin = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.12, 0.66, 16), this.materials.body);
+      shin.position.y = -0.34;
+      shin.castShadow = true;
+      shinPivot.add(shin);
+
+      const boot = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.14, 0.42), this.materials.boot);
+      boot.position.set(0, -0.72, 0.08);
+      boot.castShadow = true;
+      shinPivot.add(boot);
+
+      // Crampons: six small pyramids under the boot — front two point
+      // forward for the front-points, middle and heel point down. Not
+      // individually articulated but the silhouette reads "alpinist".
+      const cramponPoints = [
+        { x: -0.06, z: 0.26, rot: 0.3 },
+        { x: 0.06, z: 0.26, rot: 0.3 },
+        { x: -0.07, z: 0.06, rot: 0 },
+        { x: 0.07, z: 0.06, rot: 0 },
+        { x: -0.07, z: -0.14, rot: 0 },
+        { x: 0.07, z: -0.14, rot: 0 }
+      ];
+      cramponPoints.forEach((p) => {
+        const tooth = new THREE.Mesh(new THREE.ConeGeometry(0.03, 0.1, 4), this.materials.metal);
+        tooth.position.set(p.x, -0.84, 0.08 + p.z);
+        tooth.rotation.x = p.rot;
+        shinPivot.add(tooth);
+      });
+
+      return { legPivot, shinPivot };
+    };
+
+    const leftLeg = buildLeg(-1);
+    this.leftLegPivot = leftLeg.legPivot;
+    this.leftShinPivot = leftLeg.shinPivot;
+
+    const rightLeg = buildLeg(1);
+    this.rightLegPivot = rightLeg.legPivot;
+    this.rightShinPivot = rightLeg.shinPivot;
 
     this.shieldBillboard = new THREE.Sprite(this.materials.shield.clone());
-    this.shieldBillboard.position.set(0, 1.2, 0.1);
-    this.shieldBillboard.scale.set(4.4, 6.2, 1);
+    this.shieldBillboard.position.set(0, 0.9, 0.1);
+    this.shieldBillboard.scale.set(3.2, 4.4, 1);
     this.shieldBillboard.visible = false;
     this.playerGroup.add(this.shieldBillboard);
 
-    this.shieldRing = new THREE.Mesh(new THREE.TorusGeometry(1.1, 0.06, 20, 64), this.materials.metal.clone());
+    this.shieldRing = new THREE.Mesh(new THREE.TorusGeometry(0.8, 0.05, 18, 48), this.materials.metal.clone());
     this.shieldRing.material.transparent = true;
     this.shieldRing.material.opacity = 0;
     this.shieldRing.rotation.x = Math.PI / 2;
-    this.shieldRing.position.set(0, 1.0, 0.08);
+    this.shieldRing.position.set(0, 0.8, 0.08);
     this.playerGroup.add(this.shieldRing);
 
-    this.tetherPoints = [new THREE.Vector3(), new THREE.Vector3()];
+    // Climbing tether: a multi-segment line from the harness to an anchor
+    // that sits above the climber and follows them up the route. Each
+    // segment damps toward a target position built from a catenary sag
+    // plus a reactive offset from the climber's lateral velocity — so
+    // when the body swings, the rope whips and settles instead of
+    // instantly snapping to a straight line.
+    this.tetherSegmentCount = 14;
+    this.tetherPoints = [];
+    for (let i = 0; i < this.tetherSegmentCount; i += 1) {
+      this.tetherPoints.push(new THREE.Vector3());
+    }
+    this.tetherVelocities = this.tetherPoints.map(() => new THREE.Vector3());
     this.tetherGeometry = new THREE.BufferGeometry().setFromPoints(this.tetherPoints);
     this.tetherLine = new THREE.Line(this.tetherGeometry, this.materials.tether);
     this.root.add(this.tetherLine);
@@ -1725,9 +1877,9 @@ class BergRenderer {
     const phase = snapshot.phaseRatio;
     const progressRatio = Math.min(1, snapshot.player.progressY / 100);
 
-    this.moonHalo.material.opacity = 0.34 + (1 - phase) * 0.22;
-    this.moonDisk.material.opacity = 0.52 + (1 - phase) * 0.3;
-    this.starField.material.opacity = (1 - phase) * 0.68;
+    this.moonHalo.material.opacity = 0.06 + (1 - phase) * 0.04;
+    this.moonDisk.material.opacity = 0.32 + (1 - phase) * 0.18;
+    this.starField.material.opacity = (1 - phase) * 0.28;
 
     this.cloudCards.forEach((cloud, index) => {
       cloud.mesh.position.x = cloud.anchorX + Math.sin(this.elapsed * cloud.speed + index) * cloud.drift;
@@ -1757,31 +1909,22 @@ class BergRenderer {
     });
     this.undercloudGroup.visible = shelfFade > 0.001;
 
-    this.auroraBands.forEach((band, index) => {
-      band.visible = phase < 0.4;
-      band.material.opacity = (1 - phase) * (0.08 + Math.sin(this.elapsed * 0.8 + index) * 0.03);
-      band.rotation.z = -0.18 + Math.sin(this.elapsed * 0.3 + index) * 0.05;
-      band.position.x = -22 + index * 22 + Math.sin(this.elapsed * 0.2 + index) * 8;
-    });
+    // Aurora no longer rendered — block intentionally empty.
 
-    // Atmospheric perspective: distant peaks wash toward the horizon colour so
-    // depth reads clearly. Mix amount rises with distance from the viewer.
+    // Atmospheric perspective: distant ridges wash toward the horizon so
+    // depth reads clearly. Mix amount rises with distance via each mesh's
+    // stored hazeMix; closer bands stay saturated, farther ones fade out.
     const horizonColor = this.tempColorA || (this.tempColorA = new THREE.Color());
     horizonColor.setRGB(
-      0.66 + phase * 0.18,
-      0.74 - phase * 0.18,
-      0.86 - phase * 0.3
+      0.56 + phase * 0.14,
+      0.64 - phase * 0.16,
+      0.74 - phase * 0.26
     );
     const rockColor = this.tempColorB || (this.tempColorB = new THREE.Color());
-    this.distantPeaks.children.forEach((peak, index) => {
-      peak.position.y = 40 + Math.sin(this.elapsed * 0.16 + index * 0.8) * 2 + progressRatio * 10;
-      rockColor.setRGB(
-        0.18 + phase * 0.18,
-        0.22 + phase * 0.06,
-        0.26 - phase * 0.02
-      );
-      // Strong haze for farthest silhouettes (Z around -130 in local).
-      peak.material.color.copy(rockColor).lerp(horizonColor, 0.68 - phase * 0.15);
+    this.distantPeaks.children.forEach((peak) => {
+      rockColor.setHex(0x3a4751);
+      const baseMix = peak.userData.hazeMix != null ? peak.userData.hazeMix : 0.5;
+      peak.material.color.copy(rockColor).lerp(horizonColor, baseMix + phase * 0.05);
     });
 
     if (this.backMassMesh) {
@@ -1801,47 +1944,52 @@ class BergRenderer {
     const progressRatio = Math.min(1, snapshot.player.progressY / 100);
     const danger = snapshot.dangerLevel || 0;
 
+    // Cold-leaning sky palette. Top stays a deep slate blue, horizon a pale
+    // washed grey — the look you get on an overcast north-face morning.
+    // Lava phase only just begins to smear orange into the band.
     this.skyUniforms.topColor.value.setRGB(
-      0.49 + (1 - phase) * 0.12,
-      0.66 - phase * 0.18,
-      0.84 - phase * 0.28
+      0.30 + phase * 0.14,
+      0.42 - phase * 0.16,
+      0.58 - phase * 0.24
     );
     this.skyUniforms.horizonColor.value.setRGB(
-      0.84 + phase * 0.08,
-      0.93 - phase * 0.22,
-      1 - phase * 0.34
+      0.68 + phase * 0.12,
+      0.72 - phase * 0.14,
+      0.78 - phase * 0.26
     );
     this.skyUniforms.bottomColor.value.setRGB(
-      0.03 + phase * 0.09,
-      0.06 + phase * 0.02,
-      0.1 - phase * 0.01
+      0.05 + phase * 0.08,
+      0.07 + phase * 0.01,
+      0.10 - phase * 0.01
     );
 
     this.scene.fog.color.setRGB(
-      0.05 + phase * 0.16,
-      0.08 + phase * 0.03,
-      0.12 - phase * 0.02
+      0.10 + phase * 0.14,
+      0.16 + phase * 0.02,
+      0.20 - phase * 0.03
     );
-    this.scene.fog.near = 85 - phase * 10;
-    this.scene.fog.far = 300 - phase * 40 - danger * 12;
+    this.scene.fog.near = 48 - phase * 8;
+    this.scene.fog.far = 190 - phase * 28 - danger * 8;
 
     this.renderer.setClearColor(
       new THREE.Color().setRGB(
-        0.05 + phase * 0.16,
-        0.1 + phase * 0.02,
-        0.15 - phase * 0.02
+        0.08 + phase * 0.14,
+        0.12 + phase * 0.02,
+        0.16 - phase * 0.02
       )
     );
 
+    // Warm drift saved entirely for the final volcanic phase; the snow and
+    // ice faces stay a clean cool white so the mountain reads as serious.
     this.materials.cliff.color.lerpColors(
-      new THREE.Color(0xffffff),
-      new THREE.Color(0x8c5a4a),
-      phase * 0.42
+      new THREE.Color(0xf4f8fc),
+      new THREE.Color(0x7a4a3a),
+      Math.max(0, phase - 0.72) * 1.3
     );
     this.materials.cliff.emissive = new THREE.Color(0x000000);
-    this.materials.moltenFace.opacity = phase * 0.92;
-    this.materials.moltenFace.emissiveIntensity = 0.6 + phase * 1.2 + danger * 0.2;
-    this.materials.glacier.opacity = (1 - phase) * 0.24 + 0.04;
+    this.materials.moltenFace.opacity = Math.max(0, phase - 0.62) * 1.4;
+    this.materials.moltenFace.emissiveIntensity = 0.3 + Math.max(0, phase - 0.62) * 2.0 + danger * 0.2;
+    this.materials.glacier.opacity = (1 - phase) * 0.22 + 0.04;
 
     this.crackNodes.forEach((node, index) => {
       node.tube.material.opacity = phase * (0.46 + Math.sin(this.elapsed * 2.2 + node.offset) * 0.16);
@@ -1857,20 +2005,24 @@ class BergRenderer {
     });
 
     this.flagMesh.rotation.z = Math.sin(this.elapsed * 3.4) * 0.12 - phase * 0.08;
-    this.summitAura.material.opacity = 0.28 + phase * 0.18 + Math.sin(this.elapsed * 1.8) * 0.05;
-    this.summitAura.scale.set(18 + phase * 7, 18 + phase * 7, 1);
     this.summitGroup.position.y = Math.sin(this.elapsed * 0.35) * 0.3;
 
-    this.ambientLight.intensity = 1.42 - phase * 0.12;
-    this.ambientLight.groundColor.setRGB(0.12 + phase * 0.08, 0.16 + phase * 0.04, 0.18);
-    this.keyLight.color.setRGB(0.85 + phase * 0.08, 0.94 - phase * 0.18, 1 - phase * 0.28);
-    this.keyLight.intensity = 2.2 - phase * 0.18 + danger * 0.06;
-    this.fillLight.intensity = 0.48 - phase * 0.14;
-    this.lavaLight.intensity = 4 + phase * 13 + danger * 2.2;
+    // Cooler, softer key light. Documentary cinematographers usually
+    // expose for the face of the mountain, not for neon rim-light.
+    this.ambientLight.intensity = 0.95 - phase * 0.08;
+    this.ambientLight.groundColor.setRGB(0.10 + phase * 0.06, 0.14 + phase * 0.03, 0.17);
+    this.keyLight.color.setRGB(0.78 + phase * 0.08, 0.84 - phase * 0.12, 0.94 - phase * 0.22);
+    this.keyLight.intensity = 1.55 - phase * 0.12 + danger * 0.05;
+    this.fillLight.intensity = 0.34 - phase * 0.1;
+    // Lava glow only engages meaningfully in volcanic phase; snow face
+    // used to read as torch-lit because this light was always on.
+    const lavaGate = Math.max(0, phase - 0.62) * 1.5;
+    this.lavaLight.intensity = lavaGate * (9 + danger * 2.2);
     this.lavaLight.position.y = this._worldY(136 + snapshot.player.y * 0.4);
-    this.summitLight.intensity = 4 + phase * 6;
+    // Summit kill-light: no more warm sparkle on the peak snow.
+    this.summitLight.intensity = 0;
 
-    this.moonHalo.position.y = 148 + progressRatio * 12;
+    this.moonHalo.position.y = 148 + progressRatio * 6;
     this.moonDisk.position.y = this.moonHalo.position.y;
   }
 
@@ -1880,7 +2032,14 @@ class BergRenderer {
     this.playerGroup.position.copy(this.playerRender);
 
     const lateralSwing = snapshot.player.vx || 0;
-    const climbPulse = Math.sin(this.elapsed * 7 + snapshot.player.y * 0.38) * 0.18;
+    // Pulse amplitude scales with active climbing. When the climber is
+    // just hanging on the rope, limbs drift gently; when pulling up,
+    // the cadence is visible and deliberate.
+    const climbing = Boolean(snapshot.player.climbing);
+    const climbGain = climbing ? 1 : 0.35;
+    const climbPulse =
+      Math.sin(this.elapsed * (climbing ? 5.6 : 2.4) + snapshot.player.y * 0.38) *
+      0.24 * climbGain;
     const sway = clamp(snapshot.player.x * 0.08 + lateralSwing * 0.008, -0.45, 0.45);
 
     // Phase-driven posture blend:
@@ -1934,12 +2093,62 @@ class BergRenderer {
       this.rightLegPivot.rotation.x = -0.2;
     }
 
+    // Rope with sag and inertia. Each segment's target is the catenary
+    // between the harness (segment 0) and the upper anchor (last
+    // segment); individual segments are relaxed toward that target with
+    // damping, so a swinging body translates into a visible whip.
     this.harnessAnchor.updateMatrixWorld(true);
     const harnessPosition = this.harnessAnchor.getWorldPosition(this.tempVecA);
     this.root.worldToLocal(harnessPosition);
+    const anchorX = this.playerRender.x * 0.38;
+    const anchorY = this.playerRender.y + 7.4;
+    const anchorZ = 1.25;
+
+    const count = this.tetherSegmentCount;
+    const lateralVx = snapshot.player.vx || 0;
+    const dtClamped = Math.min(dt, 0.05);
+
+    for (let i = 0; i < count; i += 1) {
+      const t = i / (count - 1);
+      // Hyperbolic catenary sag: strongest at the middle, zero at the
+      // two pinned endpoints. A small tension pulse every few seconds
+      // keeps the rope alive even when the climber is still.
+      const sag = Math.sin(Math.PI * t) * 0.55;
+      const wind = Math.sin(this.elapsed * 0.9 + t * 3.1) * 0.06;
+      const targetX = harnessPosition.x * (1 - t) + anchorX * t + wind;
+      const targetY = harnessPosition.y * (1 - t) + anchorY * t - sag;
+      const targetZ = harnessPosition.z * (1 - t) + anchorZ * t + Math.cos(this.elapsed * 0.7 + t * 2.2) * 0.05;
+
+      const point = this.tetherPoints[i];
+      const vel = this.tetherVelocities[i];
+      if (i === 0) {
+        // Endpoint 0 is hard-pinned to the harness.
+        point.set(harnessPosition.x, harnessPosition.y, harnessPosition.z);
+        vel.set(0, 0, 0);
+      } else if (i === count - 1) {
+        // Upper anchor: soft pin so tiny swing still reads, no drift.
+        point.set(targetX, targetY, targetZ);
+        vel.set(0, 0, 0);
+      } else {
+        // Spring-damper toward target. Lateral climber motion blows
+        // sideways through the middle of the rope so it whips.
+        const whip = Math.sin(Math.PI * t) * lateralVx * 0.006;
+        const tx = targetX + whip;
+        vel.x += (tx - point.x) * 24 * dtClamped;
+        vel.y += (targetY - point.y) * 22 * dtClamped;
+        vel.z += (targetZ - point.z) * 22 * dtClamped;
+        vel.multiplyScalar(Math.exp(-dtClamped * 6.5));
+        point.x += vel.x * dtClamped;
+        point.y += vel.y * dtClamped;
+        point.z += vel.z * dtClamped;
+      }
+    }
+
     const tetherAttr = this.tetherGeometry.attributes.position;
-    tetherAttr.setXYZ(0, harnessPosition.x, harnessPosition.y, harnessPosition.z);
-    tetherAttr.setXYZ(1, this.playerRender.x * 0.55, this.playerRender.y + 2.2, 1.1);
+    for (let i = 0; i < count; i += 1) {
+      const p = this.tetherPoints[i];
+      tetherAttr.setXYZ(i, p.x, p.y, p.z);
+    }
     tetherAttr.needsUpdate = true;
   }
 
@@ -2066,12 +2275,14 @@ class BergRenderer {
           chips.push(chip);
         }
 
-        // landing telegraph on the slope
-        const targetGeom = new THREE.RingGeometry(1.1, 1.45, 48);
+        // Landing telegraph: a soft dark shadow on the slope instead of
+        // the old orange bullseye. Reads as the rock's approaching mass
+        // without turning the 3D frame into a HUD.
+        const targetGeom = new THREE.CircleGeometry(1.2, 32);
         const targetMat = new THREE.MeshBasicMaterial({
-          color: 0xffb070,
+          color: 0x0e1821,
           transparent: true,
-          opacity: 0.55,
+          opacity: 0.34,
           depthWrite: false,
           side: THREE.DoubleSide
         });
@@ -2080,11 +2291,11 @@ class BergRenderer {
         this.dynamicHazards.add(target);
 
         const targetCore = new THREE.Mesh(
-          new THREE.CircleGeometry(0.9, 40),
+          new THREE.CircleGeometry(0.35, 24),
           new THREE.MeshBasicMaterial({
-            color: 0xff6a3d,
+            color: 0x070c12,
             transparent: true,
-            opacity: 0.22,
+            opacity: 0.5,
             depthWrite: false,
             side: THREE.DoubleSide
           })
@@ -2113,20 +2324,19 @@ class BergRenderer {
         chip.rotation.y += 0.05 + chipIndex * 0.03;
       });
 
-      // telegraph marker tracks the landing lane at the player's current altitude
+      // Shadow marker: grows a touch as impact nears, stays a cold dark
+      // pool on the slope. No colour flash — the hazard feed copy and the
+      // rock's own descent sell urgency.
       const dy = Math.max(0, rock.y - snapshot.player.y);
       const timeToImpact = dy / Math.max(4, rock.speed);
       const urgency = clamp01(1 - timeToImpact / 2.4);
-      const pulse = 0.7 + Math.sin(this.elapsed * (6 + urgency * 14)) * 0.25;
       const markerY = snapshot.player.y + 0.4;
       node.target.position.set(rock.x, markerY, 1.44);
-      node.target.scale.setScalar(1 + (1 - urgency) * 1.2);
-      node.target.material.opacity = (0.35 + urgency * 0.45) * pulse;
-      node.target.material.color.setHex(urgency > 0.6 ? 0xff4a2a : 0xffb070);
+      node.target.scale.setScalar(1.05 + (1 - urgency) * 0.7);
+      node.target.material.opacity = 0.24 + urgency * 0.24;
       node.targetCore.position.set(rock.x, markerY, 1.43);
-      node.targetCore.scale.setScalar(0.9 + urgency * 0.4);
-      node.targetCore.material.opacity = 0.18 + urgency * 0.42;
-      node.targetCore.material.color.setHex(urgency > 0.6 ? 0xff3020 : 0xff6a3d);
+      node.targetCore.scale.setScalar(0.85 + urgency * 0.3);
+      node.targetCore.material.opacity = 0.38 + urgency * 0.22;
     });
 
     Array.from(this.rockMeshes.entries()).forEach(([id, node]) => {
@@ -2467,61 +2677,92 @@ class BergRenderer {
     const progressRatio = Math.min(1, snapshot.player.progressY / 100);
     const playerWorldY = this._worldY(this.playerRender.y);
     const summitWorldY = this._worldY(this.summitFocusLocal.y);
+    const climbing = Boolean(snapshot.player.climbing);
 
-    // Over-the-shoulder POV: the camera rides just behind and above the
-    // climber's helmet, pitched up the slope. It sells the feel of sitting
-    // on the climber's shoulders while still showing the mountain face, the
-    // summit, and the hazards coming down.
-    const desiredFov = 78 - progressRatio * 6;
+    // Over-the-shoulder POV with weight. The camera lags the climber, leans
+    // into the slope when they climb, and sways gently against their
+    // lateral motion so the rig reads as attached to a body breathing
+    // on a rope — not a locked follow-cam.
+    const desiredFov = 74 - progressRatio * 4 + (climbing ? 1.6 : 0);
     if (Math.abs(this.camera.fov - desiredFov) > 0.02) {
-      this.camera.fov += (desiredFov - this.camera.fov) * Math.min(1, dt * 3.2);
+      this.camera.fov += (desiredFov - this.camera.fov) * Math.min(1, dt * 2.2);
       this.camera.updateProjectionMatrix();
     }
 
-    // Rig offsets in world space. The climber's helmet sits around scene-local
-    // y=2.5 on top of the player render, so in world y that's ~1.3 given the
-    // current vertical compression.
-    const shoulderWorldY = this._worldY(2.45);
-    const camBackOffset = 2.9;   // behind the climber along +Z
-    const camRise = 0.65;        // a touch above the helmet for a clear forward read
+    // Climber's helmet now sits around scene-local y=1.95; shoulder is
+    // just below. Reduced from the old 2.45 so the cam doesn't float
+    // half a metre above the rebuilt (properly-proportioned) climber.
+    const shoulderWorldY = this._worldY(1.9);
+    // Pull the rig a bit further back when climbing: gives the axe-plant
+    // frame room to read. Settles closer when the climber is just hanging.
+    const climbOffset = climbing ? 0.35 : 0;
+    const camBackOffset = 2.55 + climbOffset;
+    const camRise = 0.42 + climbOffset * 0.4;
 
-    // Aim point: up the slope, climbing along with the player. Clamped so we
-    // never overshoot the summit near the top of the route.
-    const lookAheadLocal = 26 + progressRatio * 10;
+    const lookAheadLocal = 24 + progressRatio * 8 + (climbing ? 2.4 : 0);
     const lookWorldY = Math.min(
       summitWorldY + 0.8,
       playerWorldY + this._worldY(lookAheadLocal)
     );
     const lookZ = 0.2;
 
+    // Lateral counter-sway: when the climber swings right, the cam drifts
+    // left of his back, so the silhouette cuts through frame instead of
+    // being centred and lifeless.
+    const lateralX = snapshot.player.x || 0;
+    const lateralVx = snapshot.player.vx || 0;
+    const counterSway = -lateralX * 0.12 - lateralVx * 0.009;
+
     const targetPosition = this.tempVecA.set(
-      this.playerRender.x * 0.55,
+      lateralX * 0.42 + counterSway,
       playerWorldY + shoulderWorldY + camRise,
-      this.playerRender.z + camBackOffset + Math.sin(this.elapsed * 0.5) * 0.05
+      this.playerRender.z + camBackOffset + Math.sin(this.elapsed * 0.42) * 0.04
     );
     const targetLook = this.tempVecB.set(
-      this.playerRender.x * 0.3,
+      lateralX * 0.22,
       lookWorldY,
       lookZ
     );
 
-    this.camera.position.lerp(targetPosition, 1 - Math.exp(-dt * 6));
-    this.cameraTarget.lerp(targetLook, 1 - Math.exp(-dt * 6.5));
+    // Heavier damping — exp(-dt*3.2) lags ~0.3s vs the old ~0.15s.
+    // Gives the rig real mass and turns the old "whip to target" feel
+    // into a weighted follow.
+    this.camera.position.lerp(targetPosition, 1 - Math.exp(-dt * 3.2));
+    this.cameraTarget.lerp(targetLook, 1 - Math.exp(-dt * 3.6));
 
-    // Subtle breathing so the head-cam never feels locked.
-    const breathAmp = 0.05 + progressRatio * 0.1 + danger * 0.05;
-    const breath = Math.sin(this.elapsed * 0.85) * breathAmp;
-    const breathSway = Math.sin(this.elapsed * 0.6 + 0.4) * breathAmp * 0.6;
+    // Breathing: deeper amplitude under load, syncopated X so it's not a
+    // simple bob. Extra pulse when actively climbing — the axe/foot
+    // cadence bleeds into the rig.
+    const load = (climbing ? 0.5 : 0) + danger * 0.4;
+    const breathAmp = 0.06 + progressRatio * 0.09 + load * 0.08;
+    const breath = Math.sin(this.elapsed * (0.9 + load * 0.4)) * breathAmp;
+    const breathSway = Math.sin(this.elapsed * 0.6 + 0.4) * breathAmp * 0.55;
     this.camera.position.y += breath;
     this.camera.position.x += breathSway;
+
+    // Axe-plant micro-dolly: a short forward bump timed to the climb
+    // stroke phase, then a settle. Gives the rig a living, reactive feel.
+    if (climbing) {
+      const stroke = (snapshot.player.climbStrokePhase || 0);
+      const phaseOffset = stroke * Math.PI;
+      const kick = Math.max(0, Math.sin(this.elapsed * 4.8 + phaseOffset));
+      this.camera.position.z -= kick * kick * 0.08;
+      this.camera.position.y += kick * kick * 0.04;
+    }
 
     this.camera.position.x += Math.sin(this.elapsed * 23) * shake * 0.14;
     this.camera.position.y += Math.cos(this.elapsed * 19) * shake * 0.2;
     this.camera.position.z += Math.sin(this.elapsed * 21) * shake * 0.08;
 
     this.camera.lookAt(this.cameraTarget);
+
+    // Roll responds to tether tension (up-vector pulling the climber
+    // tight) plus lateral swing. A touch of idle breath keeps it alive
+    // even when the climber is still.
     const rollBreath = Math.sin(this.elapsed * 0.7 + 1.2) * (0.003 + progressRatio * 0.004);
-    this.camera.rotation.z = -snapshot.player.x * 0.018 - (snapshot.player.vx || 0) * 0.0022 + rollBreath;
+    const tensionRoll = climbing ? Math.sin(this.elapsed * 2.1) * 0.012 : 0;
+    this.camera.rotation.z =
+      -lateralX * 0.022 - lateralVx * 0.0028 + rollBreath + tensionRoll;
   }
 
   resize() {

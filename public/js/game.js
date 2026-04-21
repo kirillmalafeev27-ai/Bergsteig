@@ -7,6 +7,11 @@ const STRONG_SWING_HOLD_MS = 720;
 const SHIELD_ACTIVE_MS = 15000;
 const SPRING_STIFFNESS = 30;
 const SPRING_DAMPING = 8.4;
+// Climb pacing: metres per second of rope. A full CLIMB_STEP (6 m) takes ~3 s,
+// so a double-climb bonus is ~6 s — enough to *feel* the ascent instead of
+// teleporting. Fall-back from an avalanche hit resolves faster on purpose.
+const CLIMB_SPEED_UP = 2.05;
+const CLIMB_SPEED_DOWN = 11;
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -252,6 +257,10 @@ class Game {
       level: settings.langLevel || DEFAULT_CEFR_LEVEL,
       lexicalTopic: settings.lexicalTopic,
       progress: 0,
+      climbTarget: 0,
+      climbing: false,
+      climbStrokePhase: 0,
+      climbStrokeTimer: 0,
       baseLane: 0,
       x: 0,
       vx: 0,
@@ -494,6 +503,40 @@ class Game {
       return;
     }
 
+    // Smooth the logical progress toward climbTarget. A flat rate with a
+    // tiny ease-near-target gives the "pulling up the rope" feel without
+    // stalling at the last centimetre. Each stroke footprint is laid
+    // roughly every metre so the climb reads as deliberate hand-over-hand.
+    const delta = this.player.climbTarget - this.player.progress;
+    if (Math.abs(delta) > 0.001) {
+      const ascending = delta > 0;
+      const rate = ascending ? CLIMB_SPEED_UP : CLIMB_SPEED_DOWN;
+      const easing = ascending
+        ? 0.55 + 0.45 * clamp(Math.abs(delta) / 2.5, 0, 1)
+        : 1;
+      const step = Math.sign(delta) * Math.min(Math.abs(delta), rate * easing * dt);
+      this.player.progress = clamp(this.player.progress + step, 0, SUMMIT_HEIGHT);
+      this.player.climbing = ascending;
+
+      if (ascending) {
+        // Alternating axe/foot pulse tied to meters, not frames, so the
+        // renderer can sync its limb animation cleanly.
+        this.player.climbStrokeTimer += Math.abs(step);
+        if (this.player.climbStrokeTimer > 0.8) {
+          this.player.climbStrokeTimer = 0;
+          this.player.climbStrokePhase = (this.player.climbStrokePhase + 1) % 2;
+          this._leaveFootprints(this.player.progress, 0.6);
+          this.cameraShake = Math.max(this.cameraShake, 0.06);
+          if (this.audio) {
+            this.audio.playSidestep();
+          }
+        }
+      }
+    } else {
+      this.player.climbing = false;
+      this.player.climbStrokeTimer = 0;
+    }
+
     if (this.player.shieldCharges > 0 && now >= this.player.shieldUntil) {
       this.player.shieldCharges = 0;
     }
@@ -573,7 +616,14 @@ class Game {
         }
 
         this.stats.avalanchesHit += 1;
-        this.player.progress = Math.max(0, this.player.progress - CLIMB_STEP * 3);
+        // Knockback as a target, not a snap — the fast down-rate in
+        // _updatePlayerPhysics covers the distance quickly but still
+        // sells direction and weight instead of teleporting.
+        this.player.climbTarget = Math.max(0, this.player.progress - CLIMB_STEP * 3);
+        this.player.progress = Math.max(
+          this.player.climbTarget,
+          this.player.progress - CLIMB_STEP * 0.4
+        );
         this.player.lens = clamp(this.player.lens + 0.2, 0, 1);
         this.cameraShake = Math.max(this.cameraShake, 0.52);
         this._leaveFootprints(this.player.progress, 0.9);
@@ -719,13 +769,20 @@ class Game {
 
     switch (slotId) {
       case 'climb':
-        this.player.progress = clamp(this.player.progress + CLIMB_STEP * 2, 0, SUMMIT_HEIGHT);
-        this._leaveFootprints(this.player.progress, 1);
-        this.cameraShake = Math.max(this.cameraShake, 0.16);
+        // Queue altitude instead of snapping — _updatePlayerPhysics eases the
+        // actual progress so the camera, rope, and limbs have time to sell
+        // the pull. Chaining is fine: if another climb lands mid-ascent, the
+        // target just extends.
+        this.player.climbTarget = clamp(
+          Math.max(this.player.climbTarget, this.player.progress) + CLIMB_STEP * 2,
+          0,
+          SUMMIT_HEIGHT
+        );
+        this.cameraShake = Math.max(this.cameraShake, 0.08);
         if (this.audio) {
           this.audio.playClimb();
         }
-        this._showMessage('Рывок вверх дал два хода по тросу.', 1100);
+        this._showMessage('Рывок на трос: пара метров вверх.', 1100);
         this.currentQuestion = null;
         this._closeQuestionPanel();
         this._renderTopicButtons();
@@ -994,6 +1051,9 @@ class Game {
         x: this.player.x,
         y: this.player.progress,
         vx: this.player.vx,
+        climbing: this.player.climbing,
+        climbTarget: this.player.climbTarget,
+        climbStrokePhase: this.player.climbStrokePhase,
         shieldActive: this.player.shieldCharges > 0 && this.currentTime < this.player.shieldUntil,
         falling: this.player.falling,
         fallOffset: this.player.fallOffset
