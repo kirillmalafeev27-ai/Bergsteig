@@ -78,20 +78,6 @@ class Game {
       canvas: document.getElementById('game-canvas'),
       lensOverlay: document.getElementById('lens-overlay'),
       stormOverlay: document.getElementById('storm-overlay'),
-      messageBanner: document.getElementById('message-banner'),
-      altitudeText: document.getElementById('altitude-text'),
-      altitudeBar: document.getElementById('altitude-bar-fill'),
-      phaseText: document.getElementById('phase-text'),
-      phaseSubtext: document.getElementById('phase-subtext'),
-      laneText: document.getElementById('lane-text'),
-      swingText: document.getElementById('swing-text'),
-      lensText: document.getElementById('lens-text'),
-      lensSubtext: document.getElementById('lens-subtext'),
-      shieldText: document.getElementById('shield-text'),
-      shieldSubtext: document.getElementById('shield-subtext'),
-      playerDisplay: document.getElementById('player-display'),
-      sessionDisplay: document.getElementById('session-display'),
-      hazardText: document.getElementById('hazard-text'),
       topicPanel: document.getElementById('topic-panel'),
       topicButtons: document.getElementById('topic-buttons'),
       questionPanel: document.getElementById('question-panel'),
@@ -105,9 +91,6 @@ class Game {
       directionPanel: document.getElementById('direction-panel'),
       directionTitle: document.getElementById('direction-title'),
       directionButtons: Array.from(document.querySelectorAll('.direction-btn')),
-      pauseBtn: document.getElementById('pause-btn'),
-      muteBtn: document.getElementById('mute-btn'),
-      exitBtn: document.getElementById('exit-btn'),
       pauseOverlay: document.getElementById('pause-overlay'),
       resumeBtn: document.getElementById('resume-btn'),
       pauseExitBtn: document.getElementById('pause-exit-btn'),
@@ -122,15 +105,6 @@ class Game {
       });
     });
 
-    if (this.ui.pauseBtn) {
-      this.ui.pauseBtn.addEventListener('click', () => this.togglePause());
-    }
-    if (this.ui.muteBtn) {
-      this.ui.muteBtn.addEventListener('click', () => this.toggleMute());
-    }
-    if (this.ui.exitBtn) {
-      this.ui.exitBtn.addEventListener('click', () => this._handleExit());
-    }
     if (this.ui.resumeBtn) {
       this.ui.resumeBtn.addEventListener('click', () => this.togglePause(false));
     }
@@ -299,8 +273,6 @@ class Game {
     this._closeQuestionPanel();
     this._closeDirectionPanel();
     this._renderTopicButtons();
-    this._updateHud();
-    this._updateHazardFeed();
     this._showMessage('Подъём начался. Следи за оранжевыми метками на склоне — там упадёт камень.', 3200);
     this._loop(this.startedAt);
   }
@@ -332,15 +304,14 @@ class Game {
     this.currentQuestion = null;
     this.pendingDirection = null;
     this.state = 'idle';
-    this.ui.messageBanner.classList.add('hidden');
+    if (this.ui.messageBanner) {
+      this.ui.messageBanner.classList.add('hidden');
+    }
     this._closeQuestionPanel();
     this._closeDirectionPanel();
     this.ui.topicButtons.innerHTML = '';
     if (this.ui.pauseOverlay) {
       this.ui.pauseOverlay.classList.add('hidden');
-    }
-    if (this.ui.pauseBtn) {
-      this.ui.pauseBtn.classList.remove('active');
     }
     document.body.classList.remove('paused');
 
@@ -372,9 +343,6 @@ class Game {
       if (this.ui.pauseOverlay) {
         this.ui.pauseOverlay.classList.remove('hidden');
       }
-      if (this.ui.pauseBtn) {
-        this.ui.pauseBtn.classList.add('active');
-      }
       document.body.classList.add('paused');
       return;
     }
@@ -404,9 +372,6 @@ class Game {
       }
       if (this.ui.pauseOverlay) {
         this.ui.pauseOverlay.classList.add('hidden');
-      }
-      if (this.ui.pauseBtn) {
-        this.ui.pauseBtn.classList.remove('active');
       }
       document.body.classList.remove('paused');
       this.frameId = requestAnimationFrame(this._loop);
@@ -468,9 +433,6 @@ class Game {
     this._updateEnvironment(dt, timestamp);
     this._updateHazards(dt, timestamp);
     this._updateFootprints(dt);
-    this._updateHud();
-    this._updateHazardFeed();
-
     if (this.renderer) {
       this.renderer.render(this._buildSnapshot(), dt);
     }
@@ -963,6 +925,10 @@ class Game {
   }
 
   _updateHud() {
+    if (!this.ui.altitudeText) {
+      return;
+    }
+
     const progressRatio = this.player.progress / SUMMIT_HEIGHT;
     const phaseRatio = this._phaseRatio();
     const swingAmount = clamp(
@@ -1012,6 +978,10 @@ class Game {
   }
 
   _updateHazardFeed() {
+    if (!this.ui.hazardText) {
+      return;
+    }
+
     const nearestAvalanche = this.hazards.avalanches
       .filter((hazard) => hazard.y >= this.player.progress)
       .sort((left, right) => left.y - right.y)[0];
@@ -1179,12 +1149,17 @@ class Game {
   }
 
   _showMessage(text, duration = 1400) {
-    this.ui.messageBanner.textContent = text;
-    this.ui.messageBanner.classList.remove('hidden');
-
     if (this.currentMessageTimeout) {
       clearTimeout(this.currentMessageTimeout);
+      this.currentMessageTimeout = null;
     }
+
+    if (!this.ui.messageBanner) {
+      return;
+    }
+
+    this.ui.messageBanner.textContent = text;
+    this.ui.messageBanner.classList.remove('hidden');
 
     this.currentMessageTimeout = setTimeout(() => {
       this.ui.messageBanner.classList.add('hidden');
