@@ -19,7 +19,7 @@
           <div class="hero-kicker">Язык как восхождение</div>
           <h1 id="game-title">BERGSTIEG</h1>
           <p class="hero-subtitle">
-            Кинематографичный подъём на вершину, где каждое упражнение по немецкому становится выбором выживания.
+            Кинематографичный подъём на вершину, где каждое упражнение по немецкому или французскому становится выбором выживания.
             Камни срываются с гребня, лавины сносят к подножию, метель налипает на камеру,
             а склон меняется от снежной стены к раскалённому вулкану — за одну сессию.
           </p>
@@ -32,7 +32,7 @@
           </article>
           <article class="hero-panel">
             <div class="hero-panel-title">Сессия под вас</div>
-            <p>Вы выбираете уровень CEFR, лексическую тему и пять грамматических тем. Каждая тема закрепляется за своей бонусной кнопкой на время подъёма.</p>
+            <p>Вы выбираете язык, уровень CEFR, лексическую тему и пять грамматических тем. У немецкого и французского свои отдельные наборы тем и вопросов.</p>
           </article>
           <article class="hero-panel">
             <div class="hero-panel-title">Цена ошибки</div>
@@ -64,7 +64,12 @@
 
         <div id="setup-step1" class="setup-step">
           <h2 class="step-title">Кто поднимается</h2>
-          <p class="step-text">Выберите уровень немецкого и имя альпиниста. От уровня зависит сложность заданий, от имени — подписи в HUD.</p>
+          <p id="step1-text" class="step-text">Выберите язык сессии, уровень и имя альпиниста. Для немецкого откроются только немецкие темы и немецкие вопросы.</p>
+
+          <div class="form-group">
+            <label>Язык сессии</label>
+            <div id="language-buttons" class="language-buttons"></div>
+          </div>
 
           <div class="form-group">
             <label for="player-name">Имя альпиниста</label>
@@ -72,7 +77,7 @@
           </div>
 
           <div class="form-group">
-            <label>Уровень немецкого (CEFR)</label>
+            <label id="level-label">Уровень немецкого (CEFR)</label>
             <div id="level-buttons" class="level-buttons"></div>
           </div>
 
@@ -83,7 +88,7 @@
 
         <div id="setup-step2" class="setup-step hidden">
           <h2 class="step-title">Лексическая тема</h2>
-          <p class="step-text">Одна тема на всю сессию. Она задаёт рамку для упражнений и настроение карточек во время подъёма.</p>
+          <p id="step2-text" class="step-text">Одна тема на всю сессию. Она задаёт рамку для упражнений по немецкому и настроение карточек во время подъёма.</p>
           <div id="lexical-grid" class="selection-grid" role="list"></div>
 
           <div class="setup-actions">
@@ -101,7 +106,7 @@
           <div id="bonus-slots" class="bonus-slots"></div>
 
           <div class="picker-header">
-            <span>Доступные грамматические темы</span>
+            <span id="grammar-label">Доступные грамматические темы по немецкому</span>
             <span id="selection-counter">0 / 5</span>
           </div>
           <div id="grammar-picker" class="selection-grid grammar-grid" role="list"></div>
