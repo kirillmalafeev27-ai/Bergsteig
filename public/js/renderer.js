@@ -53,7 +53,7 @@ class BergRenderer {
     this.tempVecC = new THREE.Vector3();
 
     this.rockMeshes = new Map();
-    this.perchedBoulderMeshes = new Map();
+    this.fissureMeshes = new Map();
     this.avalancheMeshes = new Map();
     this.footprints = new Map();
     this.cloudCards = [];
@@ -1111,6 +1111,37 @@ class BergRenderer {
       positions.setXYZ(v, n.x * scaled, n.y * scaled, n.z * scaled);
     }
 
+    geometry.computeVertexNormals();
+    return geometry;
+  }
+
+  _buildFissureGeometry(width = 5.8, height = 1.9, seed = Math.random() * 1000) {
+    const geometry = new THREE.PlaneGeometry(width, height, 26, 4);
+    const positions = geometry.attributes.position;
+    const colors = new Float32Array(positions.count * 3);
+
+    for (let index = 0; index < positions.count; index += 1) {
+      const x = positions.getX(index);
+      const y = positions.getY(index);
+      const nx = x / (width * 0.5);
+      const ny = y / (height * 0.5);
+      const slit = Math.pow(clamp01(1 - Math.abs(nx) * 1.16), 1.3);
+      const lip = Math.pow(1 - Math.abs(ny), 0.72);
+      const jag =
+        Math.sin(nx * 8.4 + ny * 1.8 + seed * 0.17) * 0.18 +
+        Math.cos(nx * 14.2 - seed * 0.09) * 0.08;
+      const z = -0.12 - slit * (0.48 + lip * 0.18) + Math.abs(jag) * 0.04;
+      const warpedX = x + jag * 0.22 * lip;
+      const warpedY = y + Math.sin(nx * 5.1 + seed * 0.23) * 0.08 * (1 - slit * 0.45);
+      positions.setXYZ(index, warpedX, warpedY, z);
+
+      const shade = clamp01(0.16 + slit * 0.22 + lip * 0.08 - Math.abs(ny) * 0.05);
+      colors[index * 3] = shade * 0.58;
+      colors[index * 3 + 1] = shade * 0.68;
+      colors[index * 3 + 2] = shade * 0.8;
+    }
+
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     geometry.computeVertexNormals();
     return geometry;
   }
@@ -2185,10 +2216,10 @@ class BergRenderer {
         progressY: avalanche.y,
         y: this._sceneYFromGameY(avalanche.y)
       })),
-      perchedBoulders: (snapshot.perchedBoulders || []).map((boulder) => ({
-        ...boulder,
-        progressY: boulder.y,
-        y: this._sceneYFromGameY(boulder.y)
+      couloirFissures: (snapshot.couloirFissures || []).map((fissure) => ({
+        ...fissure,
+        progressY: fissure.y,
+        y: this._sceneYFromGameY(fissure.y)
       })),
       footprints: snapshot.footprints.map((mark) => ({
         ...mark,
@@ -2209,7 +2240,7 @@ class BergRenderer {
     this._updateEnvironment(renderSnapshot, dt);
     this._updatePlayer(renderSnapshot, dt);
     this._updateRope(renderSnapshot, dt);
-    this._updatePerchedBoulders(renderSnapshot, dt);
+    this._updateCouloirFissures(renderSnapshot, dt);
     this._updateHazards(renderSnapshot, dt);
     this._updateFootprints(renderSnapshot);
     this._updateParticles(renderSnapshot, dt);
@@ -2580,97 +2611,135 @@ class BergRenderer {
     });
   }
 
-  _updatePerchedBoulders(snapshot, dt) {
+  _updateCouloirFissures(snapshot, dt) {
     const nextIds = new Set();
-    snapshot.perchedBoulders.forEach((boulder, index) => {
-      nextIds.add(boulder.id);
-      let node = this.perchedBoulderMeshes.get(boulder.id);
+    (snapshot.couloirFissures || []).forEach((fissure, index) => {
+      nextIds.add(fissure.id);
+      let node = this.fissureMeshes.get(fissure.id);
 
       if (!node) {
         const group = new THREE.Group();
-        const rockSeed = Math.random() * 1000;
+        const seed = Math.random() * 1000;
         const core = new THREE.Mesh(
-          this._buildBoulderGeometry(1.18, 3, 0.24, { seed: rockSeed }),
-          this._makeRockMaterial(rockSeed, 'perched')
+          this._buildFissureGeometry(5.8, 1.9, seed),
+          new THREE.MeshStandardMaterial({
+            color: 0x0c141b,
+            emissive: 0x112333,
+            emissiveIntensity: 0.28,
+            roughness: 0.98,
+            metalness: 0.02,
+            vertexColors: true
+          })
         );
-        core.castShadow = true;
         core.receiveShadow = true;
         group.add(core);
 
-        const shell = new THREE.Mesh(
-          new THREE.IcosahedronGeometry(1.34, 1),
+        const shadow = new THREE.Mesh(
+          new THREE.PlaneGeometry(6.4, 2.45),
           new THREE.MeshBasicMaterial({
-            color: 0xd4dee5,
+            color: 0x05090d,
             transparent: true,
-            opacity: 0.06,
-            depthWrite: false,
-            side: THREE.BackSide
+            opacity: 0.28,
+            depthWrite: false
           })
         );
-        group.add(shell);
+        shadow.position.set(0, 0, -0.16);
+        group.add(shadow);
 
-        const brace = new THREE.Mesh(
-          new THREE.CircleGeometry(0.88, 24),
+        const rimTop = new THREE.Mesh(
+          new THREE.PlaneGeometry(4.9, 0.22),
           new THREE.MeshBasicMaterial({
-            color: 0x0c1319,
+            color: 0xd8efff,
             transparent: true,
             opacity: 0.16,
-            depthWrite: false
+            depthWrite: false,
+            side: THREE.DoubleSide
           })
         );
-        brace.scale.set(1.15, 0.54, 1);
-        brace.position.set(0, -0.62, -0.12);
-        group.add(brace);
+        rimTop.position.set(0, 0.56, 0.08);
+        group.add(rimTop);
 
-        const crack = new THREE.Mesh(
-          new THREE.PlaneGeometry(1.72, 0.26),
+        const rimBottom = new THREE.Mesh(
+          new THREE.PlaneGeometry(4.9, 0.22),
           new THREE.MeshBasicMaterial({
-            color: 0xdde7ee,
+            color: 0xd8efff,
             transparent: true,
-            opacity: 0.09,
-            depthWrite: false
+            opacity: 0.16,
+            depthWrite: false,
+            side: THREE.DoubleSide
           })
         );
-        crack.position.set(0, -0.76, -0.05);
-        group.add(crack);
+        rimBottom.position.set(0, -0.56, 0.08);
+        group.add(rimBottom);
+
+        const mist = new THREE.Sprite(this.materials.trail.clone());
+        mist.material.color.setHex(0xe7f6ff);
+        mist.material.opacity = 0.14;
+        mist.position.set(0, 0, 0.26);
+        mist.scale.set(4.7, 1.4, 1);
+        group.add(mist);
+
+        const shards = [];
+        for (let sideIndex = 0; sideIndex < 2; sideIndex += 1) {
+          const side = sideIndex === 0 ? -1 : 1;
+          for (let shardIndex = 0; shardIndex < 5; shardIndex += 1) {
+            const shardSeed = seed + sideIndex * 37 + shardIndex * 11;
+            const shard = new THREE.Mesh(
+              this._buildBoulderGeometry(0.14 + shardIndex * 0.02, 1, 0.28, { seed: shardSeed }),
+              this._makeRockMaterial(shardSeed, 'env')
+            );
+            shard.castShadow = true;
+            shard.receiveShadow = true;
+            const x = -2.15 + shardIndex * 1.08 + (Math.random() - 0.5) * 0.18;
+            const y = side * (0.55 + Math.random() * 0.12);
+            const z = 0.06 + Math.random() * 0.16;
+            shard.position.set(x, y, z);
+            shard.rotation.set(
+              (Math.random() - 0.5) * 0.4,
+              Math.random() * Math.PI * 2,
+              (Math.random() - 0.5) * 0.5
+            );
+            shard.userData = {
+              baseZ: z,
+              baseRotZ: shard.rotation.z,
+              wobble: 0.8 + Math.random() * 0.8,
+              phase: Math.random() * Math.PI * 2
+            };
+            group.add(shard);
+            shards.push(shard);
+          }
+        }
 
         this.dynamicHazards.add(group);
-        node = {
-          group,
-          core,
-          baseColor: core.material.color.clone(),
-          shell,
-          brace,
-          crack,
-          restYaw: (Math.random() - 0.5) * 0.22,
-          restTiltZ: -0.11 + (Math.random() - 0.5) * 0.04
-        };
-        this.perchedBoulderMeshes.set(boulder.id, node);
+        node = { group, core, shadow, rimTop, rimBottom, mist, shards, seed };
+        this.fissureMeshes.set(fissure.id, node);
       }
 
-      const armedMix = boulder.armed ? 1 : 0.3;
-      const shakeMix = boulder.shaking ? 1 : 0;
-      const jitter = shakeMix ? Math.sin(this.elapsed * 28 + index * 1.9) * 0.08 : 0;
-
-      // These boulders are embedded in the cliff, so keep them planted unless
-      // they're actively shaking before a drop.
-      node.group.position.set(boulder.x + jitter, boulder.y, 1.04 + armedMix * 0.02);
-      node.group.scale.setScalar(boulder.size * 0.8);
+      const openMix = clamp01((fissure.turnsLeft || 0) / 3);
+      const pulse = 0.5 + 0.5 * Math.sin(this.elapsed * 4.1 + index * 0.8);
+      const freshness = fissure.freshness || 0;
+      node.group.position.set(fissure.x, fissure.y, 1.06 + openMix * 0.06);
       node.group.rotation.x = -0.08;
-      node.group.rotation.y = node.restYaw;
-      node.group.rotation.z = node.restTiltZ + shakeMix * Math.sin(this.elapsed * 24 + index) * 0.03;
+      node.group.rotation.y = Math.sin(this.elapsed * 0.7 + node.seed) * 0.025;
+      node.group.rotation.z = Math.sin(this.elapsed * 1.7 + node.seed * 0.1) * 0.02;
+      node.group.scale.set(1 + openMix * 0.08, 0.94 + openMix * 0.16 + freshness * 0.06, 1);
 
-      const perchedAlertColor = this.tempColorC || (this.tempColorC = new THREE.Color());
-      perchedAlertColor.setHex(0x8d969b);
-      node.core.material.color.copy(node.baseColor).lerp(perchedAlertColor, armedMix * 0.26 + shakeMix * 0.08);
-      node.shell.material.opacity = 0.03 + armedMix * 0.05 + shakeMix * 0.08;
-      node.brace.material.opacity = 0.14 + armedMix * 0.06;
-      node.crack.material.opacity = 0.05 + armedMix * 0.08 + shakeMix * 0.08;
-      node.crack.scale.x = 1 + armedMix * 0.18;
-      node.crack.rotation.z = Math.sin(this.elapsed * 3.2 + index * 0.8) * 0.05;
+      node.core.material.emissiveIntensity = 0.18 + openMix * 0.16 + freshness * 0.1;
+      node.shadow.material.opacity = 0.18 + openMix * 0.14;
+      node.rimTop.material.opacity = 0.08 + openMix * 0.14 + pulse * 0.05 + freshness * 0.08;
+      node.rimBottom.material.opacity = 0.08 + openMix * 0.14 + (1 - pulse) * 0.05 + freshness * 0.08;
+      node.mist.material.opacity = 0.05 + openMix * 0.09 + freshness * 0.08;
+      node.mist.scale.set(4.3 + openMix * 0.7, 1.2 + pulse * 0.25, 1);
+      node.mist.position.y = Math.sin(this.elapsed * 1.8 + index) * 0.05;
+
+      node.shards.forEach((shard, shardIndex) => {
+        const wobble = Math.sin(this.elapsed * (1.4 + shard.userData.wobble) + shard.userData.phase + shardIndex) * 0.03;
+        shard.position.z = shard.userData.baseZ + wobble * (0.5 + openMix * 0.6);
+        shard.rotation.z = shard.userData.baseRotZ + wobble * 0.8;
+      });
     });
 
-    Array.from(this.perchedBoulderMeshes.entries()).forEach(([id, node]) => {
+    Array.from(this.fissureMeshes.entries()).forEach(([id, node]) => {
       if (!nextIds.has(id)) {
         this.dynamicHazards.remove(node.group);
         node.group.traverse((child) => {
@@ -2681,7 +2750,7 @@ class BergRenderer {
             child.material.dispose();
           }
         });
-        this.perchedBoulderMeshes.delete(id);
+        this.fissureMeshes.delete(id);
       }
     });
   }

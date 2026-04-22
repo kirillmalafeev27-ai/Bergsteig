@@ -1,10 +1,15 @@
 const STORAGE_KEYS = {
   playerName: 'bergstieg_player_name',
+  language: 'bergstieg_language',
   level: 'bergstieg_lang_level',
   lexical: 'bergstieg_lexical_topic',
   slots: 'bergstieg_slot_assignments',
   muted: 'bergstieg_muted'
 };
+
+function languageStorageKey(key, language) {
+  return `${key}_${language}`;
+}
 
 function safeStorageGet(key, fallback = '') {
   try {
@@ -45,10 +50,15 @@ document.addEventListener('DOMContentLoaded', () => {
     gameScreen: document.getElementById('game-screen'),
     winScreen: document.getElementById('win-screen'),
     loseScreen: document.getElementById('lose-screen'),
+    languageButtons: document.getElementById('language-buttons'),
+    step1Text: document.getElementById('step1-text'),
     playerName: document.getElementById('player-name'),
+    levelLabel: document.getElementById('level-label'),
     levelButtons: document.getElementById('level-buttons'),
+    step2Text: document.getElementById('step2-text'),
     lexicalGrid: document.getElementById('lexical-grid'),
     bonusSlots: document.getElementById('bonus-slots'),
+    grammarLabel: document.getElementById('grammar-label'),
     grammarPicker: document.getElementById('grammar-picker'),
     selectionCounter: document.getElementById('selection-counter'),
     startButton: document.getElementById('start-btn'),
@@ -57,13 +67,17 @@ document.addEventListener('DOMContentLoaded', () => {
     loseMessage: document.getElementById('lose-message')
   };
 
-  let selectedLevel = safeStorageGet(STORAGE_KEYS.level, DEFAULT_CEFR_LEVEL) || DEFAULT_CEFR_LEVEL;
-  const storedLexical = safeStorageGet(STORAGE_KEYS.lexical, '');
-  let selectedLexical = LEXICAL_TOPICS.includes(storedLexical) ? storedLexical : null;
+  let selectedLanguage = safeStorageGet(STORAGE_KEYS.language, DEFAULT_LANGUAGE) || DEFAULT_LANGUAGE;
+  if (!LANGUAGE_OPTIONS.some((option) => option.id === selectedLanguage)) {
+    selectedLanguage = DEFAULT_LANGUAGE;
+  }
+  let selectedLevel = DEFAULT_CEFR_LEVEL;
+  let selectedLexical = null;
   let selectedSlotIndex = 0;
-  const slotAssignments = restoreSlotAssignments();
+  let slotAssignments = [];
 
   ui.playerName.value = safeStorageGet(STORAGE_KEYS.playerName, '');
+  loadSelectionsForLanguage(selectedLanguage);
 
   const storedMute = safeStorageGet(STORAGE_KEYS.muted, '0');
   game.setMuted(storedMute === '1');
@@ -94,6 +108,8 @@ document.addEventListener('DOMContentLoaded', () => {
     setScreen('lose-screen');
   };
 
+  renderLanguageButtons();
+  updateSetupCopy();
   renderLevelButtons();
   renderLexicalGrid();
   renderBonusSlots();
@@ -123,9 +139,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     safeStorageSet(STORAGE_KEYS.playerName, settings.playerName);
-    safeStorageSet(STORAGE_KEYS.level, settings.langLevel);
-    safeStorageSet(STORAGE_KEYS.lexical, settings.lexicalTopic);
-    safeStorageSet(STORAGE_KEYS.slots, JSON.stringify(slotAssignments));
+    persistSelectionsForLanguage();
 
     setScreen('game-screen');
     try {
@@ -183,6 +197,85 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  function loadSelectionsForLanguage(language) {
+    const languageConfig = getLanguageConfig(language);
+    const storedLevel = safeStorageGet(languageStorageKey(STORAGE_KEYS.level, language), DEFAULT_CEFR_LEVEL) || DEFAULT_CEFR_LEVEL;
+    selectedLevel = CEFR_LEVELS.includes(storedLevel) ? storedLevel : DEFAULT_CEFR_LEVEL;
+    const storedLexical = safeStorageGet(languageStorageKey(STORAGE_KEYS.lexical, language), '');
+    selectedLexical = languageConfig.lexicalTopics.includes(storedLexical) ? storedLexical : null;
+    slotAssignments = restoreSlotAssignments(language);
+    const firstEmpty = slotAssignments.findIndex((slot) => !slot);
+    selectedSlotIndex = firstEmpty >= 0 ? firstEmpty : 0;
+  }
+
+  function persistSelectionsForLanguage(language = selectedLanguage) {
+    safeStorageSet(STORAGE_KEYS.language, language);
+    safeStorageSet(languageStorageKey(STORAGE_KEYS.level, language), selectedLevel);
+    safeStorageSet(languageStorageKey(STORAGE_KEYS.lexical, language), selectedLexical || '');
+    safeStorageSet(languageStorageKey(STORAGE_KEYS.slots, language), JSON.stringify(slotAssignments));
+  }
+
+  function updateSetupCopy() {
+    const languageConfig = getLanguageConfig(selectedLanguage);
+    if (ui.step1Text) {
+      ui.step1Text.textContent = languageConfig.step1Text;
+    }
+    if (ui.levelLabel) {
+      ui.levelLabel.textContent = languageConfig.levelLabel;
+    }
+    if (ui.step2Text) {
+      ui.step2Text.textContent = languageConfig.step2Text;
+    }
+    if (ui.grammarLabel) {
+      ui.grammarLabel.textContent = languageConfig.grammarLabel;
+    }
+    if (ui.playerName) {
+      ui.playerName.placeholder = languageConfig.playerPlaceholder;
+    }
+  }
+
+  function renderLanguageButtons() {
+    if (!ui.languageButtons) {
+      return;
+    }
+
+    ui.languageButtons.innerHTML = '';
+    LANGUAGE_OPTIONS.forEach((option) => {
+      const languageConfig = getLanguageConfig(option.id);
+      const button = document.createElement('button');
+      button.className = 'language-btn';
+      button.type = 'button';
+      button.classList.toggle('active', option.id === selectedLanguage);
+      button.innerHTML = `
+        <span class="language-btn-topline">
+          <span class="language-btn-title">${option.nativeLabel}</span>
+          <span class="language-btn-tag">${languageConfig.grammarTopics.length} тем</span>
+        </span>
+        <span class="language-btn-subtitle">${option.uiLabel}</span>
+        <span class="language-btn-teaser">${option.teaser}</span>
+        <span class="language-btn-copy">${option.copy}</span>
+      `;
+      button.addEventListener('click', () => {
+        if (option.id === selectedLanguage) {
+          return;
+        }
+        persistSelectionsForLanguage(selectedLanguage);
+        selectedLanguage = option.id;
+        safeStorageSet(STORAGE_KEYS.language, selectedLanguage);
+        loadSelectionsForLanguage(selectedLanguage);
+        renderLanguageButtons();
+        updateSetupCopy();
+        renderLevelButtons();
+        renderLexicalGrid();
+        renderBonusSlots();
+        renderGrammarPicker();
+        updateSelectionCounter();
+        updateStartButton();
+      });
+      ui.languageButtons.appendChild(button);
+    });
+  }
+
   function renderLevelButtons() {
     ui.levelButtons.innerHTML = '';
     CEFR_LEVELS.forEach((level) => {
@@ -193,6 +286,7 @@ document.addEventListener('DOMContentLoaded', () => {
       button.classList.toggle('active', level === selectedLevel);
       button.addEventListener('click', () => {
         selectedLevel = level;
+        persistSelectionsForLanguage();
         renderLevelButtons();
       });
       ui.levelButtons.appendChild(button);
@@ -201,7 +295,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function renderLexicalGrid() {
     ui.lexicalGrid.innerHTML = '';
-    LEXICAL_TOPICS.forEach((topic) => {
+    getLanguageLexicalTopics(selectedLanguage).forEach((topic) => {
       const button = document.createElement('button');
       button.className = 'selection-btn';
       button.type = 'button';
@@ -209,6 +303,7 @@ document.addEventListener('DOMContentLoaded', () => {
       button.classList.toggle('selected', topic === selectedLexical);
       button.addEventListener('click', () => {
         selectedLexical = topic;
+        persistSelectionsForLanguage();
         renderLexicalGrid();
         updateStartButton();
       });
@@ -256,7 +351,7 @@ document.addEventListener('DOMContentLoaded', () => {
     ui.grammarPicker.innerHTML = '';
     const usedTopics = slotAssignments.filter(Boolean);
 
-    GRAMMAR_TOPICS.forEach((topic) => {
+    getLanguageGrammarTopics(selectedLanguage).forEach((topic) => {
       const button = document.createElement('button');
       button.className = 'selection-btn';
       button.type = 'button';
@@ -282,6 +377,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     slotAssignments[targetIndex] = topic;
+    persistSelectionsForLanguage();
     const nextEmpty = slotAssignments.findIndex((slot) => !slot);
     selectedSlotIndex = nextEmpty >= 0 ? nextEmpty : targetIndex;
     renderBonusSlots();
@@ -304,8 +400,12 @@ document.addEventListener('DOMContentLoaded', () => {
       return null;
     }
 
+    const languageConfig = getLanguageConfig(selectedLanguage);
+
     return {
-      playerName: ui.playerName.value.trim() || 'Spieler',
+      language: selectedLanguage,
+      languageLabel: languageConfig.uiLabel,
+      playerName: ui.playerName.value.trim() || languageConfig.defaultPlayerName,
       langLevel: selectedLevel,
       lexicalTopic: selectedLexical,
       slotConfigs: BONUS_SLOTS.map((slotDef, index) => ({
@@ -315,9 +415,10 @@ document.addEventListener('DOMContentLoaded', () => {
     };
   }
 
-  function restoreSlotAssignments() {
+  function restoreSlotAssignments(language = selectedLanguage) {
     const empty = Array(BONUS_SLOTS.length).fill(null);
-    const raw = safeStorageGet(STORAGE_KEYS.slots, '');
+    const grammarTopics = getLanguageGrammarTopics(language);
+    const raw = safeStorageGet(languageStorageKey(STORAGE_KEYS.slots, language), '');
     if (!raw) {
       return empty;
     }
@@ -332,7 +433,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (typeof candidate !== 'string') {
           return null;
         }
-        if (!GRAMMAR_TOPICS.includes(candidate) || seen.has(candidate)) {
+        if (!grammarTopics.includes(candidate) || seen.has(candidate)) {
           return null;
         }
         seen.add(candidate);
