@@ -220,6 +220,14 @@ document.addEventListener('DOMContentLoaded', () => {
     ui.bonusSlots.innerHTML = '';
     BONUS_SLOTS.forEach((slot, index) => {
       const node = document.createElement('button');
+      const directionSlots = slot.splitDirections
+        ? `
+          <div class="slot-directions" aria-hidden="true">
+            <span class="slot-direction">Влево</span>
+            <span class="slot-direction">Вправо</span>
+          </div>
+        `
+        : '';
       node.className = 'bonus-slot';
       node.type = 'button';
       if (selectedSlotIndex === index) {
@@ -231,6 +239,7 @@ document.addEventListener('DOMContentLoaded', () => {
       node.innerHTML = `
         <div class="slot-kicker">Бонус ${index + 1}</div>
         <div class="slot-title">${slot.bonusLabel}</div>
+        ${directionSlots}
         <div class="slot-topic">${slotAssignments[index] || 'Тема ещё не выбрана'}</div>
         <div class="slot-help">${slot.help}</div>
       `;

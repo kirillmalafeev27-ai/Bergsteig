@@ -3,10 +3,11 @@ const AUDIO_MASTER_DEFAULT = 0.24;
 const AUDIO_SAMPLES = {
   windLoop: {
     url: 'audio/ambience-wind-loop.mp3',
-    gain: 0.94,
+    gain: 1.24,
     playbackRate: 1,
     loopStart: 0,
-    loopEnd: 6.95
+    loopEnd: 6.95,
+    stream: true
   },
   threatLoop: {
     url: 'audio/ambience-threat-surge.mp3',
@@ -127,6 +128,15 @@ class AudioManager {
     if (promise && typeof promise.catch === 'function') {
       promise.catch(() => {});
     }
+    this.loopNodes.forEach((entry) => {
+      if (entry && entry.type === 'media' && entry.element) {
+        if (flag) {
+          entry.element.pause();
+        } else {
+          entry.element.play().catch(() => {});
+        }
+      }
+    });
   }
 
   setAtmosphere(progressRatio, dangerLevel) {
@@ -137,7 +147,7 @@ class AudioManager {
       return;
     }
 
-    const windTarget = 0.055 + progressRatio * 0.11 + dangerLevel * 0.07;
+    const windTarget = 0.18 + progressRatio * 0.18 + dangerLevel * 0.15;
     const threatTarget = 0.012 + progressRatio * 0.035 + dangerLevel * 0.11;
     this.windGain.gain.setTargetAtTime(windTarget, this.ctx.currentTime, 0.36);
     this.threatGain.gain.setTargetAtTime(threatTarget, this.ctx.currentTime, 0.28);
@@ -170,9 +180,16 @@ class AudioManager {
 
   playSidestep() {
     this._playSample('climbSteps', {
-      volume: 0.52,
-      duration: 0.58,
-      playbackRate: 0.98 + Math.random() * 0.07
+      volume: 0.56,
+      duration: 0.72,
+      playbackRate: 0.84 + Math.random() * 0.05
+    });
+    this._playSample('climbSteps', {
+      volume: 0.22,
+      delay: 0.16,
+      offset: 0.02,
+      duration: 0.76,
+      playbackRate: 0.72 + Math.random() * 0.04
     });
   }
 
@@ -249,7 +266,13 @@ class AudioManager {
   }
 
   async _loadAllSamples(generation) {
-    const urls = Array.from(new Set(Object.values(AUDIO_SAMPLES).map((sample) => sample.url)));
+    const urls = Array.from(
+      new Set(
+        Object.values(AUDIO_SAMPLES)
+          .filter((sample) => !sample.stream)
+          .map((sample) => sample.url)
+      )
+    );
     await Promise.all(urls.map((url) => this._loadSampleUrl(url, generation)));
   }
 
@@ -286,8 +309,44 @@ class AudioManager {
     }
 
     const def = AUDIO_SAMPLES[sampleKey];
+    if (!def) {
+      return;
+    }
+
+    if (def.stream) {
+      const element = new Audio(def.url);
+      element.preload = 'auto';
+      element.loop = true;
+      element.crossOrigin = 'anonymous';
+      element.playbackRate = def.playbackRate || 1;
+
+      const source = this.ctx.createMediaElementSource(element);
+      const gain = this.ctx.createGain();
+      gain.gain.value = def.gain || 1;
+      source.connect(gain);
+      gain.connect(outputGain);
+
+      const entry = { type: 'media', element, source, gain, onCanPlay: null };
+      const playElement = () => {
+        if (!this.initialized) {
+          return;
+        }
+        element.play().catch(() => {});
+      };
+
+      if (element.readyState >= 2) {
+        playElement();
+      } else {
+        entry.onCanPlay = () => playElement();
+        element.addEventListener('canplay', entry.onCanPlay, { once: true });
+      }
+
+      this.loopNodes.set(sampleKey, entry);
+      return;
+    }
+
     const buffer = this.sampleBuffers.get(def.url);
-    if (!def || !buffer) {
+    if (!buffer) {
       return;
     }
 
@@ -302,7 +361,7 @@ class AudioManager {
     source.connect(gain);
     gain.connect(outputGain);
     source.start();
-    this.loopNodes.set(sampleKey, { source, gain });
+    this.loopNodes.set(sampleKey, { type: 'buffer', source, gain });
   }
 
   _playSample(sampleKey, options = {}) {
@@ -382,6 +441,34 @@ class AudioManager {
     if (!entry) {
       return;
     }
+    if (entry.type === 'media') {
+      if (entry.onCanPlay && entry.element) {
+        try {
+          entry.element.removeEventListener('canplay', entry.onCanPlay);
+        } catch (error) {
+          void error;
+        }
+      }
+      try {
+        entry.element.pause();
+        entry.element.src = '';
+        entry.element.load();
+      } catch (error) {
+        void error;
+      }
+      try {
+        entry.source.disconnect();
+      } catch (error) {
+        void error;
+      }
+      try {
+        entry.gain.disconnect();
+      } catch (error) {
+        void error;
+      }
+      return;
+    }
+
     this._stopSource(entry.source);
     try {
       entry.gain.disconnect();

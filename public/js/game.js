@@ -14,6 +14,7 @@ const MAX_PLAYER_X = 16.5;
 // teleporting. Fall-back from an avalanche hit resolves faster on purpose.
 const CLIMB_SPEED_UP = 2.05;
 const CLIMB_SPEED_DOWN = 11;
+const SUMMIT_ROCK_STOP_DISTANCE = 10;
 const ROCK_SPAWN_MIN_AHEAD = 62;
 const ROCK_SPAWN_MAX_AHEAD = 82;
 const ROCK_POST_AVALANCHE_LOCK_MS = 5200;
@@ -26,7 +27,6 @@ const PERCHED_BOULDER_MAX_AHEAD = 54;
 const PERCHED_BOULDER_SPACING_MIN = 10;
 const PERCHED_BOULDER_SPACING_MAX = 16;
 const PERCHED_BOULDER_VIEW_AHEAD = 70;
-const SIDESTEP_HINT_INTERVAL_MS = 900;
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -50,32 +50,19 @@ function laneLabel(lane) {
   return 'Центр';
 }
 
+function directionLabel(dir) {
+  return dir < 0 ? 'Влево' : 'Вправо';
+}
+
+function isDirectionalBonus(slotId) {
+  return slotId === 'sidestep' || slotId === 'powerSwing';
+}
+
 function formatCooldown(ms) {
   const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = String(totalSeconds % 60).padStart(2, '0');
   return `${minutes}:${seconds}`;
-}
-
-function formatRussianCount(value, one, few, many) {
-  const abs = Math.abs(Math.trunc(value));
-  const mod10 = abs % 10;
-  const mod100 = abs % 100;
-  if (mod10 === 1 && mod100 !== 11) {
-    return one;
-  }
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) {
-    return few;
-  }
-  return many;
-}
-
-function formatSidestepCharges(count) {
-  return `${count} ${formatRussianCount(count, 'заряд', 'заряда', 'зарядов')}`;
-}
-
-function formatPowerSwingCharges(count) {
-  return formatSidestepCharges(count);
 }
 
 class Game {
@@ -189,13 +176,7 @@ class Game {
 
       if (dir) {
         event.preventDefault();
-        if (this.pendingDirection) {
-          this.commitDirection(dir);
-        } else if (event.shiftKey) {
-          this._tryUsePowerSwingCharge(dir, true);
-        } else {
-          this._tryUseSidestepCharge(dir, true);
-        }
+        this.openQuestion(event.shiftKey ? 'powerSwing' : 'sidestep', dir);
         return;
       }
 
@@ -220,43 +201,19 @@ class Game {
     if (this.state !== 'running' || this.player.falling) {
       return;
     }
-    if (this.pendingDirection) {
-      this.commitDirection(dir);
-      return;
-    }
-    if (this.player.sidestepCharges > 0) {
-      this._tryUseSidestepCharge(dir, true);
-      return;
-    }
-    this._tryUsePowerSwingCharge(dir, true);
+    this.openQuestion('sidestep', dir);
   }
 
-  _tryUseSidestepCharge(dir, showEmptyHint = false) {
-    if (this.state !== 'running' || this.player.falling) {
-      return false;
-    }
-
-    if (this.player.sidestepCharges <= 0) {
-      if (showEmptyHint && this.currentTime - this.lastSidestepHintAt > SIDESTEP_HINT_INTERVAL_MS) {
-        this.lastSidestepHintAt = this.currentTime;
-        this._showMessage('Нет зарядов смещения. Сначала заработай их правильными ответами.', 1100);
-      }
-      return false;
-    }
-
+  _performSidestep(dir) {
     const previousLane = this.player.baseLane;
     const nextLane = clamp(previousLane + dir, -1, 1);
     if (nextLane === previousLane) {
       this.player.vx += dir * 5.4;
       this.cameraShake = Math.max(this.cameraShake, 0.08);
-      if (showEmptyHint && this.currentTime - this.lastSidestepHintAt > SIDESTEP_HINT_INTERVAL_MS) {
-        this.lastSidestepHintAt = this.currentTime;
-        this._showMessage('Крайняя линия. Смещаться дальше некуда.', 900);
-      }
+      this._showMessage(`Крайняя линия. Рывок ${directionLabel(dir).toLowerCase()} дальше не уводит.`, 1000);
       return false;
     }
 
-    this.player.sidestepCharges = Math.max(0, this.player.sidestepCharges - 1);
     this.player.baseLane = nextLane;
     this.player.vx += dir * 15.2;
     this.cameraShake = Math.max(this.cameraShake, 0.18);
@@ -265,28 +222,15 @@ class Game {
       this.audio.playSidestep();
     }
 
-    this._showMessage(
-      `Линия сменена: ${laneLabel(nextLane)}. Осталось ${formatSidestepCharges(this.player.sidestepCharges)}.`,
-      1200
-    );
-    this._renderTopicButtons();
+    this._showMessage(`Рывок ${directionLabel(dir).toLowerCase()}: линия ${laneLabel(nextLane)}.`, 1200);
     return true;
   }
 
-  _tryUsePowerSwingCharge(dir, showEmptyHint = false) {
+  _performPowerSwing(dir) {
     if (this.state !== 'running' || this.player.falling) {
       return false;
     }
 
-    if (this.player.powerSwingCharges <= 0) {
-      if (showEmptyHint && this.currentTime - this.lastSidestepHintAt > SIDESTEP_HINT_INTERVAL_MS) {
-        this.lastSidestepHintAt = this.currentTime;
-        this._showMessage('Нет зарядов сильного рывка. Сначала заработай их правильными ответами.', 1100);
-      }
-      return false;
-    }
-
-    this.player.powerSwingCharges = Math.max(0, this.player.powerSwingCharges - 1);
     this.player.burst = {
       anchorX: laneToX(this.player.baseLane) + dir * STRONG_SWING_DISTANCE,
       until: this.currentTime + STRONG_SWING_HOLD_MS
@@ -299,11 +243,7 @@ class Game {
       this.audio.playPowerSwing();
     }
 
-    this._showMessage(
-      `Сильный рывок: ${dir < 0 ? 'влево' : 'вправо'}. Осталось ${formatPowerSwingCharges(this.player.powerSwingCharges)}.`,
-      1300
-    );
-    this._renderTopicButtons();
+    this._showMessage(`Сильный рывок: ${directionLabel(dir).toLowerCase()}.`, 1300);
     return true;
   }
 
@@ -346,8 +286,6 @@ class Game {
       climbStrokePhase: 0,
       climbStrokeTimer: 0,
       baseLane: 0,
-      sidestepCharges: 0,
-      powerSwingCharges: 0,
       x: 0,
       vx: 0,
       lens: 0.08,
@@ -372,7 +310,6 @@ class Game {
     this.rockSpawnBlockedUntil = 0;
     this.avalancheSpawnBlockedUntil = 0;
     this.perchedBoulderBlockedUntil = 0;
-    this.lastSidestepHintAt = -1e9;
 
     this.stats = {
       answers: 0,
@@ -752,7 +689,7 @@ class Game {
     if (rampUp > 0.56 && Math.random() < 0.12 + rampUp * 0.18 + phaseRatio * 0.16) {
       count = 3;
     }
-    const baseSpeed = 7.1 + rampUp * 2.8 + phaseRatio * 3.2;
+    const baseSpeed = 5.6 + rampUp * 2 + phaseRatio * 2.2;
 
     for (let index = 0; index < count; index += 1) {
       const lane = lanes[index];
@@ -761,7 +698,7 @@ class Game {
         lane,
         x: laneToX(lane),
         y: this.player.progress + randomRange(ROCK_SPAWN_MIN_AHEAD, ROCK_SPAWN_MAX_AHEAD),
-        speed: baseSpeed + randomRange(0, 1.9),
+        speed: baseSpeed + randomRange(0, 1.2),
         size: randomRange(0.58, 0.86),
         armedUntil: now + 720,
         warning: true,
@@ -792,7 +729,7 @@ class Game {
     this.perchedBoulderBlockedUntil = Math.max(this.perchedBoulderBlockedUntil, now + ROCK_POST_AVALANCHE_LOCK_MS);
   }
 
-  openQuestion(slotId) {
+  openQuestion(slotId, direction = 0) {
     if (this.state !== 'running' || this.player.falling || this.currentQuestion || this.pendingDirection) {
       return;
     }
@@ -810,10 +747,16 @@ class Game {
       }
     }
 
+    if (isDirectionalBonus(slotId) && !direction) {
+      this._showMessage('У этого бонуса выбери половину кнопки: влево или вправо.', 1300);
+      return;
+    }
+
     this.currentQuestion = this.questionManager.getQuestion(slotId);
     if (!this.currentQuestion) {
       return;
     }
+    this.currentQuestion.direction = direction;
 
     this._renderQuestion();
     this._renderTopicButtons();
@@ -825,6 +768,8 @@ class Game {
     }
 
     const correct = index === this.currentQuestion.options.correctIndex;
+    const resolvedSlotId = this.currentQuestion.slotDef.id;
+    const resolvedDirection = this.currentQuestion.direction || 0;
     this.stats.answers += 1;
     if (correct) {
       this.stats.correct += 1;
@@ -848,7 +793,7 @@ class Game {
       if (this.audio) {
         this.audio.playCorrectAnswer();
       }
-      this._schedule(() => this._applyBonus(this.currentQuestion.slotDef.id), 260);
+      this._schedule(() => this._applyBonus(resolvedSlotId, resolvedDirection), 260);
     } else {
       this.ui.questionFeedback.classList.add('error');
       this.ui.questionFeedback.textContent = 'Ошибка. Опасности продолжили идти вниз без твоего бонуса.';
@@ -865,7 +810,7 @@ class Game {
     }
   }
 
-  _applyBonus(slotId) {
+  _applyBonus(slotId, direction = 0) {
     if (this.player.falling || this.state !== 'running') {
       return;
     }
@@ -896,18 +841,16 @@ class Game {
         break;
 
       case 'sidestep':
-        this.player.sidestepCharges += 1;
         this.currentQuestion = null;
         this._closeQuestionPanel();
-        this._showMessage(`Получен заряд смещения. В запасе: ${formatSidestepCharges(this.player.sidestepCharges)}.`, 1300);
+        this._performSidestep(direction);
         this._renderTopicButtons();
         break;
 
       case 'powerSwing':
-        this.player.powerSwingCharges += 1;
         this.currentQuestion = null;
         this._closeQuestionPanel();
-        this._showMessage(`Получен заряд сильного рывка. В запасе: ${formatPowerSwingCharges(this.player.powerSwingCharges)}.`, 1300);
+        this._performPowerSwing(direction);
         this._renderTopicButtons();
         break;
 
@@ -991,18 +934,10 @@ class Game {
     const questionLocked = Boolean(this.currentQuestion || this.pendingDirection || this.player.falling);
 
     this.slotConfigs.forEach((slotConfig, index) => {
-      const button = document.createElement('button');
       const isShield = slotConfig.slotDef.id === 'snowShield';
+      const isDirectional = Boolean(slotConfig.slotDef.splitDirections);
       const remaining = isShield ? Math.max(0, this.player.shieldCooldownUntil - this.currentTime) : 0;
       const isCooldown = remaining > 0;
-
-      button.className = 'topic-btn';
-      if (isCooldown) {
-        button.classList.add('cooldown');
-      }
-      if (questionLocked) {
-        button.classList.add('locked');
-      }
 
       const status = isShield
         ? isCooldown
@@ -1010,13 +945,13 @@ class Game {
           : this.player.shieldCharges > 0
             ? 'Щит активен'
             : 'Готов'
-        : slotConfig.slotDef.id === 'sidestep'
-          ? formatSidestepCharges(this.player.sidestepCharges)
-          : slotConfig.slotDef.id === 'powerSwing'
-            ? formatPowerSwingCharges(this.player.powerSwingCharges)
+        : isDirectional
+          ? slotConfig.slotDef.id === 'sidestep'
+            ? 'A / D'
+            : 'Shift+A / Shift+D'
           : 'Без CD';
 
-      button.innerHTML = `
+      const sharedMarkup = `
         <span class="topic-index">${index + 1}</span>
         <span class="topic-copy">
           <span class="topic-name">${slotConfig.grammarTopic}</span>
@@ -1025,6 +960,41 @@ class Game {
         <span class="topic-status">${status}</span>
       `;
 
+      if (isDirectional) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'topic-btn topic-btn-split';
+        if (isCooldown) {
+          wrapper.classList.add('cooldown');
+        }
+        if (questionLocked) {
+          wrapper.classList.add('locked');
+        }
+        wrapper.innerHTML = `
+          ${sharedMarkup}
+          <div class="topic-directions">
+            <button class="topic-direction-btn" type="button" data-dir="-1">Влево</button>
+            <button class="topic-direction-btn" type="button" data-dir="1">Вправо</button>
+          </div>
+        `;
+        wrapper.querySelectorAll('.topic-direction-btn').forEach((directionButton) => {
+          directionButton.disabled = questionLocked || isCooldown;
+          directionButton.addEventListener('click', () => {
+            this.openQuestion(slotConfig.slotDef.id, Number(directionButton.dataset.dir || 0));
+          });
+        });
+        this.ui.topicButtons.appendChild(wrapper);
+        return;
+      }
+
+      const button = document.createElement('button');
+      button.className = 'topic-btn';
+      if (isCooldown) {
+        button.classList.add('cooldown');
+      }
+      if (questionLocked) {
+        button.classList.add('locked');
+      }
+      button.innerHTML = sharedMarkup;
       button.addEventListener('click', () => this.openQuestion(slotConfig.slotDef.id));
       this.ui.topicButtons.appendChild(button);
     });
@@ -1038,7 +1008,9 @@ class Game {
     }
 
     this.ui.questionKicker.textContent = question.grammarTopic;
-    this.ui.questionTitle.textContent = question.slotDef.bonusLabel;
+    this.ui.questionTitle.textContent = question.direction
+      ? `${question.slotDef.bonusLabel}: ${directionLabel(question.direction).toLowerCase()}`
+      : question.slotDef.bonusLabel;
     this._refreshQuestionMeta();
     this.ui.questionText.textContent = question.text;
     this.ui.questionDisplay.textContent = question.display;
@@ -1078,7 +1050,7 @@ class Game {
     let cursor = 18 + randomRange(0, 4);
     let lastLane = 99;
 
-    while (cursor < SUMMIT_HEIGHT - 8) {
+    while (cursor < SUMMIT_HEIGHT - SUMMIT_ROCK_STOP_DISTANCE) {
       const lanePool = shuffleArray([-1, 0, 1]);
       const lane = lanePool.find((value) => value !== lastLane) ?? lanePool[0];
       const offset = lane === 0 ? (Math.random() < 0.5 ? -0.42 : 0.42) : lane * 0.24;
@@ -1104,6 +1076,10 @@ class Game {
     return this.hazards.avalanches.some((avalanche) => avalanche.y > this.player.progress - 4);
   }
 
+  _rocksShouldStopSpawning() {
+    return SUMMIT_HEIGHT - this.player.progress <= SUMMIT_ROCK_STOP_DISTANCE;
+  }
+
   _nearestRockAheadDistance() {
     const nearestRock = this.hazards.rocks
       .filter((rock) => rock.y >= this.player.progress)
@@ -1113,6 +1089,9 @@ class Game {
 
   _canSpawnRockWave(now) {
     if (this.currentQuestion || this.pendingDirection) {
+      return false;
+    }
+    if (this._rocksShouldStopSpawning()) {
       return false;
     }
     if (this._hasActiveAvalanche()) {
@@ -1132,6 +1111,9 @@ class Game {
   }
 
   _findPerchedBoulderCandidate() {
+    if (this._rocksShouldStopSpawning()) {
+      return null;
+    }
     if (this.currentTime < this.perchedBoulderBlockedUntil) {
       return null;
     }
@@ -1166,7 +1148,7 @@ class Game {
       lane: candidate.lane,
       x: candidate.x,
       y: candidate.y + randomRange(0.5, 1.4),
-      speed: 7 + this._phaseRatio() * 2.4 + randomRange(0, 1.2),
+      speed: 5.6 + this._phaseRatio() * 1.9 + randomRange(0, 0.9),
       size: candidate.size * randomRange(0.74, 0.9),
       armedUntil: this.currentTime + 680,
       warning: true,
@@ -1261,13 +1243,18 @@ class Game {
       return;
     }
 
+    if (this._rocksShouldStopSpawning()) {
+      this.ui.hazardText.textContent = 'До вершины меньше 10 метров. Новые камни больше не сходят, но лавина ещё возможна.';
+      return;
+    }
+
     const phaseRatio = this._phaseRatio();
     if (phaseRatio < 0.45) {
       this.ui.hazardText.textContent = 'Метель нарастает, а камни уже начали простреливать склон.';
     } else if (phaseRatio < 0.78) {
       this.ui.hazardText.textContent = 'Снег сходит с тёмной скалы, а трос всё сильнее дрожит под руками.';
     } else {
-      this.ui.hazardText.textContent = 'Жар поднимается снизу. Камни летят быстрее, а воздух смешан со снегом и пеплом.';
+      this.ui.hazardText.textContent = 'Жар поднимается снизу, а воздух смешан со снегом и пеплом.';
     }
   }
 
