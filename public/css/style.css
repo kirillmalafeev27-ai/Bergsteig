@@ -373,6 +373,7 @@ input[type="text"]:focus {
 .level-btn,
 .bonus-slot,
 .topic-btn,
+.topic-direction-btn,
 .option-btn,
 .direction-btn,
 .btn-primary,
@@ -389,6 +390,7 @@ input[type="text"]:focus {
 .level-btn,
 .bonus-slot,
 .topic-btn,
+.topic-direction-btn,
 .option-btn,
 .direction-btn {
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -404,6 +406,7 @@ input[type="text"]:focus {
 .level-btn:hover,
 .bonus-slot:hover,
 .topic-btn:hover,
+.topic-direction-btn:hover,
 .option-btn:hover,
 .direction-btn:hover,
 .btn-primary:hover,
@@ -446,7 +449,7 @@ input[type="text"]:focus {
 }
 
 .bonus-slot {
-  min-height: 150px;
+  min-height: 182px;
   padding: 14px;
   text-align: left;
 }
@@ -473,6 +476,25 @@ input[type="text"]:focus {
   color: #fbfdff;
   font-weight: 700;
   font-size: 0.98rem;
+}
+
+.slot-directions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.slot-direction {
+  padding: 6px 8px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  color: #d7e7f1;
+  text-align: center;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .slot-topic {
@@ -804,6 +826,10 @@ body.paused #lens-overlay {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
+.topic-btn-split {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
 .topic-btn.cooldown {
   opacity: 0.64;
 }
@@ -846,6 +872,32 @@ body.paused #lens-overlay {
 .topic-status {
   font-size: 0.75rem;
   color: #d0e6f2;
+}
+
+.topic-directions {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.topic-direction-btn {
+  min-height: 48px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background:
+    linear-gradient(180deg, rgba(16, 27, 38, 0.96), rgba(8, 14, 21, 0.96)),
+    radial-gradient(circle at top, rgba(255, 181, 108, 0.12), rgba(255, 181, 108, 0) 52%);
+  color: #f7fbfe;
+  font-size: 0.9rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+.topic-direction-btn:disabled {
+  cursor: default;
 }
 
 .question-text {
