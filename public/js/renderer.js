@@ -48,8 +48,10 @@ class BergRenderer {
     this.upAxis = new THREE.Vector3(0, 1, 0);
     this.tempVecA = new THREE.Vector3();
     this.tempVecB = new THREE.Vector3();
+    this.tempVecC = new THREE.Vector3();
 
     this.rockMeshes = new Map();
+    this.perchedBoulderMeshes = new Map();
     this.avalancheMeshes = new Map();
     this.footprints = new Map();
     this.cloudCards = [];
@@ -1730,17 +1732,16 @@ class BergRenderer {
     this.playerGroup.add(this.shieldRing);
 
     // Climbing tether: a multi-segment line from the harness to an anchor
-    // that sits above the climber and follows them up the route. Each
-    // segment damps toward a target position built from a catenary sag
-    // plus a reactive offset from the climber's lateral velocity — so
-    // when the body swings, the rope whips and settles instead of
-    // instantly snapping to a straight line.
+    // above the climber. Unlike a simple "points chase a curve" rig, this
+    // chain preserves segment lengths, so motion propagates up the rope and
+    // the lower section doesn't instantly hinge to the body.
     this.tetherSegmentCount = 14;
     this.tetherPoints = [];
     for (let i = 0; i < this.tetherSegmentCount; i += 1) {
       this.tetherPoints.push(new THREE.Vector3());
     }
     this.tetherVelocities = this.tetherPoints.map(() => new THREE.Vector3());
+    this.tetherInitialized = false;
     this.tetherGeometry = new THREE.BufferGeometry().setFromPoints(this.tetherPoints);
     this.tetherLine = new THREE.Line(this.tetherGeometry, this.materials.tether);
     this.root.add(this.tetherLine);
@@ -1846,6 +1847,11 @@ class BergRenderer {
         progressY: avalanche.y,
         y: this._sceneYFromGameY(avalanche.y)
       })),
+      perchedBoulders: (snapshot.perchedBoulders || []).map((boulder) => ({
+        ...boulder,
+        progressY: boulder.y,
+        y: this._sceneYFromGameY(boulder.y)
+      })),
       footprints: snapshot.footprints.map((mark) => ({
         ...mark,
         progressY: mark.y,
@@ -1865,6 +1871,7 @@ class BergRenderer {
     this._updateEnvironment(renderSnapshot, dt);
     this._updatePlayer(renderSnapshot, dt);
     this._updateRope(renderSnapshot);
+    this._updatePerchedBoulders(renderSnapshot, dt);
     this._updateHazards(renderSnapshot, dt);
     this._updateFootprints(renderSnapshot);
     this._updateParticles(renderSnapshot, dt);
@@ -2093,56 +2100,97 @@ class BergRenderer {
       this.rightLegPivot.rotation.x = -0.2;
     }
 
-    // Rope with sag and inertia. Each segment's target is the catenary
-    // between the harness (segment 0) and the upper anchor (last
-    // segment); individual segments are relaxed toward that target with
-    // damping, so a swinging body translates into a visible whip.
+    // Rope with inertia and length constraints. The harness endpoint is
+    // pinned, but the rest of the rope solves as a linked chain with a bit
+    // of slack, so sideways motion travels upward instead of creating a hard
+    // kink in the lowest section.
     this.harnessAnchor.updateMatrixWorld(true);
     const harnessPosition = this.harnessAnchor.getWorldPosition(this.tempVecA);
     this.root.worldToLocal(harnessPosition);
     const anchorX = this.playerRender.x * 0.38;
     const anchorY = this.playerRender.y + 7.4;
     const anchorZ = 1.25;
+    const anchorPosition = this.tempVecB.set(anchorX, anchorY, anchorZ);
 
     const count = this.tetherSegmentCount;
     const lateralVx = snapshot.player.vx || 0;
     const dtClamped = Math.min(dt, 0.05);
+    const directDistance = harnessPosition.distanceTo(anchorPosition);
+    const segmentLength = (directDistance * 1.08 + 0.42) / Math.max(1, count - 1);
 
-    for (let i = 0; i < count; i += 1) {
+    if (!this.tetherInitialized) {
+      for (let i = 0; i < count; i += 1) {
+        const t = i / (count - 1);
+        const sag = Math.sin(Math.PI * t) * 0.42;
+        this.tetherPoints[i].lerpVectors(harnessPosition, anchorPosition, t);
+        this.tetherPoints[i].y -= sag;
+        this.tetherVelocities[i].set(0, 0, 0);
+      }
+      this.tetherInitialized = true;
+    }
+
+    for (let i = 1; i < count - 1; i += 1) {
       const t = i / (count - 1);
-      // Hyperbolic catenary sag: strongest at the middle, zero at the
-      // two pinned endpoints. A small tension pulse every few seconds
-      // keeps the rope alive even when the climber is still.
-      const sag = Math.sin(Math.PI * t) * 0.55;
-      const wind = Math.sin(this.elapsed * 0.9 + t * 3.1) * 0.06;
-      const targetX = harnessPosition.x * (1 - t) + anchorX * t + wind;
-      const targetY = harnessPosition.y * (1 - t) + anchorY * t - sag;
-      const targetZ = harnessPosition.z * (1 - t) + anchorZ * t + Math.cos(this.elapsed * 0.7 + t * 2.2) * 0.05;
-
       const point = this.tetherPoints[i];
       const vel = this.tetherVelocities[i];
-      if (i === 0) {
-        // Endpoint 0 is hard-pinned to the harness.
-        point.set(harnessPosition.x, harnessPosition.y, harnessPosition.z);
-        vel.set(0, 0, 0);
-      } else if (i === count - 1) {
-        // Upper anchor: soft pin so tiny swing still reads, no drift.
-        point.set(targetX, targetY, targetZ);
-        vel.set(0, 0, 0);
-      } else {
-        // Spring-damper toward target. Lateral climber motion blows
-        // sideways through the middle of the rope so it whips.
-        const whip = Math.sin(Math.PI * t) * lateralVx * 0.006;
-        const tx = targetX + whip;
-        vel.x += (tx - point.x) * 24 * dtClamped;
-        vel.y += (targetY - point.y) * 22 * dtClamped;
-        vel.z += (targetZ - point.z) * 22 * dtClamped;
-        vel.multiplyScalar(Math.exp(-dtClamped * 6.5));
-        point.x += vel.x * dtClamped;
-        point.y += vel.y * dtClamped;
-        point.z += vel.z * dtClamped;
+
+      const lineX = harnessPosition.x * (1 - t) + anchorX * t;
+      const lineY = harnessPosition.y * (1 - t) + anchorY * t;
+      const lineZ = harnessPosition.z * (1 - t) + anchorZ * t;
+      const sag = Math.sin(Math.PI * t) * 0.52;
+      const guidePull = 10 + Math.sin(Math.PI * t) * 8;
+      const whip = Math.sin(Math.PI * t) * lateralVx * 0.0038;
+      const wind = Math.sin(this.elapsed * 0.9 + t * 3.1) * 0.03;
+      const depthPulse = Math.cos(this.elapsed * 0.7 + t * 2.2) * 0.022;
+
+      vel.x += (lineX + whip + wind - point.x) * guidePull * dtClamped;
+      vel.y += ((lineY - sag) - point.y) * (guidePull * 0.9) * dtClamped;
+      vel.z += (lineZ + depthPulse - point.z) * (guidePull * 0.8) * dtClamped;
+      vel.y -= (1.3 + Math.sin(Math.PI * t) * 0.35) * dtClamped;
+      vel.multiplyScalar(Math.exp(-dtClamped * 5.8));
+
+      point.x += vel.x * dtClamped;
+      point.y += vel.y * dtClamped;
+      point.z += vel.z * dtClamped;
+    }
+
+    for (let iteration = 0; iteration < 6; iteration += 1) {
+      this.tetherPoints[0].copy(harnessPosition);
+      this.tetherPoints[count - 1].copy(anchorPosition);
+
+      for (let i = 0; i < count - 1; i += 1) {
+        const left = this.tetherPoints[i];
+        const right = this.tetherPoints[i + 1];
+        const delta = this.tempVecC.copy(right).sub(left);
+        const distance = Math.max(0.0001, delta.length());
+        const stretch = (distance - segmentLength) / distance;
+
+        if (i === 0) {
+          right.addScaledVector(delta, -stretch);
+        } else if (i === count - 2) {
+          left.addScaledVector(delta, stretch);
+        } else {
+          left.addScaledVector(delta, stretch * 0.5);
+          right.addScaledVector(delta, -stretch * 0.5);
+        }
+      }
+
+      for (let i = 1; i < count - 1; i += 1) {
+        const t = i / (count - 1);
+        const guideX = harnessPosition.x * (1 - t) + anchorX * t;
+        const guideY = harnessPosition.y * (1 - t) + anchorY * t - Math.sin(Math.PI * t) * 0.5;
+        const guideZ = harnessPosition.z * (1 - t) + anchorZ * t;
+        const point = this.tetherPoints[i];
+        point.x += (guideX - point.x) * 0.02;
+        point.y += (guideY - point.y) * 0.035;
+        point.z += (guideZ - point.z) * 0.02;
       }
     }
+
+    this.tetherPoints[0].copy(harnessPosition);
+    this.tetherPoints[count - 1].copy(anchorPosition);
+    this.tetherVelocities[0].set(0, 0, 0);
+    this.tetherVelocities[count - 1].set(0, 0, 0);
 
     const tetherAttr = this.tetherGeometry.attributes.position;
     for (let i = 0; i < count; i += 1) {
@@ -2211,6 +2259,104 @@ class BergRenderer {
         const altFactor = clamp01(node.baseY / 240);
         node.ribbon.rotation.z += Math.sin(this.elapsed * 3.1 + node.baseY * 0.04) * 0.003 * (0.4 + altFactor);
         node.ribbon.position.x += Math.sin(this.elapsed * 2.2 + node.baseY * 0.06) * 0.002;
+      }
+    });
+  }
+
+  _updatePerchedBoulders(snapshot, dt) {
+    const nextIds = new Set();
+    snapshot.perchedBoulders.forEach((boulder, index) => {
+      nextIds.add(boulder.id);
+      let node = this.perchedBoulderMeshes.get(boulder.id);
+
+      if (!node) {
+        const group = new THREE.Group();
+        const core = new THREE.Mesh(
+          this._buildBoulderGeometry(1.35, 3, 0.16),
+          new THREE.MeshStandardMaterial({
+            map: this.materials.rock.map,
+            color: 0x4c5a64,
+            roughness: 0.95,
+            metalness: 0.06
+          })
+        );
+        core.castShadow = true;
+        core.receiveShadow = true;
+        group.add(core);
+
+        const shell = new THREE.Mesh(
+          new THREE.IcosahedronGeometry(1.55, 1),
+          new THREE.MeshBasicMaterial({
+            color: 0xe4eef5,
+            transparent: true,
+            opacity: 0.12,
+            depthWrite: false,
+            side: THREE.BackSide
+          })
+        );
+        group.add(shell);
+
+        const brace = new THREE.Mesh(
+          new THREE.CircleGeometry(1.05, 24),
+          new THREE.MeshBasicMaterial({
+            color: 0x0c1319,
+            transparent: true,
+            opacity: 0.22,
+            depthWrite: false
+          })
+        );
+        brace.scale.set(1.35, 0.62, 1);
+        brace.position.set(0, -0.72, -0.12);
+        group.add(brace);
+
+        const crack = new THREE.Mesh(
+          new THREE.PlaneGeometry(2.1, 0.34),
+          new THREE.MeshBasicMaterial({
+            color: 0xdde7ee,
+            transparent: true,
+            opacity: 0.14,
+            depthWrite: false
+          })
+        );
+        crack.position.set(0, -0.88, -0.05);
+        group.add(crack);
+
+        this.dynamicHazards.add(group);
+        node = { group, core, shell, brace, crack };
+        this.perchedBoulderMeshes.set(boulder.id, node);
+      }
+
+      const armedMix = boulder.armed ? 1 : 0.3;
+      const shakeMix = boulder.shaking ? 1 : 0;
+      const bob = Math.sin(this.elapsed * 1.4 + index * 0.7) * 0.05;
+      const jitter = shakeMix ? Math.sin(this.elapsed * 28 + index * 1.9) * 0.08 : 0;
+
+      node.group.position.set(boulder.x + jitter, boulder.y + bob, 1.12 + armedMix * 0.06);
+      node.group.scale.setScalar(boulder.size * 1.26);
+      node.group.rotation.x = -0.08;
+      node.group.rotation.y += (0.01 + armedMix * 0.01) * dt * 60;
+      node.group.rotation.z = -0.16 + Math.sin(this.elapsed * 2.3 + index) * 0.03 + shakeMix * Math.sin(this.elapsed * 24 + index) * 0.04;
+
+      node.core.material.color.setHex(boulder.armed ? 0x748591 : 0x43505a);
+      node.shell.material.opacity = 0.06 + armedMix * 0.08 + shakeMix * 0.14;
+      node.brace.material.opacity = 0.18 + armedMix * 0.08;
+      node.crack.material.opacity = 0.08 + armedMix * 0.12 + shakeMix * 0.12;
+      node.crack.scale.x = 1 + armedMix * 0.28;
+      node.crack.rotation.z = Math.sin(this.elapsed * 3.8 + index * 0.8) * 0.08;
+    });
+
+    Array.from(this.perchedBoulderMeshes.entries()).forEach(([id, node]) => {
+      if (!nextIds.has(id)) {
+        this.dynamicHazards.remove(node.group);
+        node.group.traverse((child) => {
+          if (child.geometry) {
+            child.geometry.dispose();
+          }
+          if (child.material) {
+            child.material.dispose();
+          }
+        });
+        this.perchedBoulderMeshes.delete(id);
       }
     });
   }

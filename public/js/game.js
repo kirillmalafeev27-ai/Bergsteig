@@ -12,6 +12,17 @@ const SPRING_DAMPING = 8.4;
 // teleporting. Fall-back from an avalanche hit resolves faster on purpose.
 const CLIMB_SPEED_UP = 2.05;
 const CLIMB_SPEED_DOWN = 11;
+const ROCK_SPAWN_MIN_AHEAD = 62;
+const ROCK_SPAWN_MAX_AHEAD = 82;
+const ROCK_POST_AVALANCHE_LOCK_MS = 5200;
+const AVALANCHE_POST_ROCK_LOCK_MS = 2600;
+const AVALANCHE_ROCK_CLEARANCE = 40;
+const PERCHED_BOULDER_DROP_CHANCE = 0.33;
+const PERCHED_BOULDER_MIN_AHEAD = 22;
+const PERCHED_BOULDER_MAX_AHEAD = 54;
+const PERCHED_BOULDER_SPACING_MIN = 10;
+const PERCHED_BOULDER_SPACING_MAX = 16;
+const PERCHED_BOULDER_VIEW_AHEAD = 70;
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -256,6 +267,10 @@ class Game {
     this.footprintCounter = 0;
     this.hazardCounter = 0;
     this.cameraShake = 0;
+    this.perchedBoulders = [];
+    this.rockSpawnBlockedUntil = 0;
+    this.avalancheSpawnBlockedUntil = 0;
+    this.perchedBoulderBlockedUntil = 0;
 
     this.stats = {
       answers: 0,
@@ -267,6 +282,7 @@ class Game {
 
     this.nextRockSpawnAt = this.startedAt + 13000;
     this.nextAvalancheSpawnAt = this.startedAt + 16000;
+    this.perchedBoulders = this._seedPerchedBoulders();
 
     this.currentQuestion = null;
     this.pendingDirection = null;
@@ -433,6 +449,9 @@ class Game {
     this._updateEnvironment(dt, timestamp);
     this._updateHazards(dt, timestamp);
     this._updateFootprints(dt);
+    if (this.currentQuestion) {
+      this._refreshQuestionMeta();
+    }
     if (this.renderer) {
       this.renderer.render(this._buildSnapshot(), dt);
     }
@@ -522,10 +541,18 @@ class Game {
 
     if (!this.player.falling) {
       if (now >= this.nextRockSpawnAt) {
-        this._spawnRockWave(now);
+        if (this._canSpawnRockWave(now)) {
+          this._spawnRockWave(now);
+        } else {
+          this.nextRockSpawnAt = now + 500;
+        }
       }
       if (now >= this.nextAvalancheSpawnAt) {
-        this._spawnAvalanche(now);
+        if (this._canSpawnAvalanche(now)) {
+          this._spawnAvalanche(now);
+        } else {
+          this.nextAvalancheSpawnAt = now + 700;
+        }
       }
       if (this.player.progress >= SUMMIT_HEIGHT) {
         this._handleWin();
@@ -557,6 +584,8 @@ class Game {
 
       if (!avalanche.processed && Math.abs(avalanche.y - this.player.progress) < 2.8) {
         avalanche.processed = true;
+        this.rockSpawnBlockedUntil = Math.max(this.rockSpawnBlockedUntil, now + ROCK_POST_AVALANCHE_LOCK_MS);
+        this.perchedBoulderBlockedUntil = Math.max(this.perchedBoulderBlockedUntil, now + ROCK_POST_AVALANCHE_LOCK_MS);
 
         if (this.player.shieldCharges > 0 && now < this.player.shieldUntil) {
           this.player.shieldCharges = 0;
@@ -610,8 +639,8 @@ class Game {
     const phaseRatio = this._phaseRatio();
     const rampUp = clamp((now - this.startedAt) / 30000, 0, 1);
     const lanes = shuffleArray([-1, 0, 1]);
-    const count = rampUp > 0.6 && Math.random() < 0.22 + phaseRatio * 0.18 ? 2 : 1;
-    const baseSpeed = 8.4 + rampUp * 4 + phaseRatio * 4.4;
+    const count = rampUp > 0.72 && Math.random() < 0.18 + phaseRatio * 0.12 ? 2 : 1;
+    const baseSpeed = 7.1 + rampUp * 2.8 + phaseRatio * 3.2;
 
     for (let index = 0; index < count; index += 1) {
       const lane = lanes[index];
@@ -619,8 +648,8 @@ class Game {
         id: `rock-${this.hazardCounter += 1}`,
         lane,
         x: laneToX(lane),
-        y: this.player.progress + randomRange(48, 64),
-        speed: baseSpeed + randomRange(0, 2.6),
+        y: this.player.progress + randomRange(ROCK_SPAWN_MIN_AHEAD, ROCK_SPAWN_MAX_AHEAD),
+        speed: baseSpeed + randomRange(0, 1.9),
         size: randomRange(1.1, 1.55),
         armedUntil: now + 720,
         warning: true,
@@ -628,8 +657,9 @@ class Game {
       });
     }
 
-    const cadence = randomRange(4000, 6400) - phaseRatio * 640 - rampUp * 1000;
-    this.nextRockSpawnAt = now + Math.max(2800, cadence);
+    const cadence = randomRange(5200, 7800) - phaseRatio * 440 - rampUp * 800;
+    this.nextRockSpawnAt = now + Math.max(3400, cadence);
+    this.avalancheSpawnBlockedUntil = Math.max(this.avalancheSpawnBlockedUntil, now + AVALANCHE_POST_ROCK_LOCK_MS);
   }
 
   _spawnAvalanche(now) {
@@ -646,6 +676,8 @@ class Game {
 
     const cadence = randomRange(16000, 22000) - phaseRatio * 1200 - rampUp * 2000;
     this.nextAvalancheSpawnAt = now + Math.max(12000, cadence);
+    this.rockSpawnBlockedUntil = Math.max(this.rockSpawnBlockedUntil, now + ROCK_POST_AVALANCHE_LOCK_MS);
+    this.perchedBoulderBlockedUntil = Math.max(this.perchedBoulderBlockedUntil, now + ROCK_POST_AVALANCHE_LOCK_MS);
   }
 
   openQuestion(slotId) {
@@ -709,6 +741,7 @@ class Game {
       this.ui.questionFeedback.classList.add('error');
       this.ui.questionFeedback.textContent = 'Ошибка. Опасности продолжили идти вниз без твоего бонуса.';
       this.player.lens = clamp(this.player.lens + 0.05, 0, 1);
+      this._rollPerchedBoulderOnMistake();
       if (this.audio) {
         this.audio.playWrongAnswer();
       }
@@ -890,7 +923,7 @@ class Game {
 
     this.ui.questionKicker.textContent = question.grammarTopic;
     this.ui.questionTitle.textContent = question.slotDef.bonusLabel;
-    this.ui.questionMeta.textContent = '1-4';
+    this._refreshQuestionMeta();
     this.ui.questionText.textContent = question.text;
     this.ui.questionDisplay.textContent = question.display;
     this.ui.questionFeedback.className = 'question-feedback hidden';
@@ -922,6 +955,119 @@ class Game {
 
   _closeDirectionPanel() {
     this.ui.directionPanel.classList.add('hidden');
+  }
+
+  _seedPerchedBoulders() {
+    const boulders = [];
+    let cursor = 18 + randomRange(0, 4);
+    let lastLane = 99;
+
+    while (cursor < SUMMIT_HEIGHT - 8) {
+      const lanePool = shuffleArray([-1, 0, 1]);
+      const lane = lanePool.find((value) => value !== lastLane) ?? lanePool[0];
+      const offset = lane === 0 ? (Math.random() < 0.5 ? -0.42 : 0.42) : lane * 0.24;
+
+      boulders.push({
+        id: `perched-${this.hazardCounter += 1}`,
+        lane,
+        x: laneToX(lane) + offset,
+        y: cursor,
+        size: randomRange(1.05, 1.45),
+        shakeUntil: 0,
+        spent: false
+      });
+
+      lastLane = lane;
+      cursor += randomRange(PERCHED_BOULDER_SPACING_MIN, PERCHED_BOULDER_SPACING_MAX);
+    }
+
+    return boulders;
+  }
+
+  _hasActiveAvalanche() {
+    return this.hazards.avalanches.some((avalanche) => avalanche.y > this.player.progress - 4);
+  }
+
+  _nearestRockAheadDistance() {
+    const nearestRock = this.hazards.rocks
+      .filter((rock) => rock.y >= this.player.progress)
+      .sort((left, right) => left.y - right.y)[0];
+    return nearestRock ? nearestRock.y - this.player.progress : Infinity;
+  }
+
+  _canSpawnRockWave(now) {
+    if (this.currentQuestion || this.pendingDirection) {
+      return false;
+    }
+    if (this._hasActiveAvalanche()) {
+      return false;
+    }
+    return now >= this.rockSpawnBlockedUntil;
+  }
+
+  _canSpawnAvalanche(now) {
+    if (this._hasActiveAvalanche()) {
+      return false;
+    }
+    if (now < this.avalancheSpawnBlockedUntil) {
+      return false;
+    }
+    return this._nearestRockAheadDistance() > AVALANCHE_ROCK_CLEARANCE;
+  }
+
+  _findPerchedBoulderCandidate() {
+    if (this.currentTime < this.perchedBoulderBlockedUntil) {
+      return null;
+    }
+    if (this._hasActiveAvalanche()) {
+      return null;
+    }
+    if (this._nearestRockAheadDistance() < 22) {
+      return null;
+    }
+
+    return this.perchedBoulders
+      .filter((boulder) => !boulder.spent)
+      .filter((boulder) => boulder.y > this.player.progress + PERCHED_BOULDER_MIN_AHEAD)
+      .filter((boulder) => boulder.y < this.player.progress + PERCHED_BOULDER_MAX_AHEAD)
+      .sort((left, right) => left.y - right.y)[0] || null;
+  }
+
+  _rollPerchedBoulderOnMistake() {
+    const candidate = this._findPerchedBoulderCandidate();
+    if (!candidate) {
+      return;
+    }
+
+    candidate.shakeUntil = this.currentTime + 1400;
+    if (Math.random() >= PERCHED_BOULDER_DROP_CHANCE) {
+      return;
+    }
+
+    candidate.spent = true;
+    this.hazards.rocks.push({
+      id: `rock-${this.hazardCounter += 1}`,
+      lane: candidate.lane,
+      x: candidate.x,
+      y: candidate.y + randomRange(0.5, 1.4),
+      speed: 7 + this._phaseRatio() * 2.4 + randomRange(0, 1.2),
+      size: candidate.size * randomRange(1.02, 1.14),
+      armedUntil: this.currentTime + 680,
+      warning: true,
+      closeCallDone: false
+    });
+    this.avalancheSpawnBlockedUntil = Math.max(this.avalancheSpawnBlockedUntil, this.currentTime + AVALANCHE_POST_ROCK_LOCK_MS);
+  }
+
+  _questionMetaText() {
+    return this._findPerchedBoulderCandidate() ? '1-4 / ошибка = валун 33%' : '1-4';
+  }
+
+  _refreshQuestionMeta() {
+    if (!this.ui.questionMeta) {
+      return;
+    }
+    this.ui.questionMeta.textContent = this._questionMetaText();
   }
 
   _updateHud() {
@@ -1011,6 +1157,7 @@ class Game {
 
   _buildSnapshot() {
     const stormStrength = 0.32 + this._phaseRatio() * 0.18 + this._dangerLevel() * 0.28;
+    const rollCandidate = this.currentQuestion ? this._findPerchedBoulderCandidate() : null;
 
     return {
       phaseRatio: this._phaseRatio(),
@@ -1042,6 +1189,18 @@ class Game {
         intensity: avalanche.intensity,
         heightScale: avalanche.heightScale
       })),
+      perchedBoulders: this.perchedBoulders
+        .filter((boulder) => !boulder.spent)
+        .filter((boulder) => boulder.y > this.player.progress - 10)
+        .filter((boulder) => boulder.y < this.player.progress + PERCHED_BOULDER_VIEW_AHEAD)
+        .map((boulder) => ({
+          id: boulder.id,
+          x: boulder.x,
+          y: boulder.y,
+          size: boulder.size,
+          armed: Boolean(rollCandidate && rollCandidate.id === boulder.id),
+          shaking: this.currentTime < boulder.shakeUntil
+        })),
       footprints: this.footprintMarks.map((mark) => ({
         id: mark.id,
         x: mark.x,
