@@ -74,6 +74,10 @@ function formatSidestepCharges(count) {
   return `${count} ${formatRussianCount(count, 'заряд', 'заряда', 'зарядов')}`;
 }
 
+function formatPowerSwingCharges(count) {
+  return formatSidestepCharges(count);
+}
+
 class Game {
   constructor() {
     this.ui = this._cacheUi();
@@ -176,13 +180,21 @@ class Game {
         return;
       }
 
-      if (this.pendingDirection) {
-        if (event.key === 'ArrowLeft' || event.key === 'a' || event.key === 'A') {
-          event.preventDefault();
-          this.commitDirection(-1);
-        } else if (event.key === 'ArrowRight' || event.key === 'd' || event.key === 'D') {
-          event.preventDefault();
-          this.commitDirection(1);
+      const dir =
+        event.key === 'ArrowLeft' || event.key === 'a' || event.key === 'A'
+          ? -1
+          : event.key === 'ArrowRight' || event.key === 'd' || event.key === 'D'
+            ? 1
+            : 0;
+
+      if (dir) {
+        event.preventDefault();
+        if (this.pendingDirection) {
+          this.commitDirection(dir);
+        } else if (event.shiftKey) {
+          this._tryUsePowerSwingCharge(dir, true);
+        } else {
+          this._tryUseSidestepCharge(dir, true);
         }
         return;
       }
@@ -193,18 +205,6 @@ class Game {
           event.preventDefault();
           this.answerQuestion(optionIndex);
         }
-        return;
-      }
-
-      if (event.key === 'ArrowLeft' || event.key === 'a' || event.key === 'A') {
-        event.preventDefault();
-        this._tryUseSidestepCharge(-1, true);
-        return;
-      }
-
-      if (event.key === 'ArrowRight' || event.key === 'd' || event.key === 'D') {
-        event.preventDefault();
-        this._tryUseSidestepCharge(1, true);
         return;
       }
 
@@ -224,10 +224,11 @@ class Game {
       this.commitDirection(dir);
       return;
     }
-    if (this.currentQuestion) {
+    if (this.player.sidestepCharges > 0) {
+      this._tryUseSidestepCharge(dir, true);
       return;
     }
-    this._tryUseSidestepCharge(dir, true);
+    this._tryUsePowerSwingCharge(dir, true);
   }
 
   _tryUseSidestepCharge(dir, showEmptyHint = false) {
@@ -267,6 +268,40 @@ class Game {
     this._showMessage(
       `Линия сменена: ${laneLabel(nextLane)}. Осталось ${formatSidestepCharges(this.player.sidestepCharges)}.`,
       1200
+    );
+    this._renderTopicButtons();
+    return true;
+  }
+
+  _tryUsePowerSwingCharge(dir, showEmptyHint = false) {
+    if (this.state !== 'running' || this.player.falling) {
+      return false;
+    }
+
+    if (this.player.powerSwingCharges <= 0) {
+      if (showEmptyHint && this.currentTime - this.lastSidestepHintAt > SIDESTEP_HINT_INTERVAL_MS) {
+        this.lastSidestepHintAt = this.currentTime;
+        this._showMessage('Нет зарядов сильного рывка. Сначала заработай их правильными ответами.', 1100);
+      }
+      return false;
+    }
+
+    this.player.powerSwingCharges = Math.max(0, this.player.powerSwingCharges - 1);
+    this.player.burst = {
+      anchorX: laneToX(this.player.baseLane) + dir * STRONG_SWING_DISTANCE,
+      until: this.currentTime + STRONG_SWING_HOLD_MS
+    };
+    this.player.vx += dir * 20.4;
+    this.cameraShake = Math.max(this.cameraShake, 0.34);
+    this._leaveFootprints(this.player.progress + 0.3, 0.7);
+
+    if (this.audio) {
+      this.audio.playPowerSwing();
+    }
+
+    this._showMessage(
+      `Сильный рывок: ${dir < 0 ? 'влево' : 'вправо'}. Осталось ${formatPowerSwingCharges(this.player.powerSwingCharges)}.`,
+      1300
     );
     this._renderTopicButtons();
     return true;
@@ -312,6 +347,7 @@ class Game {
       climbStrokeTimer: 0,
       baseLane: 0,
       sidestepCharges: 0,
+      powerSwingCharges: 0,
       x: 0,
       vx: 0,
       lens: 0.08,
@@ -726,7 +762,7 @@ class Game {
         x: laneToX(lane),
         y: this.player.progress + randomRange(ROCK_SPAWN_MIN_AHEAD, ROCK_SPAWN_MAX_AHEAD),
         speed: baseSpeed + randomRange(0, 1.9),
-        size: randomRange(0.52, 0.78),
+        size: randomRange(0.58, 0.86),
         armedUntil: now + 720,
         warning: true,
         closeCallDone: false
@@ -868,10 +904,10 @@ class Game {
         break;
 
       case 'powerSwing':
-        this.pendingDirection = { type: 'powerSwing' };
+        this.player.powerSwingCharges += 1;
         this.currentQuestion = null;
         this._closeQuestionPanel();
-        this._openDirectionPanel('Выбери сторону для сильного рывка вне линии');
+        this._showMessage(`Получен заряд сильного рывка. В запасе: ${formatPowerSwingCharges(this.player.powerSwingCharges)}.`, 1300);
         this._renderTopicButtons();
         break;
 
@@ -976,6 +1012,8 @@ class Game {
             : 'Готов'
         : slotConfig.slotDef.id === 'sidestep'
           ? formatSidestepCharges(this.player.sidestepCharges)
+          : slotConfig.slotDef.id === 'powerSwing'
+            ? formatPowerSwingCharges(this.player.powerSwingCharges)
           : 'Без CD';
 
       button.innerHTML = `
@@ -1129,7 +1167,7 @@ class Game {
       x: candidate.x,
       y: candidate.y + randomRange(0.5, 1.4),
       speed: 7 + this._phaseRatio() * 2.4 + randomRange(0, 1.2),
-      size: candidate.size * randomRange(0.68, 0.84),
+      size: candidate.size * randomRange(0.74, 0.9),
       armedUntil: this.currentTime + 680,
       warning: true,
       closeCallDone: false
@@ -1244,6 +1282,7 @@ class Game {
       cameraShake: this.cameraShake,
       player: {
         x: this.player.x,
+        baseLane: this.player.baseLane,
         y: this.player.progress,
         vx: this.player.vx,
         climbing: this.player.climbing,

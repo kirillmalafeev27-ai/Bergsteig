@@ -851,6 +851,8 @@ class BergRenderer {
     const outsideCorridor = absX > m.ROUTE_HALF;
     const insideRoute = !outsideCorridor;
     const flankFrac = outsideCorridor ? clamp01((absX - m.ROUTE_HALF) / m.FLANK_SPAN) : 0;
+    const routeCenter = insideRoute ? clamp01(1 - absX / (m.ROUTE_HALF * 0.94)) : 0;
+    const routeSmoothMask = insideRoute ? Math.pow(routeCenter, 1.35) : 0;
     // Soft falloff mask for the far flanks so noise and crags ease off before
     // the plane edge — prevents sharp "holes" when the silhouette recedes.
     const edgeFalloff = 1 - smoothStep(0.72, 1, flankFrac);
@@ -924,32 +926,37 @@ class BergRenderer {
     const routeChatter = insideRoute ? noise(x, meshY, 2.1, 1.46) * 0.22 : 0;
     const apexPush = smoothStep(0.84, 1, slopeRatio) * Math.max(0, 4.6 - absX * 0.34);
     const fractureMask = clamp01((faultScarps * 0.45 + brokenFaces * 0.18 + shearBands * 0.16) / 1.55);
+    const routeMacroScale = insideRoute ? 0.52 + (1 - routeSmoothMask) * 0.12 : 1;
+    const routeCragScale = insideRoute ? 0.34 + (1 - routeSmoothMask) * 0.16 : 1;
+    const routeBandScale = insideRoute ? 0.18 + (1 - routeSmoothMask) * 0.2 : 1;
+    const routeMicroScale = insideRoute ? 0.28 + (1 - routeSmoothMask) * 0.16 : 1;
+    const routeLaneScale = insideRoute ? 0.72 + (1 - routeSmoothMask) * 0.14 : 1;
 
     const z =
       -4.2 +
       spineBank +
-      terrace * 0.88 +
-      crags * (insideRoute ? 0.62 : 0.88 * edgeFalloff) +
-      fractureNoise * (insideRoute ? 0.32 : 0.62) * edgeFalloff +
-      shearBands * 1.18 +
-      faultScarps * 1.22 +
-      brokenFaces * 0.56 -
-      chimneyCuts * 0.92 +
+      terrace * (insideRoute ? 0.88 * routeMacroScale : 0.88) +
+      crags * (insideRoute ? 0.62 * routeCragScale : 0.88 * edgeFalloff) +
+      fractureNoise * (insideRoute ? 0.32 * routeMicroScale : 0.62) * edgeFalloff +
+      shearBands * (insideRoute ? 1.18 * routeBandScale : 1.18) +
+      faultScarps * (insideRoute ? 1.22 * routeBandScale : 1.22) +
+      brokenFaces * (insideRoute ? 0.56 * routeBandScale : 0.56) -
+      chimneyCuts * (insideRoute ? 0.92 * routeBandScale : 0.92) +
       sideMass * 1.08 +
       shoulderRise +
       buttress * 1.16 +
       crownLift +
-      brokenShelves * 1.18 +
-      ledges +
-      routeChatter +
-      laneRibs * 1.04 +
-      laneShoulders * 0.84 +
+      brokenShelves * (insideRoute ? 1.18 * routeMacroScale : 1.18) +
+      ledges * (insideRoute ? routeMicroScale : 1) +
+      routeChatter * (insideRoute ? routeMicroScale : 1) +
+      laneRibs * (insideRoute ? 1.04 * routeLaneScale : 1.04) +
+      laneShoulders * (insideRoute ? 0.84 * routeLaneScale : 0.84) +
       apexPush +
       flankRecession -
-      couloirDepth * 1.44 -
-      laneGullies * (1.34 + slopeRatio * 0.38);
+      couloirDepth * (insideRoute ? 1.58 + routeSmoothMask * 0.22 : 1.44) -
+      laneGullies * ((insideRoute ? 1.2 - routeSmoothMask * 0.08 : 1.34) + slopeRatio * (insideRoute ? 0.24 : 0.38));
 
-    return { x, z, insideRoute, slopeRatio, crags, terrace, flankFrac, fractureMask };
+    return { x, z, insideRoute, slopeRatio, crags, terrace, flankFrac, fractureMask, routeSmoothMask };
   }
 
   // Given a prop baseX plus its environmentGroup-local y, return the
@@ -1135,21 +1142,25 @@ class BergRenderer {
       positions.setZ(index, profile.z);
 
       const absX = Math.abs(profile.x);
+      const routeSmoothMask = profile.routeSmoothMask || 0;
       const snowMix = clamp01(
         1 - absX / 16.5 +
         smoothStep(0.72, 1, profile.slopeRatio) * 0.22 -
         Math.max(0, -profile.crags * 0.28) -
-        (profile.fractureMask || 0) * 0.12
+        (profile.fractureMask || 0) * 0.12 +
+        routeSmoothMask * 0.12
       );
       const darkMix = clamp01(
         Math.max(0, -profile.terrace * 0.32 - profile.crags * 0.22) +
         smoothStep(90, 10, y) * 0.14 +
         smoothStep(ROUTE_HALF + 3, ROUTE_HALF + 24, absX) * 0.25 +
         profile.flankFrac * 0.2 +
-        (profile.fractureMask || 0) * 0.24
+        (profile.fractureMask || 0) * 0.24 -
+        routeSmoothMask * 0.16
       );
       scratch.copy(stoneTone).lerp(snowTone, snowMix);
-      scratch.lerp(darkTone, darkMix * 0.75);
+      scratch.lerp(snowTone, routeSmoothMask * 0.06);
+      scratch.lerp(darkTone, Math.max(0, darkMix * (0.75 - routeSmoothMask * 0.16)));
       colors[index * 3] = scratch.r;
       colors[index * 3 + 1] = scratch.g;
       colors[index * 3 + 2] = scratch.b;
@@ -2781,7 +2792,7 @@ class BergRenderer {
       }
 
       node.group.position.set(rock.x, rock.y, 1.46 + Math.sin(this.elapsed * 2.2 + index) * 0.03);
-      node.group.scale.setScalar(rock.size * 0.82);
+      node.group.scale.setScalar(rock.size * 0.9);
       node.group.rotation.x += (node.spin.x + rock.speed * 0.00012) * dt * 60;
       node.group.rotation.y += (node.spin.y + rock.speed * 0.00016) * dt * 60;
       node.group.rotation.z += (node.spin.z + rock.speed * 0.00008) * dt * 60;
@@ -3182,16 +3193,20 @@ class BergRenderer {
     // left of his back, so the silhouette cuts through frame instead of
     // being centred and lifeless.
     const lateralX = snapshot.player.x || 0;
+    const baseLane = snapshot.player.baseLane || 0;
+    const activeCouloirX = baseLane * (window.BERG_ROUTE_LANE_SPACING || 6.35);
     const lateralVx = snapshot.player.vx || 0;
     const counterSway = -lateralX * 0.12 - lateralVx * 0.009;
+    const cameraLaneShift = activeCouloirX * (0.26 + danger * 0.04);
+    const lookLaneShift = activeCouloirX * (0.35 + danger * 0.03);
 
     const targetPosition = this.tempVecA.set(
-      lateralX * 0.42 + counterSway,
+      lateralX * 0.42 + counterSway + cameraLaneShift,
       playerWorldY + shoulderWorldY + camRise,
       this.playerRender.z + camBackOffset + Math.sin(this.elapsed * 0.42) * 0.04
     );
     const targetLook = this.tempVecB.set(
-      lateralX * 0.22,
+      lateralX * 0.22 + lookLaneShift,
       lookWorldY,
       lookZ
     );

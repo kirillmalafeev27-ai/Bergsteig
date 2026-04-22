@@ -3,10 +3,10 @@ const AUDIO_MASTER_DEFAULT = 0.24;
 const AUDIO_SAMPLES = {
   windLoop: {
     url: 'audio/ambience-wind-loop.mp3',
-    gain: 0.74,
+    gain: 0.94,
     playbackRate: 1,
-    loopStart: 0.45,
-    loopEnd: 13.6
+    loopStart: 0,
+    loopEnd: 6.95
   },
   threatLoop: {
     url: 'audio/ambience-threat-surge.mp3',
@@ -137,7 +137,7 @@ class AudioManager {
       return;
     }
 
-    const windTarget = 0.03 + progressRatio * 0.085 + dangerLevel * 0.05;
+    const windTarget = 0.055 + progressRatio * 0.11 + dangerLevel * 0.07;
     const threatTarget = 0.012 + progressRatio * 0.035 + dangerLevel * 0.11;
     this.windGain.gain.setTargetAtTime(windTarget, this.ctx.currentTime, 0.36);
     this.threatGain.gain.setTargetAtTime(threatTarget, this.ctx.currentTime, 0.28);
@@ -169,10 +169,10 @@ class AudioManager {
   }
 
   playSidestep() {
-    this._playSample('sidestepScrape', {
-      volume: 0.46,
-      duration: 0.84,
-      playbackRate: 1 + Math.random() * 0.05
+    this._playSample('climbSteps', {
+      volume: 0.52,
+      duration: 0.58,
+      playbackRate: 0.98 + Math.random() * 0.07
     });
   }
 
