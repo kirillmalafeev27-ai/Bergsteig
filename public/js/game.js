@@ -1,12 +1,14 @@
 const SUMMIT_HEIGHT = 100;
 const CLIMB_STEP = 6;
-const LANE_SPACING = 2.85;
-const STRONG_SWING_DISTANCE = 5.3;
-const STRONG_SWING_ESCAPE_X = 4.2;
-const STRONG_SWING_HOLD_MS = 720;
+window.BERG_ROUTE_LANE_SPACING = window.BERG_ROUTE_LANE_SPACING || 6.35;
+const LANE_SPACING = window.BERG_ROUTE_LANE_SPACING;
+const STRONG_SWING_DISTANCE = 9.8;
+const STRONG_SWING_ESCAPE_X = 8.1;
+const STRONG_SWING_HOLD_MS = 820;
 const SHIELD_ACTIVE_MS = 15000;
 const SPRING_STIFFNESS = 30;
-const SPRING_DAMPING = 8.4;
+const SPRING_DAMPING = 7.6;
+const MAX_PLAYER_X = 16.5;
 // Climb pacing: metres per second of rope. A full CLIMB_STEP (6 m) takes ~3 s,
 // so a double-climb bonus is ~6 s — enough to *feel* the ascent instead of
 // teleporting. Fall-back from an avalanche hit resolves faster on purpose.
@@ -17,12 +19,14 @@ const ROCK_SPAWN_MAX_AHEAD = 82;
 const ROCK_POST_AVALANCHE_LOCK_MS = 5200;
 const AVALANCHE_POST_ROCK_LOCK_MS = 2600;
 const AVALANCHE_ROCK_CLEARANCE = 40;
+const AVALANCHE_CADENCE_MULTIPLIER = 3;
 const PERCHED_BOULDER_DROP_CHANCE = 0.33;
 const PERCHED_BOULDER_MIN_AHEAD = 22;
 const PERCHED_BOULDER_MAX_AHEAD = 54;
 const PERCHED_BOULDER_SPACING_MIN = 10;
 const PERCHED_BOULDER_SPACING_MAX = 16;
 const PERCHED_BOULDER_VIEW_AHEAD = 70;
+const SIDESTEP_HINT_INTERVAL_MS = 900;
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -51,6 +55,23 @@ function formatCooldown(ms) {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = String(totalSeconds % 60).padStart(2, '0');
   return `${minutes}:${seconds}`;
+}
+
+function formatRussianCount(value, one, few, many) {
+  const abs = Math.abs(Math.trunc(value));
+  const mod10 = abs % 10;
+  const mod100 = abs % 100;
+  if (mod10 === 1 && mod100 !== 11) {
+    return one;
+  }
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) {
+    return few;
+  }
+  return many;
+}
+
+function formatSidestepCharges(count) {
+  return `${count} ${formatRussianCount(count, 'заряд', 'заряда', 'зарядов')}`;
 }
 
 class Game {
@@ -175,6 +196,18 @@ class Game {
         return;
       }
 
+      if (event.key === 'ArrowLeft' || event.key === 'a' || event.key === 'A') {
+        event.preventDefault();
+        this._tryUseSidestepCharge(-1, true);
+        return;
+      }
+
+      if (event.key === 'ArrowRight' || event.key === 'd' || event.key === 'D') {
+        event.preventDefault();
+        this._tryUseSidestepCharge(1, true);
+        return;
+      }
+
       const topicIndex = Number.parseInt(event.key, 10) - 1;
       if (topicIndex >= 0 && topicIndex < this.slotConfigs.length) {
         event.preventDefault();
@@ -194,18 +227,49 @@ class Game {
     if (this.currentQuestion) {
       return;
     }
+    this._tryUseSidestepCharge(dir, true);
+  }
+
+  _tryUseSidestepCharge(dir, showEmptyHint = false) {
+    if (this.state !== 'running' || this.player.falling) {
+      return false;
+    }
+
+    if (this.player.sidestepCharges <= 0) {
+      if (showEmptyHint && this.currentTime - this.lastSidestepHintAt > SIDESTEP_HINT_INTERVAL_MS) {
+        this.lastSidestepHintAt = this.currentTime;
+        this._showMessage('Нет зарядов смещения. Сначала заработай их правильными ответами.', 1100);
+      }
+      return false;
+    }
+
     const previousLane = this.player.baseLane;
     const nextLane = clamp(previousLane + dir, -1, 1);
     if (nextLane === previousLane) {
-      this.player.vx += dir * 3.2;
-      return;
+      this.player.vx += dir * 5.4;
+      this.cameraShake = Math.max(this.cameraShake, 0.08);
+      if (showEmptyHint && this.currentTime - this.lastSidestepHintAt > SIDESTEP_HINT_INTERVAL_MS) {
+        this.lastSidestepHintAt = this.currentTime;
+        this._showMessage('Крайняя линия. Смещаться дальше некуда.', 900);
+      }
+      return false;
     }
+
+    this.player.sidestepCharges = Math.max(0, this.player.sidestepCharges - 1);
     this.player.baseLane = nextLane;
-    this.player.vx += dir * 6.2;
-    this._leaveFootprints(this.player.progress + 0.3, 0.6);
+    this.player.vx += dir * 15.2;
+    this.cameraShake = Math.max(this.cameraShake, 0.18);
+    this._leaveFootprints(this.player.progress + 0.4, 0.74);
     if (this.audio) {
       this.audio.playSidestep();
     }
+
+    this._showMessage(
+      `Линия сменена: ${laneLabel(nextLane)}. Осталось ${formatSidestepCharges(this.player.sidestepCharges)}.`,
+      1200
+    );
+    this._renderTopicButtons();
+    return true;
   }
 
   _handleExit() {
@@ -247,6 +311,7 @@ class Game {
       climbStrokePhase: 0,
       climbStrokeTimer: 0,
       baseLane: 0,
+      sidestepCharges: 0,
       x: 0,
       vx: 0,
       lens: 0.08,
@@ -271,6 +336,7 @@ class Game {
     this.rockSpawnBlockedUntil = 0;
     this.avalancheSpawnBlockedUntil = 0;
     this.perchedBoulderBlockedUntil = 0;
+    this.lastSidestepHintAt = -1e9;
 
     this.stats = {
       answers: 0,
@@ -281,7 +347,7 @@ class Game {
     };
 
     this.nextRockSpawnAt = this.startedAt + 13000;
-    this.nextAvalancheSpawnAt = this.startedAt + 16000;
+    this.nextAvalancheSpawnAt = this.startedAt + 16000 * AVALANCHE_CADENCE_MULTIPLIER;
     this.perchedBoulders = this._seedPerchedBoulders();
 
     this.currentQuestion = null;
@@ -475,7 +541,7 @@ class Game {
     const accel = -SPRING_STIFFNESS * (this.player.x - anchorX) - SPRING_DAMPING * this.player.vx;
     this.player.vx += accel * dt;
     this.player.x += this.player.vx * dt;
-    this.player.x = clamp(this.player.x, -6.6, 6.6);
+    this.player.x = clamp(this.player.x, -MAX_PLAYER_X, MAX_PLAYER_X);
 
     if (this.player.falling) {
       const fallSeconds = (now - this.player.fallStartedAt) / 1000;
@@ -568,13 +634,17 @@ class Game {
     this.hazards.rocks.forEach((rock) => {
       rock.y -= rock.speed * dt;
       rock.warning = now < rock.armedUntil;
+      const closeCallY = 1.5 + rock.size * 0.95;
+      const closeCallX = 1.1 + rock.size * 0.9;
+      const hitY = 0.68 + rock.size * 0.44;
+      const hitX = 0.54 + rock.size * 0.46;
 
-      if (!rock.closeCallDone && Math.abs(rock.y - this.player.progress) < 2.5 && Math.abs(this.player.x - rock.x) < 2.5) {
+      if (!rock.closeCallDone && Math.abs(rock.y - this.player.progress) < closeCallY && Math.abs(this.player.x - rock.x) < closeCallX) {
         rock.closeCallDone = true;
         this.player.lens = clamp(this.player.lens + 0.03, 0, 1);
       }
 
-      if (Math.abs(rock.y - this.player.progress) < 1.2 && Math.abs(this.player.x - rock.x) < 1.28) {
+      if (Math.abs(rock.y - this.player.progress) < hitY && Math.abs(this.player.x - rock.x) < hitX) {
         this._handleRockHit();
       }
     });
@@ -639,7 +709,13 @@ class Game {
     const phaseRatio = this._phaseRatio();
     const rampUp = clamp((now - this.startedAt) / 30000, 0, 1);
     const lanes = shuffleArray([-1, 0, 1]);
-    const count = rampUp > 0.72 && Math.random() < 0.18 + phaseRatio * 0.12 ? 2 : 1;
+    let count = 1;
+    if (rampUp > 0.22 && Math.random() < 0.26 + rampUp * 0.2 + phaseRatio * 0.14) {
+      count = 2;
+    }
+    if (rampUp > 0.56 && Math.random() < 0.12 + rampUp * 0.18 + phaseRatio * 0.16) {
+      count = 3;
+    }
     const baseSpeed = 7.1 + rampUp * 2.8 + phaseRatio * 3.2;
 
     for (let index = 0; index < count; index += 1) {
@@ -650,7 +726,7 @@ class Game {
         x: laneToX(lane),
         y: this.player.progress + randomRange(ROCK_SPAWN_MIN_AHEAD, ROCK_SPAWN_MAX_AHEAD),
         speed: baseSpeed + randomRange(0, 1.9),
-        size: randomRange(1.1, 1.55),
+        size: randomRange(0.52, 0.78),
         armedUntil: now + 720,
         warning: true,
         closeCallDone: false
@@ -674,8 +750,8 @@ class Game {
       processed: false
     });
 
-    const cadence = randomRange(16000, 22000) - phaseRatio * 1200 - rampUp * 2000;
-    this.nextAvalancheSpawnAt = now + Math.max(12000, cadence);
+    const cadence = (randomRange(16000, 22000) - phaseRatio * 1200 - rampUp * 2000) * AVALANCHE_CADENCE_MULTIPLIER;
+    this.nextAvalancheSpawnAt = now + Math.max(36000, cadence);
     this.rockSpawnBlockedUntil = Math.max(this.rockSpawnBlockedUntil, now + ROCK_POST_AVALANCHE_LOCK_MS);
     this.perchedBoulderBlockedUntil = Math.max(this.perchedBoulderBlockedUntil, now + ROCK_POST_AVALANCHE_LOCK_MS);
   }
@@ -784,10 +860,10 @@ class Game {
         break;
 
       case 'sidestep':
-        this.pendingDirection = { type: 'sidestep' };
+        this.player.sidestepCharges += 1;
         this.currentQuestion = null;
         this._closeQuestionPanel();
-        this._openDirectionPanel('Выбери сторону для смещения на одну линию');
+        this._showMessage(`Получен заряд смещения. В запасе: ${formatSidestepCharges(this.player.sidestepCharges)}.`, 1300);
         this._renderTopicButtons();
         break;
 
@@ -840,7 +916,7 @@ class Game {
       const previousLane = this.player.baseLane;
       const nextLane = clamp(previousLane + dir, -1, 1);
       this.player.baseLane = nextLane;
-      this.player.vx += dir * (nextLane === previousLane ? 4.6 : 8.5);
+      this.player.vx += dir * (nextLane === previousLane ? 7.2 : 15.2);
       this.cameraShake = Math.max(this.cameraShake, 0.18);
       this._leaveFootprints(this.player.progress + 0.5, 0.8);
 
@@ -858,7 +934,7 @@ class Game {
         anchorX: laneToX(this.player.baseLane) + dir * STRONG_SWING_DISTANCE,
         until: this.currentTime + STRONG_SWING_HOLD_MS
       };
-      this.player.vx += dir * 13.8;
+      this.player.vx += dir * 20.4;
       this.cameraShake = Math.max(this.cameraShake, 0.34);
       this._leaveFootprints(this.player.progress + 0.3, 0.7);
 
@@ -898,7 +974,9 @@ class Game {
           : this.player.shieldCharges > 0
             ? 'Щит активен'
             : 'Готов'
-        : 'Без CD';
+        : slotConfig.slotDef.id === 'sidestep'
+          ? formatSidestepCharges(this.player.sidestepCharges)
+          : 'Без CD';
 
       button.innerHTML = `
         <span class="topic-index">${index + 1}</span>
@@ -972,7 +1050,7 @@ class Game {
         lane,
         x: laneToX(lane) + offset,
         y: cursor,
-        size: randomRange(1.05, 1.45),
+        size: randomRange(0.82, 1.12),
         shakeUntil: 0,
         spent: false
       });
@@ -1051,7 +1129,7 @@ class Game {
       x: candidate.x,
       y: candidate.y + randomRange(0.5, 1.4),
       speed: 7 + this._phaseRatio() * 2.4 + randomRange(0, 1.2),
-      size: candidate.size * randomRange(1.02, 1.14),
+      size: candidate.size * randomRange(0.68, 0.84),
       armedUntil: this.currentTime + 680,
       warning: true,
       closeCallDone: false

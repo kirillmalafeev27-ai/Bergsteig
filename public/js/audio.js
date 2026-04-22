@@ -161,20 +161,11 @@ class AudioManager {
 
   playClimb() {
     this._playSample('climbPull', {
-      volume: 0.48,
-      duration: 0.74,
-      playbackRate: 0.98 + Math.random() * 0.08
+      volume: 0.44,
+      offset: 0.04 + Math.random() * 0.1,
+      duration: 0.34,
+      playbackRate: 1.02 + Math.random() * 0.06
     });
-
-    if (Math.random() < 0.7) {
-      this._playSample('climbSteps', {
-        volume: 0.18,
-        offset: 0.14 + Math.random() * 0.55,
-        duration: 0.42,
-        delay: 0.02,
-        playbackRate: 1 + Math.random() * 0.08
-      });
-    }
   }
 
   playSidestep() {
