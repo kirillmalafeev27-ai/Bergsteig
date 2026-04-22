@@ -356,9 +356,14 @@ input[type="text"]:focus {
 }
 
 .selection-grid,
-.level-buttons {
+.level-buttons,
+.language-buttons {
   display: grid;
   gap: 10px;
+}
+
+.language-buttons {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .level-buttons {
@@ -370,6 +375,7 @@ input[type="text"]:focus {
 }
 
 .selection-btn,
+.language-btn,
 .level-btn,
 .bonus-slot,
 .topic-btn,
@@ -387,6 +393,7 @@ input[type="text"]:focus {
 }
 
 .selection-btn,
+.language-btn,
 .level-btn,
 .bonus-slot,
 .topic-btn,
@@ -403,6 +410,7 @@ input[type="text"]:focus {
 }
 
 .selection-btn:hover,
+.language-btn:hover,
 .level-btn:hover,
 .bonus-slot:hover,
 .topic-btn:hover,
@@ -421,6 +429,7 @@ input[type="text"]:focus {
 }
 
 .selection-btn.selected,
+.language-btn.active,
 .level-btn.active,
 .bonus-slot.selected {
   border-color: rgba(141, 211, 255, 0.42);
@@ -433,6 +442,55 @@ input[type="text"]:focus {
 .selection-btn.used {
   opacity: 0.34;
   pointer-events: none;
+}
+
+.language-btn {
+  min-height: 126px;
+  padding: 14px;
+  text-align: left;
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+
+.language-btn-topline {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+}
+
+.language-btn-title {
+  color: #fbfdff;
+  font-size: 1.04rem;
+  font-weight: 700;
+}
+
+.language-btn-tag {
+  padding: 5px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.05);
+  color: #d4e5f0;
+  font-size: 0.72rem;
+}
+
+.language-btn-subtitle {
+  color: #8dd3ff;
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.language-btn-teaser {
+  color: #ffd8b1;
+  font-size: 0.82rem;
+}
+
+.language-btn-copy {
+  color: #9bb1c2;
+  font-size: 0.84rem;
+  line-height: 1.45;
 }
 
 .level-btn {
@@ -1059,6 +1117,10 @@ body.paused #lens-overlay {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
+  .language-buttons {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .level-buttons {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
@@ -1110,6 +1172,7 @@ body.paused #lens-overlay {
 
   .selection-grid,
   .bonus-slots,
+  .language-buttons,
   .level-buttons {
     grid-template-columns: 1fr;
   }
