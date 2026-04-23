@@ -142,6 +142,73 @@
       <button type="button" class="touch-zone touch-zone-right" data-touch-dir="1" aria-label="Сместиться вправо"></button>
     </div>
 
+    <div id="game-hud" aria-live="polite">
+      <div class="hud-stack hud-stack-left">
+        <section class="hud-card hud-route-card" aria-label="Состояние маршрута">
+          <div class="hud-card-head">
+            <div>
+              <div class="panel-kicker">Маршрут</div>
+              <div id="altitude-text" class="hud-altitude-text">0 / 100 м</div>
+            </div>
+            <div id="phase-text" class="hud-phase-chip">Снежный склон</div>
+          </div>
+
+          <div class="hud-meter" aria-hidden="true">
+            <div id="altitude-bar" class="hud-meter-fill"></div>
+          </div>
+
+          <p id="phase-subtext" class="hud-phase-copy">Подъём только начинается: холодный свет, снег и пустой склон впереди.</p>
+
+          <div class="hud-mini-grid">
+            <div class="hud-mini-card">
+              <div class="hud-mini-label">Кулуар</div>
+              <div id="lane-text" class="hud-mini-value">Центр</div>
+            </div>
+            <div class="hud-mini-card">
+              <div class="hud-mini-label">Раскачка</div>
+              <div id="swing-text" class="hud-mini-value">0%</div>
+            </div>
+            <div class="hud-mini-card">
+              <div class="hud-mini-label">Объектив</div>
+              <div id="lens-text" class="hud-mini-value">Чисто</div>
+              <div id="lens-subtext" class="hud-mini-copy">Камера почти не заснежена.</div>
+            </div>
+            <div class="hud-mini-card">
+              <div class="hud-mini-label">Щит</div>
+              <div id="shield-text" class="hud-mini-value">Не активен</div>
+              <div id="shield-subtext" class="hud-mini-copy">Готов к использованию.</div>
+            </div>
+          </div>
+
+          <div class="hud-hazard-strip">
+            <div class="hud-mini-label">Опасность</div>
+            <p id="hazard-text" class="hud-hazard-text">Пока тихо. Камни и лавины еще не подошли вплотную.</p>
+          </div>
+        </section>
+
+        <div id="message-banner" class="hud-banner hidden" role="status" aria-live="polite"></div>
+      </div>
+
+      <div class="hud-stack hud-stack-right">
+        <section class="hud-card hud-session-card" aria-label="Текущая сессия">
+          <div class="panel-kicker">Восхождение</div>
+          <div id="player-display" class="hud-player-display">Игрок</div>
+          <div id="session-display" class="hud-session-display">Deutsch · A2 · Berge</div>
+        </section>
+
+        <div class="hud-actions" aria-label="Управление">
+          <button id="pause-btn" class="hud-action-btn" type="button" aria-label="Пауза (Esc)" title="Пауза (Esc)">
+            <span class="hud-action-icon">II</span>
+            <span class="hud-action-label">Пауза</span>
+          </button>
+          <button id="mute-btn" class="hud-action-btn" type="button" aria-pressed="false" aria-label="Выключить звук (M)" title="Выключить звук (M)">
+            <span class="hud-action-icon">S</span>
+            <span class="hud-action-label">Звук</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
     <div id="topic-panel" class="floating-panel">
       <div class="panel-topline">
         <div>
