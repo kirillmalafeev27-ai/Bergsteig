@@ -1204,11 +1204,18 @@ body.paused #lens-overlay {
     overflow-y: auto;
   }
 
-  /* Single-focus flow: when a question or direction picker is up, the
-     topic grid collapses so the player sees one surface at a time. */
-  #game-screen:has(#question-panel:not(.hidden)) #topic-panel,
+  /* Single-focus flow: the topic grid collapses only for the explicit
+     direction picker. During questions it stays available for emergency
+     sidestep and power-swing choices. */
   #game-screen:has(#direction-panel:not(.hidden)) #topic-panel {
     display: none !important;
+  }
+
+  #game-screen:has(#question-panel:not(.hidden)) #topic-panel {
+    top: 12px;
+    bottom: auto;
+    max-height: 34vh;
+    overflow-y: auto;
   }
 
   /* Tap-through prevention: while a modal surface is open, lane tap
