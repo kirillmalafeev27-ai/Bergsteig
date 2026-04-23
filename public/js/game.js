@@ -1251,12 +1251,13 @@ class Game {
     }
 
     const lane = shuffleArray([-1, 0, 1])[0];
+    const y = this.player.progress + randomRange(COULOIR_FISSURE_MIN_AHEAD, COULOIR_FISSURE_MAX_AHEAD);
     this.couloirFissure = {
       id: `fissure-${this.hazardCounter += 1}`,
       lane,
+      y,
       maxTurns: COULOIR_FISSURE_TURNS,
       turnsLeft: COULOIR_FISSURE_TURNS,
-      offsetY: randomRange(COULOIR_FISSURE_MIN_AHEAD, COULOIR_FISSURE_MAX_AHEAD),
       spawnedAt: this.currentTime
     };
     this.cameraShake = Math.max(this.cameraShake, 0.18);
@@ -1421,7 +1422,7 @@ class Game {
           id: this.couloirFissure.id,
           lane: this.couloirFissure.lane,
           x: laneToX(this.couloirFissure.lane),
-          y: this.player.progress + this.couloirFissure.offsetY,
+          y: this.couloirFissure.y ?? this.player.progress + this.couloirFissure.offsetY,
           maxTurns: this.couloirFissure.maxTurns || COULOIR_FISSURE_TURNS,
           turnsLeft: this.couloirFissure.turnsLeft,
           freshness: clamp(1 - (this.currentTime - this.couloirFissure.spawnedAt) / 1200, 0, 1)

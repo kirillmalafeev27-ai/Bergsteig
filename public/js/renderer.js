@@ -1215,6 +1215,14 @@ class BergRenderer {
     return points;
   }
 
+  // Flat irregular slit used for soft surface stains and the inner void.
+  _buildFissureShapeGeometry(width = 5.4, length = 1.5, seed = 0, jagScale = 0.14, pointsCount = 32) {
+    const outline = this._buildFissureOutline(width * 0.5, length * 0.5, seed, jagScale, pointsCount);
+    const geometry = new THREE.ShapeGeometry(new THREE.Shape(outline), 24);
+    geometry.computeVertexNormals();
+    return geometry;
+  }
+
   // Extruded ring forming the crevasse's snow-crust rim and the ice walls
   // descending to `depth`. Inner hole is a smaller, narrower slit so every
   // rim edge keeps visible crust thickness. Vertex colors paint the snow
@@ -3004,29 +3012,34 @@ class BergRenderer {
       // Spawn "cracks open" from a hairline to full aperture; once freshness
       // runs out, geometry stays at its full size — a real crevasse doesn't
       // heal as the climber answers correctly.
-      const openAnim = 1 - Math.pow(freshness, 2.2);
+      const openAnim = smoothStep(0, 1, 1 - Math.pow(freshness, 2.2));
       const pulse = 0.5 + 0.5 * Math.sin(this.elapsed * 3.6 + node.seed * 0.11);
 
       // Lay the group onto the mountain face with the surface normal as +Z.
       const surface = this._surfaceFrame(fissure.x, fissure.y);
       node.group.position.copy(surface.position);
-      node.group.position.addScaledVector(surface.normal, 0.06 + freshness * 0.04);
+      node.group.position.addScaledVector(surface.normal, 0.11 + freshness * 0.05);
       this.tempMatA.makeBasis(surface.tangentX, surface.tangentY, surface.normal);
       node.group.quaternion.setFromRotationMatrix(this.tempMatA);
+      node.group.rotateZ(node.twist);
 
       // Body breathes gently only during the spawn animation — no permanent
       // size change tied to turnsLeft.
-      node.body.scale.set(openAnim, openAnim, 1);
-      node.body.rotation.z = Math.sin(this.elapsed * 0.7 + node.seed * 0.12) * 0.02;
+      node.body.position.z = 0.028 + openAnim * 0.018;
+      node.body.scale.set(0.94 + openAnim * 0.06, 0.14 + openAnim * 0.86, 1);
+      node.body.rotation.z = Math.sin(this.elapsed * 0.8 + node.seed * 0.12) * 0.006 * freshness;
+      node.shadow.scale.set(0.92 + openAnim * 0.08, 0.18 + openAnim * 0.82, 1);
+      node.shadow.material.opacity = 0.08 + dangerMix * 0.08 + openAnim * 0.1 + freshness * 0.02;
 
-      node.lip.material.emissiveIntensity = 0.06 + dangerMix * 0.12 + freshness * 0.2;
-      node.abyss.material.opacity = 0.84 + dangerMix * 0.1;
-      node.glow.material.opacity = 0.14 + dangerMix * 0.2 + pulse * 0.07 + freshness * 0.14;
-      node.glow.scale.set(0.98 + pulse * 0.08, 0.92 + pulse * 0.06, 1);
-      node.shadow.material.opacity = 0.22 + dangerMix * 0.14 + freshness * 0.08;
-      node.mist.material.opacity = 0.05 + dangerMix * 0.1 + freshness * 0.16;
-      node.mist.scale.set(3.7 + pulse * 0.22, 1 + pulse * 0.16, 1);
-      node.mist.position.y = Math.sin(this.elapsed * 1.6 + index * 0.8) * 0.05;
+      node.lip.material.emissiveIntensity = 0.05 + dangerMix * 0.09 + freshness * 0.16;
+      node.abyss.material.opacity = 0.88 + dangerMix * 0.08;
+      node.abyss.scale.set(0.96 + openAnim * 0.04, 0.2 + openAnim * 0.8, 1);
+      node.glow.material.opacity = 0.09 + dangerMix * 0.12 + pulse * 0.04 + freshness * 0.08;
+      node.glow.scale.set(0.9 + pulse * 0.05, 0.2 + openAnim * 0.55 + pulse * 0.04, 1);
+      node.mist.material.opacity = 0.03 + dangerMix * 0.05 + freshness * 0.08;
+      node.mist.scale.set(3 + pulse * 0.18, 0.54 + openAnim * 0.26 + pulse * 0.06, 1);
+      node.mist.position.y = Math.sin(this.elapsed * 1.6 + index * 0.8) * 0.025;
+      node.mist.position.z = 0.28 + openAnim * 0.06;
 
       // Shards are siblings of the body, so they don't stretch with the
       // spawn animation — only a small z-wobble to sell instability.
@@ -3036,9 +3049,9 @@ class BergRenderer {
         if (!shardVisible) {
           return;
         }
-        const wobble = Math.sin(this.elapsed * shard.userData.wobble + shard.userData.phase + shardIndex) * 0.03;
-        shard.position.z = shard.userData.baseZ + wobble * (0.4 + dangerMix * 0.5);
-        shard.rotation.z = shard.userData.baseRotZ + wobble * 0.6;
+        const wobble = Math.sin(this.elapsed * shard.userData.wobble + shard.userData.phase + shardIndex) * 0.018;
+        shard.position.z = shard.userData.baseZ + wobble * (0.25 + dangerMix * 0.28);
+        shard.rotation.z = shard.userData.baseRotZ + wobble * 0.28;
       });
     });
 
@@ -3053,21 +3066,25 @@ class BergRenderer {
     // Soft dark pool on the surface around the crack — anchors it to the
     // slope so the floating ice doesn't read as a decal.
     const shadow = new THREE.Mesh(
-      new THREE.PlaneGeometry(6.8, 2.1),
+      this._buildFissureShapeGeometry(6.2, 1.04, seed + 5.3, 0.22, 34),
       new THREE.MeshBasicMaterial({
-        color: 0x050a11,
+        color: 0x06101a,
         transparent: true,
-        opacity: 0.26,
-        depthWrite: false
+        opacity: 0.18,
+        depthWrite: false,
+        side: THREE.DoubleSide
       })
     );
-    shadow.position.z = 0.008;
+    shadow.position.z = 0.012;
+    shadow.material.polygonOffset = true;
+    shadow.material.polygonOffsetFactor = -1;
+    shadow.material.polygonOffsetUnits = -1;
     group.add(shadow);
     group.add(body);
 
     // Ice rim + descending walls as a single extruded ring.
     const lip = new THREE.Mesh(
-      this._buildFissureLipGeometry(5.4, 1.5, 1.55, seed),
+      this._buildFissureLipGeometry(5.2, 1.22, 1.72, seed),
       new THREE.MeshStandardMaterial({
         emissive: 0x1a3550,
         emissiveIntensity: 0.08,
@@ -3087,52 +3104,52 @@ class BergRenderer {
     // The void at the bottom of the crack — slightly wider than the hole so
     // the walls read as fully enclosed when viewed head-on.
     const abyss = new THREE.Mesh(
-      new THREE.PlaneGeometry(3.6, 0.52),
+      this._buildFissureShapeGeometry(3.6, 0.4, seed + 41.7, 0.1, 30),
       new THREE.MeshBasicMaterial({
         color: 0x030608,
         transparent: true,
         opacity: 0.94,
-        depthWrite: false
+        depthWrite: false,
+        side: THREE.DoubleSide
       })
     );
-    abyss.position.z = -1.52;
+    abyss.position.z = -1.56;
     body.add(abyss);
 
     // A single cold glow layered mid-depth: gives the crack its "looking
     // into deep ice" quality without stacking five overlapping planes.
     const glow = new THREE.Mesh(
-      new THREE.PlaneGeometry(2.6, 0.4),
+      this._buildFissureShapeGeometry(2.5, 0.28, seed + 73.9, 0.08, 26),
       new THREE.MeshBasicMaterial({
         color: 0x2f78c8,
         transparent: true,
         opacity: 0.22,
         blending: THREE.AdditiveBlending,
-        depthWrite: false
+        depthWrite: false,
+        side: THREE.DoubleSide
       })
     );
-    glow.position.z = -0.72;
+    glow.position.z = -0.78;
     body.add(glow);
 
     // Chill vapor rising from the slit.
     const mist = new THREE.Sprite(this.materials.trail.clone());
     mist.material.color.setHex(0xd6ecfa);
     mist.material.opacity = 0.12;
-    mist.position.set(0, 0, 0.36);
-    mist.scale.set(3.8, 1, 1);
+    mist.position.set(0, 0, 0.3);
+    mist.scale.set(3.05, 0.62, 1);
     group.add(mist);
 
     // Ice debris scattered in a ring around the outside of the crack. Kept
     // at group level so the spawn animation (body scale) never squashes them.
     const shards = [];
-    const shardCount = 8;
+    const shardCount = 6;
     for (let i = 0; i < shardCount; i += 1) {
       const shardSeed = seed + i * 11.7 + 3.1;
-      const angle = (i / shardCount) * Math.PI * 2 + this._seededUnit(shardSeed) * 0.6;
-      const radialX = 2.95 + this._seededUnit(shardSeed + 3) * 0.55;
-      const radialY = 0.92 + this._seededUnit(shardSeed + 5) * 0.28;
-      const x = Math.cos(angle) * radialX;
-      const y = Math.sin(angle) * radialY;
-      const z = 0.05 + this._seededUnit(shardSeed + 7) * 0.14;
+      const side = i % 2 === 0 ? -1 : 1;
+      const x = side * (2.72 + this._seededUnit(shardSeed + 3) * 0.48);
+      const y = (this._seededUnit(shardSeed + 5) - 0.5) * 1.08;
+      const z = 0.04 + this._seededUnit(shardSeed + 7) * 0.1;
 
       const shard = new THREE.Mesh(
         this._buildBoulderGeometry(0.16 + this._seededUnit(shardSeed + 9) * 0.08, 1, 0.28, { seed: shardSeed }),
@@ -3157,7 +3174,18 @@ class BergRenderer {
     }
 
     this.dynamicHazards.add(group);
-    return { group, body, lip, abyss, glow, mist, shadow, shards, seed };
+    return {
+      group,
+      body,
+      lip,
+      abyss,
+      glow,
+      mist,
+      shadow,
+      shards,
+      seed,
+      twist: (this._seededUnit(seed + 29) - 0.5) * 0.24
+    };
   }
 
   _pruneFissures(liveIds) {
