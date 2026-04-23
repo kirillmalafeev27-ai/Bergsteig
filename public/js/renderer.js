@@ -1193,31 +1193,40 @@ class BergRenderer {
     return geometry;
   }
 
-  _buildFissureOutline(halfWidth, halfLength, seed = Math.random() * 1000, jagScale = 0.14, pointsCount = 28) {
+  // Jagged slit outline. Flattens the X axis and compresses the Y axis so
+  // the shape reads as an elongated crack, then breaks the edge with a
+  // seeded triple-octave wobble.
+  _buildFissureOutline(halfWidth, halfLength, seed = 0, jagScale = 0.14, pointsCount = 32) {
     const points = [];
-
     for (let index = 0; index < pointsCount; index += 1) {
       const angle = (index / pointsCount) * Math.PI * 2;
       const cos = Math.cos(angle);
       const sin = Math.sin(angle);
-      const signedX = Math.sign(cos) * Math.pow(Math.abs(cos), 0.56);
-      const signedY = Math.sign(sin) * Math.pow(Math.abs(sin), 1.36);
-      const contourNoise =
-        Math.sin(angle * 3.2 + seed * 0.07) * 0.08 +
-        Math.cos(angle * 7.1 - seed * 0.05) * 0.05 +
-        Math.sin(angle * 11.7 + seed * 0.13) * 0.03;
-      const ridge = 0.82 + Math.pow(Math.abs(sin), 0.62) * 0.34;
-      const x = signedX * halfWidth * (0.94 + Math.abs(sin) * 0.08) * (1 + contourNoise * jagScale * 2.1);
-      const y = signedY * halfLength * ridge * (1 + contourNoise * jagScale);
+      const shapedX = Math.sign(cos) * Math.pow(Math.abs(cos), 0.55);
+      const shapedY = Math.sign(sin) * Math.pow(Math.abs(sin), 1.4);
+      const noise =
+        Math.sin(angle * 3.1 + seed * 0.07) * 0.08 +
+        Math.cos(angle * 7.3 - seed * 0.05) * 0.05 +
+        Math.sin(angle * 13.1 + seed * 0.17) * 0.03;
+      const x = shapedX * halfWidth * (1 + noise * jagScale * 2);
+      const y = shapedY * halfLength * (1 + noise * jagScale);
       points.push(new THREE.Vector2(x, y));
     }
-
     return points;
   }
 
-  _buildFissureLipGeometry(width = 4.9, height = 1, depth = 1.9, seed = Math.random() * 1000) {
-    const outer = this._buildFissureOutline(width * 0.5, height * 0.5, seed, 0.2, 30);
-    const inner = this._buildFissureOutline(width * 0.23, height * 0.46, seed + 19.7, 0.12, 30).reverse();
+  // Extruded ring forming the crevasse's snow-crust rim and the ice walls
+  // descending to `depth`. Inner hole is a smaller, narrower slit so every
+  // rim edge keeps visible crust thickness. Vertex colors paint the snow
+  // crown, the pale ice, and the cold depth as the walls fall away.
+  _buildFissureLipGeometry(width = 5.4, length = 1.5, depth = 1.55, seed = 0) {
+    const outerHalfW = width * 0.5;
+    const outerHalfL = length * 0.5;
+    const innerHalfW = outerHalfW * 0.72;
+    const innerHalfL = outerHalfL * 0.34;
+
+    const outer = this._buildFissureOutline(outerHalfW, outerHalfL, seed, 0.18, 36);
+    const inner = this._buildFissureOutline(innerHalfW, innerHalfL, seed + 23.3, 0.24, 36).reverse();
     const shape = new THREE.Shape(outer);
     const hole = new THREE.Path();
     hole.setFromPoints(inner);
@@ -1227,35 +1236,36 @@ class BergRenderer {
       depth,
       steps: 1,
       bevelEnabled: true,
-      bevelSize: 0.08,
-      bevelThickness: 0.26,
+      bevelSize: 0.09,
+      bevelThickness: 0.22,
       bevelSegments: 3,
-      curveSegments: 26
+      curveSegments: 32
     });
+    // Surface crust at z=0, walls go down to z=-depth.
     geometry.translate(0, 0, -depth);
 
     const positions = geometry.attributes.position;
     const colors = new Float32Array(positions.count * 3);
-    const rimColor = new THREE.Color(0xe9f7ff);
-    const wallColor = new THREE.Color(0x8ea7b8);
-    const deepColor = new THREE.Color(0x40576d);
+    const snowColor = new THREE.Color(0xeaf4fb);
+    const iceColor = new THREE.Color(0x7a95ad);
+    const deepColor = new THREE.Color(0x1f3042);
     const scratch = new THREE.Color();
 
     for (let index = 0; index < positions.count; index += 1) {
       const x = positions.getX(index);
       const y = positions.getY(index);
       const z = positions.getZ(index);
-      const nx = x / (width * 0.5);
-      const ny = y / (height * 0.5);
       const depthMix = clamp01(-z / depth);
-      const iceBreak =
-        Math.sin(nx * 10.1 + ny * 2.4 + seed * 0.13) * 0.06 +
-        Math.cos(ny * 13.3 - seed * 0.08) * 0.04;
-      const upperSnow = clamp01(1 - depthMix * 1.65 + Math.abs(iceBreak) * 0.7);
-      scratch.copy(rimColor)
-        .lerp(wallColor, depthMix * 0.72)
-        .lerp(deepColor, Math.pow(depthMix, 1.25) * 0.44);
-      scratch.offsetHSL(0, 0, upperSnow * 0.04 - 0.02);
+      const nx = x / outerHalfW;
+      const ny = y / outerHalfL;
+      const breakNoise =
+        Math.sin(nx * 9.7 + ny * 3.1 + seed * 0.13) * 0.04 +
+        Math.cos(ny * 12.6 - seed * 0.08) * 0.025;
+
+      scratch.copy(snowColor)
+        .lerp(iceColor, Math.pow(depthMix, 0.8))
+        .lerp(deepColor, Math.pow(depthMix, 1.7) * 0.7);
+      scratch.offsetHSL(0, 0, breakNoise);
 
       colors[index * 3] = scratch.r;
       colors[index * 3 + 1] = scratch.g;
@@ -1267,38 +1277,15 @@ class BergRenderer {
     return geometry;
   }
 
-  _buildFissureCoreGeometry(width = 2.55, height = 1, depth = 1.28, seed = Math.random() * 1000) {
-    const geometry = new THREE.PlaneGeometry(width, height, 24, 28);
-    const positions = geometry.attributes.position;
-    const colors = new Float32Array(positions.count * 3);
-    const innerBlue = new THREE.Color(0x17345a);
-    const deepBlue = new THREE.Color(0x07111d);
-    const scratch = new THREE.Color();
-
-    for (let index = 0; index < positions.count; index += 1) {
-      const x = positions.getX(index);
-      const y = positions.getY(index);
-      const nx = x / (width * 0.5);
-      const ny = y / (height * 0.5);
-      const slit = Math.pow(clamp01(1 - Math.abs(nx) * 1.02), 0.46);
-      const lengthFalloff = Math.pow(1 - Math.abs(ny), 0.76);
-      const jag =
-        Math.sin(nx * 8.9 + ny * 5.4 + seed * 0.12) * 0.08 +
-        Math.cos(ny * 15.6 - seed * 0.07) * 0.05;
-      const z = -0.24 - slit * (depth * (0.84 + lengthFalloff * 0.34)) - Math.abs(jag) * 0.12;
-      const warpedX = x + Math.sin(ny * 11.8 + seed * 0.19) * 0.08 * (0.3 + slit * 0.7);
-      const warpedY = y + Math.cos(nx * 7.1 - seed * 0.09) * 0.03 * (1 - slit * 0.22);
-      positions.setXYZ(index, warpedX, warpedY, z);
-
-      scratch.copy(deepBlue).lerp(innerBlue, clamp01(0.3 + slit * 0.78 + lengthFalloff * 0.08));
-      colors[index * 3] = scratch.r;
-      colors[index * 3 + 1] = scratch.g;
-      colors[index * 3 + 2] = scratch.b;
+  // Stable hash from a fissure id so a single crevasse reads consistent
+  // across frames (same shard layout, same noise seed) without re-rolling.
+  _fissureSeed(id) {
+    const source = String(id);
+    let hash = 0;
+    for (let i = 0; i < source.length; i += 1) {
+      hash = (hash * 131 + source.charCodeAt(i)) >>> 0;
     }
-
-    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-    geometry.computeVertexNormals();
-    return geometry;
+    return (hash % 100000) * 0.01;
   }
 
   _buildEnvironment() {
@@ -3000,211 +2987,194 @@ class BergRenderer {
   }
 
   _updateCouloirFissures(snapshot, dt) {
-    const nextIds = new Set();
-    (snapshot.couloirFissures || []).forEach((fissure, index) => {
-      nextIds.add(fissure.id);
+    const liveIds = new Set();
+    const fissures = snapshot.couloirFissures || [];
+
+    fissures.forEach((fissure, index) => {
+      liveIds.add(fissure.id);
       let node = this.fissureMeshes.get(fissure.id);
-
       if (!node) {
-        const group = new THREE.Group();
-        const fissureBody = new THREE.Group();
-        group.add(fissureBody);
-        const seed = Math.random() * 1000;
-        const lip = new THREE.Mesh(
-          this._buildFissureLipGeometry(5.05, 1, 1.92, seed),
-          new THREE.MeshStandardMaterial({
-            color: 0xc7dced,
-            emissive: 0x16314a,
-            emissiveIntensity: 0.08,
-            roughness: 0.86,
-            metalness: 0.02,
-            vertexColors: true
-          })
-        );
-        lip.castShadow = true;
-        lip.receiveShadow = true;
-        lip.material.polygonOffset = true;
-        lip.material.polygonOffsetFactor = -2;
-        lip.material.polygonOffsetUnits = -2;
-        fissureBody.add(lip);
-
-        const throat = new THREE.Mesh(
-          this._buildFissureCoreGeometry(2.55, 1, 1.28, seed + 11.3),
-          new THREE.MeshStandardMaterial({
-            color: 0x08131f,
-            emissive: 0x123d68,
-            emissiveIntensity: 0.34,
-            roughness: 0.58,
-            metalness: 0.02,
-            vertexColors: true
-          })
-        );
-        throat.position.z = -0.42;
-        throat.receiveShadow = true;
-        fissureBody.add(throat);
-
-        const shadow = new THREE.Mesh(
-          new THREE.PlaneGeometry(6.45, 1.28),
-          new THREE.MeshBasicMaterial({
-            color: 0x061018,
-            transparent: true,
-            opacity: 0.26,
-            depthWrite: false
-          })
-        );
-        shadow.position.set(0, 0, -0.12);
-        fissureBody.add(shadow);
-
-        const rimLeft = new THREE.Mesh(
-          new THREE.PlaneGeometry(0.18, 1.06),
-          new THREE.MeshBasicMaterial({
-            color: 0xd8efff,
-            transparent: true,
-            opacity: 0.16,
-            depthWrite: false,
-            side: THREE.DoubleSide
-          })
-        );
-        rimLeft.position.set(-1.28, 0, 0.1);
-        fissureBody.add(rimLeft);
-
-        const rimRight = new THREE.Mesh(
-          new THREE.PlaneGeometry(0.18, 1.06),
-          new THREE.MeshBasicMaterial({
-            color: 0xd8efff,
-            transparent: true,
-            opacity: 0.16,
-            depthWrite: false,
-            side: THREE.DoubleSide
-          })
-        );
-        rimRight.position.set(1.28, 0, 0.1);
-        fissureBody.add(rimRight);
-
-        const abyssGlow = new THREE.Mesh(
-          new THREE.PlaneGeometry(2.4, 0.86),
-          new THREE.MeshBasicMaterial({
-            color: 0x1a4f8f,
-            transparent: true,
-            opacity: 0.24,
-            blending: THREE.AdditiveBlending,
-            depthWrite: false
-          })
-        );
-        abyssGlow.position.set(0, 0, -0.84);
-        fissureBody.add(abyssGlow);
-
-        const mist = new THREE.Sprite(this.materials.trail.clone());
-        mist.material.color.setHex(0xcbe7ff);
-        mist.material.opacity = 0.12;
-        mist.position.set(0, 0, 0.34);
-        mist.scale.set(3.5, 0.88, 1);
-        fissureBody.add(mist);
-
-        const chillBloom = new THREE.Sprite(this.materials.trail.clone());
-        chillBloom.material.color.setHex(0x346caa);
-        chillBloom.material.opacity = 0.12;
-        chillBloom.position.set(0, 0, -0.42);
-        chillBloom.scale.set(2.15, 0.66, 1);
-        fissureBody.add(chillBloom);
-
-        const shards = [];
-        for (let sideIndex = 0; sideIndex < 2; sideIndex += 1) {
-          const side = sideIndex === 0 ? -1 : 1;
-          for (let shardIndex = 0; shardIndex < 4; shardIndex += 1) {
-            const shardSeed = seed + sideIndex * 37 + shardIndex * 11;
-            const shard = new THREE.Mesh(
-              this._buildBoulderGeometry(0.17 + shardIndex * 0.02, 1, 0.26, { seed: shardSeed }),
-              this._makeRockMaterial(shardSeed, 'env')
-            );
-            shard.castShadow = true;
-            shard.receiveShadow = true;
-            const x = side * (1.86 + Math.random() * 0.48);
-            const y = -0.38 + shardIndex * 0.25 + (Math.random() - 0.5) * 0.06;
-            const z = 0.06 + Math.random() * 0.16;
-            shard.position.set(x, y, z);
-            shard.rotation.set(
-              (Math.random() - 0.5) * 0.4,
-              Math.random() * Math.PI * 2,
-              (Math.random() - 0.5) * 0.5
-            );
-            shard.userData = {
-              baseZ: z,
-              baseRotZ: shard.rotation.z,
-              wobble: 0.8 + Math.random() * 0.8,
-              phase: Math.random() * Math.PI * 2
-            };
-            fissureBody.add(shard);
-            shards.push(shard);
-          }
-        }
-
-        this.dynamicHazards.add(group);
-        node = {
-          group,
-          fissureBody,
-          lip,
-          throat,
-          shadow,
-          rimLeft,
-          rimRight,
-          abyssGlow,
-          mist,
-          chillBloom,
-          shards,
-          seed
-        };
+        node = this._createFissureNode(fissure);
         this.fissureMeshes.set(fissure.id, node);
       }
 
       const maxTurns = Math.max(1, fissure.maxTurns || 3);
-      const openMix = clamp01((fissure.turnsLeft || 0) / maxTurns);
-      const pulse = 0.5 + 0.5 * Math.sin(this.elapsed * 4.4 + index * 0.8);
+      const dangerMix = clamp01((fissure.turnsLeft || 0) / maxTurns);
       const freshness = fissure.freshness || 0;
-      const lengthScale = Math.max(0.9, (fissure.turnsLeft || 0) * 1.28);
-      const surface = this._surfaceFrame(fissure.x, fissure.y);
+      // Spawn "cracks open" from a hairline to full aperture; once freshness
+      // runs out, geometry stays at its full size — a real crevasse doesn't
+      // heal as the climber answers correctly.
+      const openAnim = 1 - Math.pow(freshness, 2.2);
+      const pulse = 0.5 + 0.5 * Math.sin(this.elapsed * 3.6 + node.seed * 0.11);
 
-      node.group.position.set(surface.position.x, surface.position.y, surface.position.z);
-      node.group.position.addScaledVector(surface.normal, 0.08 + openMix * 0.05 + freshness * 0.04);
+      // Lay the group onto the mountain face with the surface normal as +Z.
+      const surface = this._surfaceFrame(fissure.x, fissure.y);
+      node.group.position.copy(surface.position);
+      node.group.position.addScaledVector(surface.normal, 0.06 + freshness * 0.04);
       this.tempMatA.makeBasis(surface.tangentX, surface.tangentY, surface.normal);
       node.group.quaternion.setFromRotationMatrix(this.tempMatA);
 
-      node.fissureBody.rotation.z = Math.sin(this.elapsed * 0.8 + node.seed * 0.12) * 0.035;
-      node.fissureBody.scale.set(1 + openMix * 0.06, lengthScale, 1);
+      // Body breathes gently only during the spawn animation — no permanent
+      // size change tied to turnsLeft.
+      node.body.scale.set(openAnim, openAnim, 1);
+      node.body.rotation.z = Math.sin(this.elapsed * 0.7 + node.seed * 0.12) * 0.02;
 
-      node.lip.material.emissiveIntensity = 0.05 + freshness * 0.08;
-      node.throat.material.emissiveIntensity = 0.28 + openMix * 0.18 + freshness * 0.16;
-      node.shadow.material.opacity = 0.16 + openMix * 0.18;
-      node.rimLeft.material.opacity = 0.12 + openMix * 0.16 + pulse * 0.07 + freshness * 0.08;
-      node.rimRight.material.opacity = 0.12 + openMix * 0.16 + (1 - pulse) * 0.07 + freshness * 0.08;
-      node.abyssGlow.material.opacity = 0.16 + openMix * 0.16 + freshness * 0.12;
-      node.abyssGlow.scale.set(1.02 + pulse * 0.16, 0.9 + pulse * 0.14, 1);
-      node.mist.material.opacity = 0.04 + openMix * 0.08 + freshness * 0.1;
-      node.mist.scale.set(3.35 + openMix * 0.52, 0.9 + pulse * 0.22, 1);
-      node.mist.position.y = Math.sin(this.elapsed * 1.8 + index) * 0.05;
-      node.chillBloom.material.opacity = 0.05 + openMix * 0.08 + freshness * 0.08;
-      node.chillBloom.scale.set(2 + pulse * 0.22, 0.64 + openMix * 0.06, 1);
+      node.lip.material.emissiveIntensity = 0.06 + dangerMix * 0.12 + freshness * 0.2;
+      node.abyss.material.opacity = 0.84 + dangerMix * 0.1;
+      node.glow.material.opacity = 0.14 + dangerMix * 0.2 + pulse * 0.07 + freshness * 0.14;
+      node.glow.scale.set(0.98 + pulse * 0.08, 0.92 + pulse * 0.06, 1);
+      node.shadow.material.opacity = 0.22 + dangerMix * 0.14 + freshness * 0.08;
+      node.mist.material.opacity = 0.05 + dangerMix * 0.1 + freshness * 0.16;
+      node.mist.scale.set(3.7 + pulse * 0.22, 1 + pulse * 0.16, 1);
+      node.mist.position.y = Math.sin(this.elapsed * 1.6 + index * 0.8) * 0.05;
 
+      // Shards are siblings of the body, so they don't stretch with the
+      // spawn animation — only a small z-wobble to sell instability.
+      const shardVisible = openAnim > 0.15;
       node.shards.forEach((shard, shardIndex) => {
-        const wobble = Math.sin(this.elapsed * (1.4 + shard.userData.wobble) + shard.userData.phase + shardIndex) * 0.03;
-        shard.position.z = shard.userData.baseZ + wobble * (0.6 + openMix * 0.7);
-        shard.rotation.z = shard.userData.baseRotZ + wobble * 0.8;
+        shard.visible = shardVisible;
+        if (!shardVisible) {
+          return;
+        }
+        const wobble = Math.sin(this.elapsed * shard.userData.wobble + shard.userData.phase + shardIndex) * 0.03;
+        shard.position.z = shard.userData.baseZ + wobble * (0.4 + dangerMix * 0.5);
+        shard.rotation.z = shard.userData.baseRotZ + wobble * 0.6;
       });
     });
 
+    this._pruneFissures(liveIds);
+  }
+
+  _createFissureNode(fissure) {
+    const seed = this._fissureSeed(fissure.id);
+    const group = new THREE.Group();
+    const body = new THREE.Group();
+
+    // Soft dark pool on the surface around the crack — anchors it to the
+    // slope so the floating ice doesn't read as a decal.
+    const shadow = new THREE.Mesh(
+      new THREE.PlaneGeometry(6.8, 2.1),
+      new THREE.MeshBasicMaterial({
+        color: 0x050a11,
+        transparent: true,
+        opacity: 0.26,
+        depthWrite: false
+      })
+    );
+    shadow.position.z = 0.008;
+    group.add(shadow);
+    group.add(body);
+
+    // Ice rim + descending walls as a single extruded ring.
+    const lip = new THREE.Mesh(
+      this._buildFissureLipGeometry(5.4, 1.5, 1.55, seed),
+      new THREE.MeshStandardMaterial({
+        emissive: 0x1a3550,
+        emissiveIntensity: 0.08,
+        roughness: 0.88,
+        metalness: 0.02,
+        vertexColors: true
+      })
+    );
+    lip.castShadow = true;
+    lip.receiveShadow = true;
+    // Avoid z-fighting with the mountain face at the crest of the rim.
+    lip.material.polygonOffset = true;
+    lip.material.polygonOffsetFactor = -2;
+    lip.material.polygonOffsetUnits = -2;
+    body.add(lip);
+
+    // The void at the bottom of the crack — slightly wider than the hole so
+    // the walls read as fully enclosed when viewed head-on.
+    const abyss = new THREE.Mesh(
+      new THREE.PlaneGeometry(3.6, 0.52),
+      new THREE.MeshBasicMaterial({
+        color: 0x030608,
+        transparent: true,
+        opacity: 0.94,
+        depthWrite: false
+      })
+    );
+    abyss.position.z = -1.52;
+    body.add(abyss);
+
+    // A single cold glow layered mid-depth: gives the crack its "looking
+    // into deep ice" quality without stacking five overlapping planes.
+    const glow = new THREE.Mesh(
+      new THREE.PlaneGeometry(2.6, 0.4),
+      new THREE.MeshBasicMaterial({
+        color: 0x2f78c8,
+        transparent: true,
+        opacity: 0.22,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+      })
+    );
+    glow.position.z = -0.72;
+    body.add(glow);
+
+    // Chill vapor rising from the slit.
+    const mist = new THREE.Sprite(this.materials.trail.clone());
+    mist.material.color.setHex(0xd6ecfa);
+    mist.material.opacity = 0.12;
+    mist.position.set(0, 0, 0.36);
+    mist.scale.set(3.8, 1, 1);
+    group.add(mist);
+
+    // Ice debris scattered in a ring around the outside of the crack. Kept
+    // at group level so the spawn animation (body scale) never squashes them.
+    const shards = [];
+    const shardCount = 8;
+    for (let i = 0; i < shardCount; i += 1) {
+      const shardSeed = seed + i * 11.7 + 3.1;
+      const angle = (i / shardCount) * Math.PI * 2 + this._seededUnit(shardSeed) * 0.6;
+      const radialX = 2.95 + this._seededUnit(shardSeed + 3) * 0.55;
+      const radialY = 0.92 + this._seededUnit(shardSeed + 5) * 0.28;
+      const x = Math.cos(angle) * radialX;
+      const y = Math.sin(angle) * radialY;
+      const z = 0.05 + this._seededUnit(shardSeed + 7) * 0.14;
+
+      const shard = new THREE.Mesh(
+        this._buildBoulderGeometry(0.16 + this._seededUnit(shardSeed + 9) * 0.08, 1, 0.28, { seed: shardSeed }),
+        this._makeRockMaterial(shardSeed, 'env')
+      );
+      shard.castShadow = true;
+      shard.receiveShadow = true;
+      shard.position.set(x, y, z);
+      shard.rotation.set(
+        (this._seededUnit(shardSeed + 11) - 0.5) * 0.5,
+        this._seededUnit(shardSeed + 13) * Math.PI * 2,
+        (this._seededUnit(shardSeed + 15) - 0.5) * 0.6
+      );
+      shard.userData = {
+        baseZ: z,
+        baseRotZ: shard.rotation.z,
+        wobble: 1.4 + this._seededUnit(shardSeed + 17) * 0.9,
+        phase: this._seededUnit(shardSeed + 19) * Math.PI * 2
+      };
+      group.add(shard);
+      shards.push(shard);
+    }
+
+    this.dynamicHazards.add(group);
+    return { group, body, lip, abyss, glow, mist, shadow, shards, seed };
+  }
+
+  _pruneFissures(liveIds) {
     Array.from(this.fissureMeshes.entries()).forEach(([id, node]) => {
-      if (!nextIds.has(id)) {
-        this.dynamicHazards.remove(node.group);
-        node.group.traverse((child) => {
-          if (child.geometry) {
-            child.geometry.dispose();
-          }
-          if (child.material) {
-            child.material.dispose();
-          }
-        });
-        this.fissureMeshes.delete(id);
+      if (liveIds.has(id)) {
+        return;
       }
+      this.dynamicHazards.remove(node.group);
+      node.group.traverse((child) => {
+        if (child.geometry) {
+          child.geometry.dispose();
+        }
+        if (child.material) {
+          child.material.dispose();
+        }
+      });
+      this.fissureMeshes.delete(id);
     });
   }
 
