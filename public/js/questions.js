@@ -1654,7 +1654,7 @@ class QuestionManager {
     }
 
     const pool = this.questionPool[slotId];
-    if (pool && pool.length > AI_PREFETCH_LOW_WATERMARK) {
+    if (pool && pool.length > 0) {
       return pool;
     }
 

@@ -90,6 +90,7 @@ class Game {
     this.slotConfigs = [];
     this.topicButtonNodes = [];
     this.currentQuestion = null;
+    this.questionLoading = false;
     this.pendingDirection = null;
     this.currentMessageTimeout = null;
     this.pendingTimeouts = [];
@@ -291,6 +292,9 @@ class Game {
     this.questionManager.setLevel(settings.langLevel);
     this.questionManager.setLexicalTopic(settings.lexicalTopic);
     this.questionManager.configureSlots(settings.slotConfigs);
+    this.questionManager.prefetchAll().catch((error) => {
+      console.warn('Question prefetch failed:', error);
+    });
 
     this.renderer = new BergRenderer(this.ui.canvas);
     this.audio = new AudioManager();
@@ -348,6 +352,7 @@ class Game {
     this.nextAvalancheSpawnAt = this.startedAt + AVALANCHE_INITIAL_DELAY_MS;
 
     this.currentQuestion = null;
+    this.questionLoading = false;
     this.pendingDirection = null;
     this._closeQuestionPanel();
     this._closeDirectionPanel();
@@ -381,6 +386,7 @@ class Game {
     }
 
     this.currentQuestion = null;
+    this.questionLoading = false;
     this.pendingDirection = null;
     this.state = 'idle';
     if (this.ui.messageBanner) {
@@ -751,8 +757,8 @@ class Game {
     this.rockSpawnBlockedUntil = Math.max(this.rockSpawnBlockedUntil, now + ROCK_POST_AVALANCHE_LOCK_MS);
   }
 
-  openQuestion(slotId, direction = 0) {
-    if (this.state !== 'running' || this.player.falling || this.currentQuestion || this.pendingDirection) {
+  async openQuestion(slotId, direction = 0) {
+    if (this.state !== 'running' || this.player.falling || this.currentQuestion || this.pendingDirection || this.questionLoading) {
       return;
     }
 
@@ -774,14 +780,31 @@ class Game {
       return;
     }
 
-    this.currentQuestion = this.questionManager.getQuestion(slotId);
-    if (!this.currentQuestion) {
-      return;
-    }
-    this.currentQuestion.direction = direction;
-
-    this._renderQuestion();
+    this.questionLoading = true;
     this._renderTopicButtons();
+    this._showMessage('Загружаем вопрос...', 1100);
+
+    try {
+      const question = await this.questionManager.getQuestion(slotId);
+      if (this.state !== 'running' || this.player.falling || this.currentQuestion || this.pendingDirection) {
+        this.questionManager.onWrongAnswer(slotId);
+        return;
+      }
+      if (!question) {
+        this._showMessage('Не удалось получить вопрос для этой темы.', 1400);
+        return;
+      }
+
+      this.currentQuestion = question;
+      this.currentQuestion.direction = direction;
+      this._renderQuestion();
+    } catch (error) {
+      console.warn('Question loading failed:', error);
+      this._showMessage('Не удалось загрузить вопрос. Попробуйте другую тему.', 1500);
+    } finally {
+      this.questionLoading = false;
+      this._renderTopicButtons();
+    }
   }
 
   answerQuestion(index) {
@@ -795,6 +818,11 @@ class Game {
     this.stats.answers += 1;
     if (correct) {
       this.stats.correct += 1;
+      if (this.questionManager) {
+        this.questionManager.onCorrectAnswer(resolvedSlotId);
+      }
+    } else if (this.questionManager) {
+      this.questionManager.onWrongAnswer(resolvedSlotId);
     }
 
     const optionButtons = Array.from(this.ui.questionOptions.querySelectorAll('.option-btn'));
@@ -822,6 +850,8 @@ class Game {
     } else {
       this.ui.questionFeedback.classList.add('error');
       this.ui.questionFeedback.textContent = 'Ошибка. Опасности продолжили идти вниз без твоего бонуса.';
+      this.ui.questionFeedback.textContent =
+        `Ошибка. Правильный ответ: ${this.currentQuestion.options.options[this.currentQuestion.options.correctIndex]}`;
       this.player.lens = clamp(this.player.lens + 0.05, 0, 1);
       const fissureSpawned = this._spawnCouloirFissureOnMistake();
       if (this.audio) {
@@ -970,7 +1000,7 @@ class Game {
 
   _renderTopicButtons() {
     this.ui.topicButtons.innerHTML = '';
-    const questionLocked = Boolean(this.currentQuestion || this.pendingDirection || this.player.falling);
+    const questionLocked = Boolean(this.currentQuestion || this.pendingDirection || this.player.falling || this.questionLoading);
 
     this.slotConfigs.forEach((slotConfig, index) => {
       const isShield = slotConfig.slotDef.id === 'snowShield';
