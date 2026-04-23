@@ -28,6 +28,13 @@ const COULOIR_FISSURE_CHANCE = 0.4;
 const COULOIR_FISSURE_TURNS = 3;
 const COULOIR_FISSURE_MIN_AHEAD = 12;
 const COULOIR_FISSURE_MAX_AHEAD = 18;
+const LENS_DIRT_BASE_RATE = 0.0045;
+const LENS_DIRT_PHASE_RATE = 0.0035;
+const LENS_DIRT_DANGER_RATE = 0.0025;
+const LENS_VISUAL_SMOOTHING = 1.8;
+const LENS_STAGE_LIGHT = 0.3;
+const LENS_STAGE_HEAVY = 0.65;
+const LENS_STAGE_FULL = 1;
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -76,6 +83,19 @@ function formatTurnCount(count) {
     return `${count} хода`;
   }
   return `${count} ходов`;
+}
+
+function lensStageTarget(dirt) {
+  if (dirt >= LENS_STAGE_FULL) {
+    return LENS_STAGE_FULL;
+  }
+  if (dirt >= LENS_STAGE_HEAVY) {
+    return LENS_STAGE_HEAVY;
+  }
+  if (dirt >= LENS_STAGE_LIGHT) {
+    return LENS_STAGE_LIGHT;
+  }
+  return 0;
 }
 
 class Game {
@@ -320,7 +340,8 @@ class Game {
       baseLane: 0,
       x: 0,
       vx: 0,
-      lens: 0.08,
+      lens: 0,
+      lensVisual: 0,
       shieldCharges: 0,
       shieldUntil: 0,
       shieldCooldownUntil: 0,
@@ -596,19 +617,26 @@ class Game {
 
   _updateEnvironment(dt, now) {
     const phaseRatio = this._phaseRatio();
-    const shieldFactor = this.player.shieldCharges > 0 ? 0.72 : 1;
+    const shieldFactor = this.player.shieldCharges > 0 ? 0.58 : 1;
     this.player.lens = clamp(
-      this.player.lens + dt * (0.018 + phaseRatio * 0.013 + this._dangerLevel() * 0.01) * shieldFactor,
+      this.player.lens + dt * (
+        LENS_DIRT_BASE_RATE +
+        phaseRatio * LENS_DIRT_PHASE_RATE +
+        this._dangerLevel() * LENS_DIRT_DANGER_RATE
+      ) * shieldFactor,
       0,
       1
     );
+    const lensTarget = lensStageTarget(this.player.lens);
+    const lensBlend = 1 - Math.exp(-LENS_VISUAL_SMOOTHING * dt);
+    this.player.lensVisual += (lensTarget - this.player.lensVisual) * lensBlend;
     this.cameraShake = Math.max(0, this.cameraShake - dt * 1.3);
 
     const stormStrength = 0.28 + phaseRatio * 0.18 + this._dangerLevel() * 0.24;
     this.ui.stormOverlay.style.setProperty('--storm-strength', stormStrength.toFixed(3));
-    this.ui.lensOverlay.style.setProperty('--lens-blur', this.player.lens.toFixed(3));
-    this.ui.lensOverlay.style.setProperty('--lens-haze', (this.player.lens * 0.9).toFixed(3));
-    this.ui.lensOverlay.style.setProperty('--lens-frost', clamp(this.player.lens * 1.15, 0, 1).toFixed(3));
+    this.ui.lensOverlay.style.setProperty('--lens-blur', this.player.lensVisual.toFixed(3));
+    this.ui.lensOverlay.style.setProperty('--lens-haze', (this.player.lensVisual * 0.86).toFixed(3));
+    this.ui.lensOverlay.style.setProperty('--lens-frost', clamp(this.player.lensVisual * 1.08, 0, 1).toFixed(3));
 
     if (!this.player.falling) {
       if (now >= this.nextRockSpawnAt) {
@@ -646,7 +674,7 @@ class Game {
 
       if (!rock.closeCallDone && Math.abs(rock.y - this.player.progress) < closeCallY && Math.abs(this.player.x - rock.x) < closeCallX) {
         rock.closeCallDone = true;
-        this.player.lens = clamp(this.player.lens + 0.03, 0, 1);
+        this.player.lens = clamp(this.player.lens + 0.01, 0, 1);
       }
 
       if (Math.abs(rock.y - this.player.progress) < hitY && Math.abs(this.player.x - rock.x) < hitX) {
@@ -665,7 +693,7 @@ class Game {
           this.player.shieldCharges = 0;
           this.stats.avalanchesBlocked += 1;
           this.cameraShake = Math.max(this.cameraShake, 0.28);
-          this.player.lens = clamp(this.player.lens + 0.04, 0, 1);
+          this.player.lens = clamp(this.player.lens + 0.015, 0, 1);
           if (this.audio) {
             this.audio.playAvalancheBlocked();
           }
@@ -689,7 +717,7 @@ class Game {
           this.player.climbTarget,
           this.player.progress - CLIMB_STEP * 0.4
         );
-        this.player.lens = clamp(this.player.lens + 0.2, 0, 1);
+        this.player.lens = clamp(this.player.lens + 0.09, 0, 1);
         this.cameraShake = Math.max(this.cameraShake, 0.52);
         this._leaveFootprints(this.player.progress, 0.9);
         if (this.audio) {
@@ -865,7 +893,7 @@ class Game {
       this.ui.questionFeedback.textContent = 'Ошибка. Опасности продолжили идти вниз без твоего бонуса.';
       this.ui.questionFeedback.textContent =
         `Ошибка. Правильный ответ: ${this.currentQuestion.options.options[this.currentQuestion.options.correctIndex]}`;
-      this.player.lens = clamp(this.player.lens + 0.05, 0, 1);
+      this.player.lens = clamp(this.player.lens + 0.015, 0, 1);
       const fissureSpawned = this._spawnCouloirFissureOnMistake();
       if (this.audio) {
         this.audio.playWrongAnswer();
@@ -950,7 +978,7 @@ class Game {
         break;
 
       case 'cleanLens':
-        this.player.lens = Math.max(0, this.player.lens - 0.72);
+        this.player.lens = Math.max(0, this.player.lens - 0.65);
         if (this.audio) {
           this.audio.playLensClean();
         }
@@ -1242,13 +1270,14 @@ class Game {
     this.ui.laneText.textContent = laneLabel(this.player.baseLane);
     this.ui.swingText.textContent = `Раскачка: ${Math.round(swingAmount * 100)}%`;
 
-    if (this.player.lens < 0.22) {
+    const lensStage = lensStageTarget(this.player.lens);
+    if (lensStage === 0) {
       this.ui.lensText.textContent = 'Чисто';
       this.ui.lensSubtext.textContent = 'Камера почти не заснежена.';
-    } else if (this.player.lens < 0.52) {
+    } else if (lensStage === LENS_STAGE_LIGHT) {
       this.ui.lensText.textContent = 'Снег липнет';
       this.ui.lensSubtext.textContent = 'Изображение постепенно мутнеет.';
-    } else if (this.player.lens < 0.78) {
+    } else if (lensStage === LENS_STAGE_HEAVY) {
       this.ui.lensText.textContent = 'Плохо видно';
       this.ui.lensSubtext.textContent = 'Опасности теряют читаемость.';
     } else {
@@ -1465,7 +1494,8 @@ class Game {
     const dangerFromRocks = this.hazards.rocks.length * 0.08;
     const dangerFromAvalanches = this.hazards.avalanches.length * 0.22;
     const dangerFromFissure = this.couloirFissure ? 0.12 + this.couloirFissure.turnsLeft * 0.03 : 0;
-    return clamp(dangerFromRocks + dangerFromAvalanches + dangerFromFissure + this.player.lens * 0.22, 0, 1);
+    const lensDanger = typeof this.player.lensVisual === 'number' ? this.player.lensVisual : this.player.lens;
+    return clamp(dangerFromRocks + dangerFromAvalanches + dangerFromFissure + lensDanger * 0.18, 0, 1);
   }
 
   _showMessage(text, duration = 1400) {
