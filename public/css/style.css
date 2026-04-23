@@ -884,6 +884,7 @@ body[data-atmosphere-preset="newyear"] #storm-overlay {
 #question-panel,
 #direction-panel,
 #control-hint,
+#game-hud,
 .overlay-screen {
   position: fixed;
   z-index: 4;
@@ -941,6 +942,235 @@ body.paused #game-canvas,
 body.paused #storm-overlay,
 body.paused #lens-overlay {
   filter: saturate(0.6) brightness(0.72);
+}
+
+#game-hud {
+  top: max(12px, env(safe-area-inset-top));
+  left: 12px;
+  right: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 14px;
+  pointer-events: none;
+}
+
+.hud-stack {
+  display: grid;
+  gap: 10px;
+}
+
+.hud-stack-left {
+  width: min(390px, calc(100vw - 148px));
+}
+
+.hud-stack-right {
+  justify-items: end;
+  width: min(300px, 34vw);
+}
+
+.hud-card,
+.hud-banner,
+.hud-action-btn {
+  pointer-events: auto;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 20px;
+  background:
+    linear-gradient(180deg, rgba(8, 15, 23, 0.9), rgba(6, 11, 18, 0.74)),
+    radial-gradient(circle at top, rgba(188, 226, 255, 0.1), rgba(188, 226, 255, 0) 42%),
+    rgba(5, 10, 15, 0.42);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 18px 38px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(14px);
+}
+
+body[data-atmosphere-preset="newyear"] .hud-card,
+body[data-atmosphere-preset="newyear"] .hud-banner,
+body[data-atmosphere-preset="newyear"] .hud-action-btn {
+  border-color: rgba(255, 221, 136, 0.14);
+  background:
+    linear-gradient(180deg, rgba(8, 12, 20, 0.92), rgba(5, 8, 14, 0.76)),
+    radial-gradient(circle at top, rgba(255, 214, 120, 0.09), rgba(255, 214, 120, 0) 42%),
+    rgba(5, 10, 15, 0.42);
+}
+
+.hud-route-card,
+.hud-session-card {
+  padding: 14px;
+}
+
+.hud-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.hud-altitude-text {
+  color: #f6fbff;
+  font-size: 1.42rem;
+  font-weight: 700;
+  line-height: 1.06;
+  letter-spacing: 0.02em;
+}
+
+.hud-phase-chip {
+  padding: 8px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+  color: #dff2ff;
+  font-size: 0.75rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.hud-meter {
+  position: relative;
+  height: 9px;
+  margin-top: 12px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.hud-meter-fill {
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background:
+    linear-gradient(90deg, #e5f7ff 0%, #8dd3ff 42%, #ffb56c 100%);
+  box-shadow: 0 0 18px rgba(141, 211, 255, 0.28);
+}
+
+.hud-phase-copy {
+  margin-top: 10px;
+  color: #bed0dd;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.hud-mini-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.hud-mini-card {
+  min-height: 72px;
+  padding: 10px 11px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02)),
+    rgba(255, 255, 255, 0.03);
+}
+
+.hud-mini-label {
+  color: #8fb0c4;
+  font-size: 0.67rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.hud-mini-value {
+  margin-top: 5px;
+  color: #f8fcff;
+  font-size: 0.94rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.hud-mini-copy {
+  margin-top: 3px;
+  color: #9cb5c6;
+  font-size: 0.73rem;
+  line-height: 1.36;
+}
+
+.hud-hazard-strip {
+  margin-top: 12px;
+  padding: 10px 11px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background:
+    radial-gradient(circle at left, rgba(255, 122, 74, 0.12), rgba(255, 122, 74, 0) 44%),
+    rgba(255, 255, 255, 0.03);
+}
+
+.hud-hazard-text {
+  margin-top: 4px;
+  color: #e6eef5;
+  font-size: 0.79rem;
+  line-height: 1.45;
+}
+
+.hud-banner {
+  padding: 12px 14px;
+  color: #fef6ea;
+  font-size: 0.84rem;
+  font-weight: 700;
+  line-height: 1.45;
+  border-color: rgba(255, 181, 108, 0.18);
+  background:
+    radial-gradient(circle at left, rgba(255, 181, 108, 0.18), rgba(255, 181, 108, 0) 42%),
+    linear-gradient(180deg, rgba(33, 20, 10, 0.86), rgba(13, 10, 16, 0.76));
+}
+
+.hud-player-display {
+  color: #fbfdff;
+  font-size: 1.18rem;
+  font-weight: 700;
+  line-height: 1.15;
+}
+
+.hud-session-display {
+  margin-top: 6px;
+  color: #b9cddd;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.hud-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  width: 100%;
+}
+
+.hud-action-btn {
+  min-height: 52px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  color: #eef5fb;
+  cursor: pointer;
+}
+
+.hud-action-btn.active {
+  border-color: rgba(255, 181, 108, 0.24);
+  background:
+    radial-gradient(circle at top, rgba(255, 181, 108, 0.18), rgba(255, 181, 108, 0) 44%),
+    linear-gradient(180deg, rgba(38, 24, 14, 0.92), rgba(10, 10, 14, 0.76));
+}
+
+.hud-action-icon {
+  min-width: 18px;
+  color: #ffd7a4;
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-align: center;
+  letter-spacing: 0.1em;
+}
+
+.hud-action-label {
+  font-size: 0.82rem;
+  font-weight: 700;
 }
 
 .floating-panel,
@@ -1269,6 +1499,19 @@ body[data-atmosphere-preset="newyear"] #control-hint {
 }
 
 @media (max-width: 900px) {
+  #game-hud {
+    flex-wrap: wrap;
+  }
+
+  .hud-stack-left,
+  .hud-stack-right {
+    width: 100%;
+  }
+
+  .hud-stack-right {
+    justify-items: stretch;
+  }
+
   .selection-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
@@ -1314,6 +1557,47 @@ body[data-atmosphere-preset="newyear"] #control-hint {
 }
 
 @media (max-width: 640px) {
+  #game-hud {
+    top: max(8px, env(safe-area-inset-top));
+    left: 8px;
+    right: 8px;
+    gap: 8px;
+  }
+
+  .hud-route-card,
+  .hud-session-card {
+    padding: 12px;
+    border-radius: 18px;
+  }
+
+  .hud-altitude-text {
+    font-size: 1.22rem;
+  }
+
+  .hud-phase-chip {
+    font-size: 0.68rem;
+  }
+
+  .hud-mini-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .hud-mini-card {
+    min-height: 0;
+  }
+
+  .hud-banner {
+    padding: 10px 12px;
+    border-radius: 16px;
+    font-size: 0.8rem;
+  }
+
+  #game-screen:has(#question-panel:not(.hidden)) #game-hud,
+  #game-screen:has(#direction-panel:not(.hidden)) #game-hud,
+  #game-screen:has(#pause-overlay:not(.hidden)) #game-hud {
+    display: none;
+  }
+
   .menu-layout {
     width: calc(100% - 16px);
     max-height: calc(100vh - 16px);
