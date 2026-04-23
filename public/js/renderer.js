@@ -10,8 +10,10 @@ function clamp01(value) {
 window.BERG_ROUTE_LANE_SPACING = window.BERG_ROUTE_LANE_SPACING || 6.35;
 
 class BergRenderer {
-  constructor(canvas) {
+  constructor(canvas, options = {}) {
     this.canvas = canvas;
+    this.atmospherePreset = options.atmospherePreset || 'classic';
+    this.isNewYearPreset = this.atmospherePreset === 'newyear';
     this.scene = new THREE.Scene();
     // Tighter, denser atmospheric haze — the far silhouettes now fade into
     // the sky instead of sitting hard against a cool-black backdrop.
@@ -20,7 +22,7 @@ class BergRenderer {
     this.routeHeight = 228;
     this.routeScale = this.routeHeight / 100;
     this.verticalCompression = 0.52;
-    this.summitFocusLocal = new THREE.Vector3(0, 239.5, -0.6);
+    this.summitFocusLocal = new THREE.Vector3(0, 246.5, -8.2);
 
     this.camera = new THREE.PerspectiveCamera(74, window.innerWidth / window.innerHeight, 0.1, 520);
     this.camera.position.set(0, 2, 4.2);
@@ -61,6 +63,7 @@ class BergRenderer {
     this.fissureMeshes = new Map();
     this.avalancheMeshes = new Map();
     this.footprints = new Map();
+    this.routeLanterns = [];
     this.cloudCards = [];
     this.crackNodes = [];
     this.icePanels = [];
@@ -646,6 +649,20 @@ class BergRenderer {
         transparent: true,
         opacity: 0.8,
         depthWrite: false
+      }),
+      lanternFrame: new THREE.MeshStandardMaterial({
+        color: 0x4e3a23,
+        roughness: 0.58,
+        metalness: 0.62
+      }),
+      lanternGlass: new THREE.MeshStandardMaterial({
+        color: 0xffdc9f,
+        emissive: 0xe0a348,
+        emissiveIntensity: 1.3,
+        roughness: 0.18,
+        metalness: 0.02,
+        transparent: true,
+        opacity: 0.92
       })
     };
   }
@@ -699,8 +716,9 @@ class BergRenderer {
     this.moonDisk.scale.set(3.4, 3.4, 1);
     this.scene.add(this.moonDisk);
 
-    const starPositions = new Float32Array(850 * 3);
-    for (let index = 0; index < 850; index += 1) {
+    const starCount = this.isNewYearPreset ? 1280 : 850;
+    const starPositions = new Float32Array(starCount * 3);
+    for (let index = 0; index < starCount; index += 1) {
       const radius = 160 + Math.random() * 20;
       const theta = Math.random() * Math.PI * 2;
       const phi = Math.random() * Math.PI * 0.46;
@@ -711,6 +729,10 @@ class BergRenderer {
     const starGeometry = new THREE.BufferGeometry();
     starGeometry.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
     this.starField = new THREE.Points(starGeometry, this.materials.star);
+    if (this.isNewYearPreset) {
+      this.starField.material.color.setHex(0xf5d26b);
+      this.starField.material.size = 1.34;
+    }
     this.scene.add(this.starField);
 
     // Distant ridge silhouettes: extrude a jagged polyline per band so the
@@ -930,6 +952,10 @@ class BergRenderer {
     const ledges = insideRoute ? Math.sin(meshY * 0.47 + x * 0.24) * 0.28 : 0;
     const routeChatter = insideRoute ? noise(x, meshY, 2.1, 1.46) * 0.22 : 0;
     const apexPush = smoothStep(0.84, 1, slopeRatio) * Math.max(0, 4.6 - absX * 0.34);
+    const summitRecess = insideRoute
+      ? smoothStep(0.84, 0.985, slopeRatio) *
+        (0.9 + routeSmoothMask * 2.4 + Math.max(0, 1 - absX / (m.ROUTE_HALF + 0.6)) * 0.35)
+      : 0;
     const fractureMask = clamp01((faultScarps * 0.45 + brokenFaces * 0.18 + shearBands * 0.16) / 1.55);
     const routeMacroScale = insideRoute ? 0.52 + (1 - routeSmoothMask) * 0.12 : 1;
     const routeCragScale = insideRoute ? 0.34 + (1 - routeSmoothMask) * 0.16 : 1;
@@ -957,6 +983,8 @@ class BergRenderer {
       laneRibs * (insideRoute ? 1.04 * routeLaneScale : 1.04) +
       laneShoulders * (insideRoute ? 0.84 * routeLaneScale : 0.84) +
       apexPush +
+      brokenShelves * smoothStep(0.88, 1, slopeRatio) * 0.06 -
+      summitRecess +
       flankRecession -
       couloirDepth * (insideRoute ? 1.58 + routeSmoothMask * 0.22 : 1.44) -
       laneGullies * ((insideRoute ? 1.2 - routeSmoothMask * 0.08 : 1.34) + slopeRatio * (insideRoute ? 0.24 : 0.38));
@@ -1591,41 +1619,42 @@ class BergRenderer {
     this.environmentGroup.add(horizonHaze);
 
     this.summitGroup = new THREE.Group();
+    this.summitGroup.position.z = -9.5;
     this.environmentGroup.add(this.summitGroup);
 
     const crownShadow = new THREE.Mesh(new THREE.ConeGeometry(13.5, 24, 20, 4), this.materials.peakShadow.clone());
-    crownShadow.position.set(0, 228, -7.4);
+    crownShadow.position.set(0, 236, -8.8);
     crownShadow.scale.set(1.3, 1, 1.05);
     crownShadow.castShadow = true;
     this.summitGroup.add(crownShadow);
 
     const peak = new THREE.Mesh(new THREE.ConeGeometry(8.5, 20, 20, 4), this.materials.summit);
-    peak.position.set(0, 230, -2.8);
+    peak.position.set(0, 240, -4.8);
     peak.castShadow = true;
     this.summitGroup.add(peak);
 
     [-1, 1].forEach((side) => {
       const shoulder = new THREE.Mesh(new THREE.ConeGeometry(4.6, 10.5, 18, 3), this.materials.summit.clone());
-      shoulder.position.set(side * 5.1, 226.4, -4.2);
+      shoulder.position.set(side * 6.1, 236.4, -6.4);
       shoulder.rotation.z = side * 0.12;
       shoulder.castShadow = true;
       this.summitGroup.add(shoulder);
     });
 
     const tower = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.28, 8.5, 20, 4), this.materials.anchorMetal);
-    tower.position.set(0, 240, -1.2);
+    tower.position.set(3.2, 247, -3.4);
     this.summitGroup.add(tower);
 
     this.flagMesh = new THREE.Mesh(new THREE.PlaneGeometry(5.2, 3.2), this.materials.flag);
-    this.flagMesh.position.set(2.8, 242.6, -0.8);
-    this.flagMesh.rotation.y = -0.16;
+    this.flagMesh.position.set(7.4, 249.8, -2.8);
+    this.flagMesh.rotation.y = -0.34;
     this.summitGroup.add(this.flagMesh);
 
     // The warm summit halo was the single loudest "this is a game" tell.
     // Replaced by a near-invisible sprite that only exists so the rest of
     // the update code doesn't have to branch on its presence.
     this.summitAura = new THREE.Sprite(this.materials.halo.clone());
-    this.summitAura.position.set(0, 237.5, 0.2);
+    this.summitAura.position.set(1.8, 245.5, -2.6);
     this.summitAura.scale.set(0.01, 0.01, 1);
     this.summitAura.material.opacity = 0;
     this.summitAura.visible = false;
@@ -1808,6 +1837,81 @@ class BergRenderer {
       this.environmentGroup.add(bergschrund);
       this.altitudeMarkers.push(bergschrund);
     }
+
+    if (this.isNewYearPreset) {
+      this._buildHolidayLanterns();
+    }
+  }
+
+  _buildHolidayLanterns() {
+    const lanternHeights = [24, 46, 72, 102, 134, 166, 198, 226];
+    lanternHeights.forEach((worldY, index) => {
+      const sideSign = index % 2 === 0 ? -1 : 1;
+      const baseX = sideSign * (1.95 + (index % 3) * 0.12);
+      const anchor = this._faceAnchor(baseX, worldY, 0.12);
+      const group = new THREE.Group();
+      group.position.set(anchor.x, anchor.y, anchor.z + 0.16);
+      group.rotation.z = sideSign * (0.06 + (index % 2) * 0.015);
+
+      const pole = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.06, 0.08, 2.2, 12),
+        this.materials.lanternFrame
+      );
+      pole.position.set(0, 0.78, -0.08);
+      pole.castShadow = true;
+      group.add(pole);
+
+      const arm = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.035, 0.045, 1.02, 10),
+        this.materials.lanternFrame
+      );
+      arm.position.set(sideSign * 0.42, 1.72, 0);
+      arm.rotation.z = Math.PI / 2;
+      group.add(arm);
+
+      const lanternBody = new THREE.Mesh(
+        new THREE.BoxGeometry(0.42, 0.56, 0.34),
+        this.materials.lanternFrame
+      );
+      lanternBody.position.set(sideSign * 0.74, 1.38, 0.12);
+      lanternBody.castShadow = true;
+      group.add(lanternBody);
+
+      const lanternGlass = new THREE.Mesh(
+        new THREE.BoxGeometry(0.26, 0.36, 0.2),
+        this.materials.lanternGlass.clone()
+      );
+      lanternGlass.position.copy(lanternBody.position);
+      group.add(lanternGlass);
+
+      const lanternCap = new THREE.Mesh(
+        new THREE.ConeGeometry(0.18, 0.16, 6),
+        this.materials.lanternFrame
+      );
+      lanternCap.position.set(sideSign * 0.74, 1.73, 0.12);
+      group.add(lanternCap);
+
+      const glow = new THREE.Sprite(this.materials.halo.clone());
+      glow.material.color.setHex(0xffd06a);
+      glow.material.opacity = 0.5;
+      glow.position.set(sideSign * 0.74, 1.38, 0.28);
+      glow.scale.set(2.2, 2.2, 1);
+      group.add(glow);
+
+      const light = new THREE.PointLight(0xffcb68, 2.6, 20, 2);
+      light.position.copy(glow.position);
+      group.add(light);
+
+      this.environmentGroup.add(group);
+      this.routeLanterns.push({
+        group,
+        glow,
+        light,
+        lanternGlass,
+        baseIntensity: 2.1 + Math.random() * 0.45,
+        phaseOffset: Math.random() * Math.PI * 2
+      });
+    });
   }
 
   _buildRope() {
@@ -2381,14 +2485,23 @@ class BergRenderer {
     const phase = snapshot.phaseRatio;
     const progressRatio = Math.min(1, snapshot.player.progressY / 100);
 
-    this.moonHalo.material.opacity = 0.06 + (1 - phase) * 0.04;
-    this.moonDisk.material.opacity = 0.32 + (1 - phase) * 0.18;
-    this.starField.material.opacity = (1 - phase) * 0.28;
+    if (this.isNewYearPreset) {
+      this.moonHalo.material.opacity = 0.018 + (1 - phase) * 0.016;
+      this.moonDisk.material.opacity = 0.08 + (1 - phase) * 0.06;
+      this.starField.material.opacity = 0.54 + (1 - phase) * 0.16;
+      this.starField.rotation.y = this.elapsed * 0.01;
+    } else {
+      this.moonHalo.material.opacity = 0.06 + (1 - phase) * 0.04;
+      this.moonDisk.material.opacity = 0.32 + (1 - phase) * 0.18;
+      this.starField.material.opacity = (1 - phase) * 0.28;
+    }
 
     this.cloudCards.forEach((cloud, index) => {
       cloud.mesh.position.x = cloud.anchorX + Math.sin(this.elapsed * cloud.speed + index) * cloud.drift;
       cloud.mesh.position.y += Math.sin(this.elapsed * 0.2 + index) * dt * 0.5;
-      cloud.mesh.material.opacity = 0.08 + (1 - phase) * 0.09 + Math.sin(this.elapsed * cloud.speed) * 0.015;
+      cloud.mesh.material.opacity = this.isNewYearPreset
+        ? 0.02 + (1 - phase) * 0.028 + Math.sin(this.elapsed * cloud.speed) * 0.01
+        : 0.08 + (1 - phase) * 0.09 + Math.sin(this.elapsed * cloud.speed) * 0.015;
     });
 
     // "Sea of clouds" shelf: rises into view past progressRatio 0.35 and sits
@@ -2403,13 +2516,25 @@ class BergRenderer {
       card.mesh.position.x = Math.cos(card.angle) * card.radius;
       card.mesh.position.z = -6 - Math.sin(card.angle) * (card.radius * 0.55) - 4;
       card.mesh.position.y = card.yOffset + Math.sin(this.elapsed * 0.22 + index) * 0.6;
-      const targetOpacity = shelfFade * (0.32 + Math.sin(this.elapsed * 0.4 + index) * 0.05);
-      card.mesh.material.opacity = targetOpacity;
-      card.mesh.material.color.setRGB(
-        0.82 - warmth * 0.08,
-        0.9 - phase * 0.18,
-        1 - phase * 0.28
+      const targetOpacity = shelfFade * (
+        this.isNewYearPreset
+          ? 0.16 + Math.sin(this.elapsed * 0.4 + index) * 0.03
+          : 0.32 + Math.sin(this.elapsed * 0.4 + index) * 0.05
       );
+      card.mesh.material.opacity = targetOpacity;
+      if (this.isNewYearPreset) {
+        card.mesh.material.color.setRGB(
+          0.56 - phase * 0.04,
+          0.7 - phase * 0.06,
+          0.88 - phase * 0.08
+        );
+      } else {
+        card.mesh.material.color.setRGB(
+          0.82 - warmth * 0.08,
+          0.9 - phase * 0.18,
+          1 - phase * 0.28
+        );
+      }
     });
     this.undercloudGroup.visible = shelfFade > 0.001;
 
@@ -2419,26 +2544,53 @@ class BergRenderer {
     // depth reads clearly. Mix amount rises with distance via each mesh's
     // stored hazeMix; closer bands stay saturated, farther ones fade out.
     const horizonColor = this.tempColorA || (this.tempColorA = new THREE.Color());
-    horizonColor.setRGB(
-      0.56 + phase * 0.14,
-      0.64 - phase * 0.16,
-      0.74 - phase * 0.26
-    );
+    if (this.isNewYearPreset) {
+      horizonColor.setRGB(
+        0.12 + phase * 0.04,
+        0.16 + phase * 0.05,
+        0.22 + phase * 0.06
+      );
+    } else {
+      horizonColor.setRGB(
+        0.56 + phase * 0.14,
+        0.64 - phase * 0.16,
+        0.74 - phase * 0.26
+      );
+    }
     const rockColor = this.tempColorB || (this.tempColorB = new THREE.Color());
     this.distantPeaks.children.forEach((peak) => {
-      rockColor.setHex(0x3a4751);
+      if (this.isNewYearPreset) {
+        rockColor.setRGB(0.44 - phase * 0.03, 0.56 - phase * 0.02, 0.72 - phase * 0.02);
+      } else {
+        rockColor.setHex(0x3a4751);
+      }
       const baseMix = peak.userData.hazeMix != null ? peak.userData.hazeMix : 0.5;
-      peak.material.color.copy(rockColor).lerp(horizonColor, baseMix + phase * 0.05);
+      peak.material.color.copy(rockColor).lerp(
+        horizonColor,
+        this.isNewYearPreset
+          ? Math.max(0.06, baseMix - 0.16 + phase * 0.03)
+          : baseMix + phase * 0.05
+      );
     });
 
     if (this.backMassMesh) {
-      rockColor.setRGB(0.2 + phase * 0.16, 0.24 + phase * 0.05, 0.28 - phase * 0.02);
-      this.backMassMesh.material.color.copy(rockColor).lerp(horizonColor, 0.34 - phase * 0.1);
+      if (this.isNewYearPreset) {
+        rockColor.setRGB(0.32, 0.42, 0.56);
+        this.backMassMesh.material.color.copy(rockColor).lerp(horizonColor, 0.12);
+      } else {
+        rockColor.setRGB(0.2 + phase * 0.16, 0.24 + phase * 0.05, 0.28 - phase * 0.02);
+        this.backMassMesh.material.color.copy(rockColor).lerp(horizonColor, 0.34 - phase * 0.1);
+      }
     }
     if (this.backFlankMeshes) {
       this.backFlankMeshes.forEach((flank) => {
-        rockColor.setRGB(0.22 + phase * 0.18, 0.26 + phase * 0.05, 0.3 - phase * 0.02);
-        flank.material.color.copy(rockColor).lerp(horizonColor, 0.24 - phase * 0.08);
+        if (this.isNewYearPreset) {
+          rockColor.setRGB(0.34, 0.45, 0.6);
+          flank.material.color.copy(rockColor).lerp(horizonColor, 0.1);
+        } else {
+          rockColor.setRGB(0.22 + phase * 0.18, 0.26 + phase * 0.05, 0.3 - phase * 0.02);
+          flank.material.color.copy(rockColor).lerp(horizonColor, 0.24 - phase * 0.08);
+        }
       });
     }
   }
@@ -2447,6 +2599,92 @@ class BergRenderer {
     const phase = snapshot.phaseRatio;
     const progressRatio = Math.min(1, snapshot.player.progressY / 100);
     const danger = snapshot.dangerLevel || 0;
+
+    if (this.isNewYearPreset) {
+      this.skyUniforms.topColor.value.setRGB(
+        0.03 + phase * 0.02,
+        0.05 + phase * 0.02,
+        0.09 + phase * 0.03
+      );
+      this.skyUniforms.horizonColor.value.setRGB(
+        0.09 + phase * 0.03,
+        0.14 + phase * 0.04,
+        0.22 + phase * 0.05
+      );
+      this.skyUniforms.bottomColor.value.setRGB(
+        0.008,
+        0.012 + phase * 0.01,
+        0.03 + phase * 0.01
+      );
+
+      this.scene.fog.color.setRGB(
+        0.04 + phase * 0.02,
+        0.06 + phase * 0.02,
+        0.10 + phase * 0.03
+      );
+      this.scene.fog.near = 58 - danger * 4;
+      this.scene.fog.far = 220 - phase * 16 - danger * 10;
+
+      this.renderer.setClearColor(
+        new THREE.Color().setRGB(
+          0.018,
+          0.024 + phase * 0.01,
+          0.04 + phase * 0.01
+        )
+      );
+
+      this.materials.cliff.color.lerpColors(
+        new THREE.Color(0xeaf6ff),
+        new THREE.Color(0xa5c9ea),
+        Math.min(1, phase * 0.72 + danger * 0.1)
+      );
+      this.materials.cliff.emissive = new THREE.Color(0x06131f);
+      this.materials.cliff.emissiveIntensity = 0.05;
+      this.materials.moltenFace.opacity = 0;
+      this.materials.moltenFace.emissiveIntensity = 0;
+      this.materials.glacier.opacity = 0.18 + (1 - phase) * 0.12;
+
+      this.crackNodes.forEach((node) => {
+        node.tube.material.opacity = 0;
+        node.tube.material.emissiveIntensity = 0;
+        node.glow.material.opacity = 0;
+      });
+
+      this.icePanels.forEach((panel, index) => {
+        panel.visible = true;
+        panel.material.opacity = 0.12 + (1 - phase) * 0.08 + (index % 3) * 0.015;
+        panel.rotation.z += Math.sin(this.elapsed * 0.15 + index) * 0.0008;
+      });
+
+      this.flagMesh.rotation.z = Math.sin(this.elapsed * 3.1) * 0.11 - 0.04;
+      this.summitGroup.position.y = Math.sin(this.elapsed * 0.28) * 0.26;
+
+      this.ambientLight.intensity = 0.82;
+      this.ambientLight.groundColor.setRGB(0.05, 0.07, 0.1);
+      this.keyLight.color.setRGB(0.78, 0.86, 0.98);
+      this.keyLight.intensity = 1.1 + danger * 0.06;
+      this.fillLight.color.setRGB(0.98, 0.86, 0.62);
+      this.fillLight.intensity = 0.32;
+      this.lavaLight.intensity = 0;
+      this.summitLight.color.setRGB(1, 0.84, 0.56);
+      this.summitLight.intensity = 1.8 + Math.sin(this.elapsed * 1.8) * 0.12;
+
+      this.moonHalo.position.y = 154 + progressRatio * 4;
+      this.moonDisk.position.y = this.moonHalo.position.y;
+
+      this.routeLanterns.forEach((lantern, index) => {
+        const flicker =
+          0.88 +
+          Math.sin(this.elapsed * 6.2 + lantern.phaseOffset) * 0.08 +
+          Math.sin(this.elapsed * 11.4 + index) * 0.05;
+        lantern.group.rotation.y = Math.sin(this.elapsed * 0.8 + lantern.phaseOffset) * 0.08;
+        lantern.glow.material.opacity = 0.34 + flicker * 0.18;
+        lantern.glow.scale.setScalar(2 + flicker * 0.48);
+        lantern.light.intensity = lantern.baseIntensity * flicker + danger * 0.14;
+        lantern.lanternGlass.material.emissiveIntensity = 1.1 + flicker * 0.7;
+      });
+      return;
+    }
 
     // Cold-leaning sky palette. Top stays a deep slate blue, horizon a pale
     // washed grey — the look you get on an overcast north-face morning.
@@ -3373,10 +3611,17 @@ class BergRenderer {
     const phase = snapshot.phaseRatio;
     const storm = snapshot.stormStrength;
 
-    this.materials.snowFar.opacity = 0.18 + storm * 0.24 * (1 - phase * 0.22);
-    this.materials.snowMid.opacity = 0.26 + storm * 0.4 * (1 - phase * 0.12);
-    this.materials.snowNear.opacity = 0.34 + storm * 0.48;
-    this.materials.ash.opacity = phase * (0.08 + storm * 0.22);
+    if (this.isNewYearPreset) {
+      this.materials.snowFar.opacity = 0.06 + storm * 0.16 * (1 - phase * 0.18);
+      this.materials.snowMid.opacity = 0.1 + storm * 0.24 * (1 - phase * 0.1);
+      this.materials.snowNear.opacity = 0.16 + storm * 0.32;
+      this.materials.ash.opacity = 0;
+    } else {
+      this.materials.snowFar.opacity = 0.18 + storm * 0.24 * (1 - phase * 0.22);
+      this.materials.snowMid.opacity = 0.26 + storm * 0.4 * (1 - phase * 0.12);
+      this.materials.snowNear.opacity = 0.34 + storm * 0.48;
+      this.materials.ash.opacity = phase * (0.08 + storm * 0.22);
+    }
 
     this._driftPoints(this.snowFarField, dt, {
       speedY: 7 + storm * 8,
@@ -3442,6 +3687,7 @@ class BergRenderer {
     const danger = snapshot.dangerLevel || 0;
     const shake = snapshot.cameraShake || 0;
     const progressRatio = Math.min(1, snapshot.player.progressY / 100);
+    const summitApproach = smoothStep(0.86, 1, progressRatio);
     const playerWorldY = this._worldY(this.playerRender.y);
     const summitWorldY = this._worldY(this.summitFocusLocal.y);
     const climbing = Boolean(snapshot.player.climbing);
@@ -3468,15 +3714,15 @@ class BergRenderer {
     // Pull the rig a bit further back when climbing: gives the axe-plant
     // frame room to read. Settles closer when the climber is just hanging.
     const climbOffset = climbing ? 0.35 : 0;
-    const camBackOffset = 2.55 + climbOffset;
-    const camRise = 0.42 + climbOffset * 0.4;
+    const camBackOffset = 2.55 + climbOffset + summitApproach * 1.15;
+    const camRise = 0.42 + climbOffset * 0.4 + summitApproach * 0.28;
 
-    const lookAheadLocal = 24 + progressRatio * 8 + (climbing ? 2.4 : 0);
+    const lookAheadLocal = 24 + progressRatio * 8 + (climbing ? 2.4 : 0) + summitApproach * 4.5;
     const lookWorldY = Math.min(
-      summitWorldY + 0.8,
+      summitWorldY + 1.6,
       playerWorldY + this._worldY(lookAheadLocal)
     );
-    const lookZ = 0.2;
+    const lookZ = 0.2 - summitApproach * 0.35;
 
     // Lateral counter-sway: when the climber swings right, the cam drifts
     // left of his back, so the silhouette cuts through frame instead of
@@ -3493,7 +3739,7 @@ class BergRenderer {
       ? this.tempVecA.set(
         lateralX * 0.26 + counterSway * 0.42 + cameraLaneShift * 0.82,
         playerWorldY + shoulderWorldY - 0.1 - fallOffsetWorld,
-        this.playerRender.z + 3.18 + fallRatio * 0.7 + Math.sin(this.elapsed * 0.68) * 0.03
+        this.playerRender.z + 3.18 + summitApproach * 0.8 + fallRatio * 0.7 + Math.sin(this.elapsed * 0.68) * 0.03
       )
       : this.tempVecA.set(
         lateralX * 0.42 + counterSway + cameraLaneShift,

@@ -106,6 +106,7 @@ class Game {
     this.questionManager = null;
 
     this.state = 'idle';
+    this.atmospherePreset = 'classic';
     this.lastSettings = null;
     this.slotConfigs = [];
     this.topicButtonNodes = [];
@@ -301,6 +302,7 @@ class Game {
     this.destroy(false);
 
     this.lastSettings = JSON.parse(JSON.stringify(settings));
+    this.atmospherePreset = settings.atmospherePreset || 'classic';
     this.slotConfigs = settings.slotConfigs;
     this.state = 'running';
     this.startedAt = performance.now();
@@ -318,7 +320,9 @@ class Game {
       console.warn('Question prefetch failed:', error);
     });
 
-    this.renderer = new BergRenderer(this.ui.canvas);
+    this.renderer = new BergRenderer(this.ui.canvas, {
+      atmospherePreset: this.atmospherePreset
+    });
     this.audio = new AudioManager();
     this.audio.setMuted(this.muted);
     this.audio.init();
@@ -632,11 +636,14 @@ class Game {
     this.player.lensVisual += (lensTarget - this.player.lensVisual) * lensBlend;
     this.cameraShake = Math.max(0, this.cameraShake - dt * 1.3);
 
-    const stormStrength = 0.28 + phaseRatio * 0.18 + this._dangerLevel() * 0.24;
+    const stormPresetMultiplier = this.atmospherePreset === 'newyear' ? 0.48 : 1;
+    const stormStrength = (0.28 + phaseRatio * 0.18 + this._dangerLevel() * 0.24) * stormPresetMultiplier;
+    const lensHazeFactor = this.atmospherePreset === 'newyear' ? 0.68 : 0.86;
+    const lensFrostFactor = this.atmospherePreset === 'newyear' ? 0.88 : 1.08;
     this.ui.stormOverlay.style.setProperty('--storm-strength', stormStrength.toFixed(3));
     this.ui.lensOverlay.style.setProperty('--lens-blur', this.player.lensVisual.toFixed(3));
-    this.ui.lensOverlay.style.setProperty('--lens-haze', (this.player.lensVisual * 0.86).toFixed(3));
-    this.ui.lensOverlay.style.setProperty('--lens-frost', clamp(this.player.lensVisual * 1.08, 0, 1).toFixed(3));
+    this.ui.lensOverlay.style.setProperty('--lens-haze', (this.player.lensVisual * lensHazeFactor).toFixed(3));
+    this.ui.lensOverlay.style.setProperty('--lens-frost', clamp(this.player.lensVisual * lensFrostFactor, 0, 1).toFixed(3));
 
     if (!this.player.falling) {
       if (now >= this.nextRockSpawnAt) {
@@ -1348,9 +1355,11 @@ class Game {
   }
 
   _buildSnapshot() {
-    const stormStrength = 0.32 + this._phaseRatio() * 0.18 + this._dangerLevel() * 0.28;
+    const stormPresetMultiplier = this.atmospherePreset === 'newyear' ? 0.52 : 1;
+    const stormStrength = (0.32 + this._phaseRatio() * 0.18 + this._dangerLevel() * 0.28) * stormPresetMultiplier;
 
     return {
+      atmospherePreset: this.atmospherePreset,
       phaseRatio: this._phaseRatio(),
       stormStrength,
       dangerLevel: this._dangerLevel(),

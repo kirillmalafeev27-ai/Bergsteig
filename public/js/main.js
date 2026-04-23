@@ -4,8 +4,27 @@ const STORAGE_KEYS = {
   level: 'bergstieg_lang_level',
   lexical: 'bergstieg_lexical_topic',
   slots: 'bergstieg_slot_assignments',
+  preset: 'bergstieg_atmosphere_preset',
   muted: 'bergstieg_muted'
 };
+
+const DEFAULT_ATMOSPHERE_PRESET = 'classic';
+const ATMOSPHERE_PRESETS = [
+  {
+    id: 'classic',
+    title: '\u0428\u0442\u0443\u0440\u043c\u043e\u0432\u043e\u0439 \u043f\u043e\u0434\u044a\u0451\u043c',
+    tag: '\u0411\u0430\u0437\u043e\u0432\u044b\u0439',
+    teaser: '\u0425\u043e\u043b\u043e\u0434, \u0441\u043d\u0435\u0433 \u0438 \u0434\u0430\u0432\u043b\u0435\u043d\u0438\u0435 \u0433\u043e\u0440\u044b',
+    copy: '\u041e\u0441\u043d\u043e\u0432\u043d\u0430\u044f \u043a\u0438\u043d\u043e\u0448\u043d\u0430\u044f \u0430\u0442\u043c\u043e\u0441\u0444\u0435\u0440\u0430: \u0445\u043e\u043b\u043e\u0434\u043d\u044b\u0439 \u0441\u0432\u0435\u0442, \u043c\u0435\u0442\u0435\u043b\u044c, \u0442\u0443\u043c\u0430\u043d \u0438 \u0441\u0443\u0440\u043e\u0432\u043e\u0435 \u0432\u043e\u0441\u0445\u043e\u0436\u0434\u0435\u043d\u0438\u0435.'
+  },
+  {
+    id: 'newyear',
+    title: '\u041d\u043e\u0432\u043e\u0433\u043e\u0434\u043d\u044f\u044f \u043d\u043e\u0447\u044c',
+    tag: '\u041d\u043e\u0432\u044b\u0439',
+    teaser: '\u0427\u0451\u0440\u043d\u043e\u0435 \u043d\u0435\u0431\u043e, \u0437\u043e\u043b\u043e\u0442\u044b\u0435 \u0437\u0432\u0451\u0437\u0434\u044b \u0438 \u0444\u043e\u043d\u0430\u0440\u0438 \u043d\u0430 \u043c\u0430\u0440\u0448\u0440\u0443\u0442\u0435',
+    copy: '\u041f\u0440\u0430\u0437\u0434\u043d\u0438\u0447\u043d\u044b\u0439 \u043a\u043e\u043d\u0442\u0440\u0430\u0441\u0442: \u0447\u0451\u0440\u043d\u043e\u0435 \u043d\u0435\u0431\u043e, \u043b\u0435\u0434\u044f\u043d\u043e-\u0433\u043e\u043b\u0443\u0431\u044b\u0435 \u0433\u043e\u0440\u044b \u0438 \u0442\u0451\u043f\u043b\u043e\u0435 \u0437\u043e\u043b\u043e\u0442\u043e\u0435 \u0441\u0432\u0435\u0447\u0435\u043d\u0438\u0435 \u0444\u043e\u043d\u0430\u0440\u0435\u0439.'
+  }
+];
 
 function languageStorageKey(key, language) {
   return `${key}_${language}`;
@@ -38,6 +57,12 @@ function detectTouchDevice() {
   return Boolean(coarse || touch);
 }
 
+function normalizeAtmospherePreset(preset) {
+  return ATMOSPHERE_PRESETS.some((option) => option.id === preset)
+    ? preset
+    : DEFAULT_ATMOSPHERE_PRESET;
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   if (detectTouchDevice()) {
     document.body.classList.add('touch');
@@ -55,6 +80,8 @@ document.addEventListener('DOMContentLoaded', () => {
     playerName: document.getElementById('player-name'),
     levelLabel: document.getElementById('level-label'),
     levelButtons: document.getElementById('level-buttons'),
+    presetLabel: document.getElementById('preset-label'),
+    presetButtons: document.getElementById('preset-buttons'),
     step2Text: document.getElementById('step2-text'),
     lexicalGrid: document.getElementById('lexical-grid'),
     bonusSlots: document.getElementById('bonus-slots'),
@@ -64,19 +91,24 @@ document.addEventListener('DOMContentLoaded', () => {
     startButton: document.getElementById('start-btn'),
     winStats: document.getElementById('win-stats'),
     loseStats: document.getElementById('lose-stats'),
-    loseMessage: document.getElementById('lose-message')
+    loseMessage: document.getElementById('lose-message'),
+    themeColorMeta: document.querySelector('meta[name="theme-color"]')
   };
 
   let selectedLanguage = safeStorageGet(STORAGE_KEYS.language, DEFAULT_LANGUAGE) || DEFAULT_LANGUAGE;
   if (!LANGUAGE_OPTIONS.some((option) => option.id === selectedLanguage)) {
     selectedLanguage = DEFAULT_LANGUAGE;
   }
+  let selectedAtmospherePreset = normalizeAtmospherePreset(
+    safeStorageGet(STORAGE_KEYS.preset, DEFAULT_ATMOSPHERE_PRESET) || DEFAULT_ATMOSPHERE_PRESET
+  );
   let selectedLevel = DEFAULT_CEFR_LEVEL;
   let selectedLexical = null;
   let selectedSlotIndex = 0;
   let slotAssignments = [];
 
   ui.playerName.value = safeStorageGet(STORAGE_KEYS.playerName, '');
+  applyAtmospherePreview();
   loadSelectionsForLanguage(selectedLanguage);
 
   const storedMute = safeStorageGet(STORAGE_KEYS.muted, '0');
@@ -109,6 +141,7 @@ document.addEventListener('DOMContentLoaded', () => {
   };
 
   renderLanguageButtons();
+  renderPresetButtons();
   updateSetupCopy();
   renderLevelButtons();
   renderLexicalGrid();
@@ -213,6 +246,7 @@ document.addEventListener('DOMContentLoaded', () => {
     safeStorageSet(languageStorageKey(STORAGE_KEYS.level, language), selectedLevel);
     safeStorageSet(languageStorageKey(STORAGE_KEYS.lexical, language), selectedLexical || '');
     safeStorageSet(languageStorageKey(STORAGE_KEYS.slots, language), JSON.stringify(slotAssignments));
+    safeStorageSet(STORAGE_KEYS.preset, selectedAtmospherePreset);
   }
 
   function updateSetupCopy() {
@@ -231,6 +265,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     if (ui.playerName) {
       ui.playerName.placeholder = languageConfig.playerPlaceholder;
+    }
+    if (ui.presetLabel) {
+      ui.presetLabel.textContent = '\u0410\u0442\u043c\u043e\u0441\u0444\u0435\u0440\u0430 \u0441\u0435\u0441\u0441\u0438\u0438';
     }
   }
 
@@ -290,6 +327,38 @@ document.addEventListener('DOMContentLoaded', () => {
         renderLevelButtons();
       });
       ui.levelButtons.appendChild(button);
+    });
+  }
+
+  function renderPresetButtons() {
+    if (!ui.presetButtons) {
+      return;
+    }
+
+    ui.presetButtons.innerHTML = '';
+    ATMOSPHERE_PRESETS.forEach((preset) => {
+      const button = document.createElement('button');
+      button.className = `preset-btn preset-btn-${preset.id}`;
+      button.type = 'button';
+      button.classList.toggle('active', preset.id === selectedAtmospherePreset);
+      button.innerHTML = `
+        <span class="preset-btn-topline">
+          <span class="preset-btn-title">${preset.title}</span>
+          <span class="preset-btn-tag">${preset.tag}</span>
+        </span>
+        <span class="preset-btn-teaser">${preset.teaser}</span>
+        <span class="preset-btn-copy">${preset.copy}</span>
+      `;
+      button.addEventListener('click', () => {
+        if (preset.id === selectedAtmospherePreset) {
+          return;
+        }
+        selectedAtmospherePreset = preset.id;
+        applyAtmospherePreview();
+        persistSelectionsForLanguage();
+        renderPresetButtons();
+      });
+      ui.presetButtons.appendChild(button);
     });
   }
 
@@ -406,6 +475,7 @@ document.addEventListener('DOMContentLoaded', () => {
       language: selectedLanguage,
       languageLabel: languageConfig.uiLabel,
       playerName: ui.playerName.value.trim() || languageConfig.defaultPlayerName,
+      atmospherePreset: selectedAtmospherePreset,
       langLevel: selectedLevel,
       lexicalTopic: selectedLexical,
       slotConfigs: BONUS_SLOTS.map((slotDef, index) => ({
@@ -442,6 +512,16 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (error) {
       console.warn('Saved slot assignments could not be restored:', error);
       return empty;
+    }
+  }
+
+  function applyAtmospherePreview() {
+    document.body.dataset.atmospherePreset = selectedAtmospherePreset;
+    if (ui.themeColorMeta) {
+      ui.themeColorMeta.setAttribute(
+        'content',
+        selectedAtmospherePreset === 'newyear' ? '#05070b' : '#0e1821'
+      );
     }
   }
 });
