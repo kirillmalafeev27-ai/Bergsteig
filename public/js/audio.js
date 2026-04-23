@@ -1,9 +1,9 @@
-const AUDIO_MASTER_DEFAULT = 0.24;
+const AUDIO_MASTER_DEFAULT = 0.34;
 
 const AUDIO_SAMPLES = {
   windLoop: {
     url: 'audio/ambience-wind-loop.mp3',
-    gain: 1.24,
+    gain: 1.95,
     playbackRate: 1,
     loopStart: 0,
     loopEnd: 6.95,
@@ -11,7 +11,7 @@ const AUDIO_SAMPLES = {
   },
   threatLoop: {
     url: 'audio/ambience-threat-surge.mp3',
-    gain: 0.36,
+    gain: 0.48,
     playbackRate: 0.92,
     loopStart: 0.35,
     loopEnd: 13.5
@@ -147,8 +147,8 @@ class AudioManager {
       return;
     }
 
-    const windTarget = 0.18 + progressRatio * 0.18 + dangerLevel * 0.15;
-    const threatTarget = 0.012 + progressRatio * 0.035 + dangerLevel * 0.11;
+    const windTarget = 0.34 + progressRatio * 0.28 + dangerLevel * 0.2;
+    const threatTarget = 0.03 + progressRatio * 0.05 + dangerLevel * 0.14;
     this.windGain.gain.setTargetAtTime(windTarget, this.ctx.currentTime, 0.36);
     this.threatGain.gain.setTargetAtTime(threatTarget, this.ctx.currentTime, 0.28);
   }
