@@ -2203,7 +2203,8 @@ class BergRenderer {
         ...snapshot.player,
         progressY: snapshot.player.y,
         y: this._sceneYFromGameY(snapshot.player.y),
-        fallOffset: this._sceneYFromGameY(snapshot.player.fallOffset || 0)
+        fallOffset: this._sceneYFromGameY(snapshot.player.fallOffset || 0),
+        fallRatio: clamp01((snapshot.player.fallOffset || 0) / 28)
       },
       rocks: snapshot.rocks.map((rock) => ({
         ...rock,
@@ -2408,6 +2409,8 @@ class BergRenderer {
     this.playerGroup.position.copy(this.playerRender);
 
     const lateralSwing = snapshot.player.vx || 0;
+    const falling = Boolean(snapshot.player.falling);
+    const fallRatio = snapshot.player.fallRatio || 0;
     // Pulse amplitude scales with active climbing. When the climber is
     // just hanging on the rope, limbs drift gently; when pulling up,
     // the cadence is visible and deliberate.
@@ -2458,15 +2461,35 @@ class BergRenderer {
       this.shieldRing.material.opacity = 0;
     }
 
-    if (snapshot.player.falling) {
-      this.playerGroup.rotation.z = -0.92;
-      this.playerGroup.rotation.x = -0.64;
+    if (falling) {
+      const flail = Math.sin(this.elapsed * 8.7 + snapshot.player.y * 0.26) * (0.08 + fallRatio * 0.12);
+      const twist = Math.sin(this.elapsed * 5.4 + snapshot.player.x * 0.18) * (0.06 + fallRatio * 0.1);
+      const kick = Math.sin(this.elapsed * 10.2 + snapshot.player.y * 0.42) * (0.14 + fallRatio * 0.16);
+      const reach = Math.sin(this.elapsed * 7.4 + 0.8) * (0.05 + fallRatio * 0.09);
+
+      // Keep the climber opened toward the route so the face and chest still
+      // read as looking upslope rather than tumbling away from the mountain.
+      this.playerGroup.rotation.x = -0.96 + fallRatio * 0.18 + flail;
+      this.playerGroup.rotation.y = twist;
+      this.playerGroup.rotation.z = -0.16 - sway * 0.24 + twist * 0.85;
       this.playerGroup.position.y -= snapshot.player.fallOffset;
-      this.playerGroup.position.z += snapshot.player.fallOffset * 0.42;
-      this.leftArmPivot.rotation.x = 2.2;
-      this.rightArmPivot.rotation.x = 0.4;
-      this.leftLegPivot.rotation.x = 0.8;
-      this.rightLegPivot.rotation.x = -0.2;
+      this.playerGroup.position.z += snapshot.player.fallOffset * (0.34 + fallRatio * 0.08);
+      this.playerGroup.position.x += Math.sin(this.elapsed * 3.7 + snapshot.player.y * 0.14) * 0.12 * fallRatio;
+
+      this.leftArmPivot.rotation.x = 1.94 + fallRatio * 0.5 + reach;
+      this.leftArmPivot.rotation.z = -0.5 - twist * 0.8;
+      this.leftForearmPivot.rotation.x = -0.18 - fallRatio * 0.3 - reach * 0.9;
+
+      this.rightArmPivot.rotation.x = 1.18 + fallRatio * 0.44 - reach * 0.8;
+      this.rightArmPivot.rotation.z = 0.48 + twist * 0.6;
+      this.rightForearmPivot.rotation.x = -0.82 + fallRatio * 0.22 + reach * 0.7;
+
+      this.leftLegPivot.rotation.x = 0.74 + fallRatio * 0.18 - kick;
+      this.leftShinPivot.rotation.x = -0.2 + kick * 0.9;
+      this.rightLegPivot.rotation.x = -0.1 + fallRatio * 0.42 + kick;
+      this.rightShinPivot.rotation.x = -0.56 - kick * 0.82;
+
+      this.headlamp.intensity = 1.95 + Math.sin(this.elapsed * 10.5) * 0.24;
     }
 
   }
@@ -3230,12 +3253,17 @@ class BergRenderer {
     const playerWorldY = this._worldY(this.playerRender.y);
     const summitWorldY = this._worldY(this.summitFocusLocal.y);
     const climbing = Boolean(snapshot.player.climbing);
+    const falling = Boolean(snapshot.player.falling);
+    const fallRatio = snapshot.player.fallRatio || 0;
+    const fallOffsetWorld = this._worldY((snapshot.player.fallOffset || 0) * 0.38);
 
     // Over-the-shoulder POV with weight. The camera lags the climber, leans
     // into the slope when they climb, and sways gently against their
     // lateral motion so the rig reads as attached to a body breathing
     // on a rope — not a locked follow-cam.
-    const desiredFov = 74 - progressRatio * 4 + (climbing ? 1.6 : 0);
+    const desiredFov = falling
+      ? 81 + fallRatio * 4
+      : 74 - progressRatio * 4 + (climbing ? 1.6 : 0);
     if (Math.abs(this.camera.fov - desiredFov) > 0.02) {
       this.camera.fov += (desiredFov - this.camera.fov) * Math.min(1, dt * 2.2);
       this.camera.updateProjectionMatrix();
@@ -3269,16 +3297,31 @@ class BergRenderer {
     const cameraLaneShift = activeCouloirX * (0.26 + danger * 0.04);
     const lookLaneShift = activeCouloirX * (0.35 + danger * 0.03);
 
-    const targetPosition = this.tempVecA.set(
-      lateralX * 0.42 + counterSway + cameraLaneShift,
-      playerWorldY + shoulderWorldY + camRise,
-      this.playerRender.z + camBackOffset + Math.sin(this.elapsed * 0.42) * 0.04
-    );
-    const targetLook = this.tempVecB.set(
-      lateralX * 0.22 + lookLaneShift,
-      lookWorldY,
-      lookZ
-    );
+    const targetPosition = falling
+      ? this.tempVecA.set(
+        lateralX * 0.26 + counterSway * 0.42 + cameraLaneShift * 0.82,
+        playerWorldY + shoulderWorldY - 0.1 - fallOffsetWorld,
+        this.playerRender.z + 3.18 + fallRatio * 0.7 + Math.sin(this.elapsed * 0.68) * 0.03
+      )
+      : this.tempVecA.set(
+        lateralX * 0.42 + counterSway + cameraLaneShift,
+        playerWorldY + shoulderWorldY + camRise,
+        this.playerRender.z + camBackOffset + Math.sin(this.elapsed * 0.42) * 0.04
+      );
+    const targetLook = falling
+      ? this.tempVecB.set(
+        lateralX * 0.1 + lookLaneShift * 0.72,
+        Math.min(
+          summitWorldY + 1.2,
+          playerWorldY + this._worldY(32 + fallRatio * 14) - fallOffsetWorld * 0.22
+        ),
+        0.14
+      )
+      : this.tempVecB.set(
+        lateralX * 0.22 + lookLaneShift,
+        lookWorldY,
+        lookZ
+      );
 
     // Heavier damping — exp(-dt*3.2) lags ~0.3s vs the old ~0.15s.
     // Gives the rig real mass and turns the old "whip to target" feel
@@ -3289,16 +3332,16 @@ class BergRenderer {
     // Breathing: deeper amplitude under load, syncopated X so it's not a
     // simple bob. Extra pulse when actively climbing — the axe/foot
     // cadence bleeds into the rig.
-    const load = (climbing ? 0.5 : 0) + danger * 0.4;
+    const load = (climbing ? 0.5 : 0) + danger * 0.4 + (falling ? 0.18 : 0);
     const breathAmp = 0.06 + progressRatio * 0.09 + load * 0.08;
     const breath = Math.sin(this.elapsed * (0.9 + load * 0.4)) * breathAmp;
     const breathSway = Math.sin(this.elapsed * 0.6 + 0.4) * breathAmp * 0.55;
-    this.camera.position.y += breath;
-    this.camera.position.x += breathSway;
+    this.camera.position.y += falling ? breath * 0.26 : breath;
+    this.camera.position.x += falling ? breathSway * 0.32 : breathSway;
 
     // Axe-plant micro-dolly: a short forward bump timed to the climb
     // stroke phase, then a settle. Gives the rig a living, reactive feel.
-    if (climbing) {
+    if (climbing && !falling) {
       const stroke = (snapshot.player.climbStrokePhase || 0);
       const phaseOffset = stroke * Math.PI;
       const kick = Math.max(0, Math.sin(this.elapsed * 4.8 + phaseOffset));
@@ -3318,7 +3361,9 @@ class BergRenderer {
     const rollBreath = Math.sin(this.elapsed * 0.7 + 1.2) * (0.003 + progressRatio * 0.004);
     const tensionRoll = climbing ? Math.sin(this.elapsed * 2.1) * 0.012 : 0;
     this.camera.rotation.z =
-      -lateralX * 0.022 - lateralVx * 0.0028 + rollBreath + tensionRoll;
+      falling
+        ? -lateralX * 0.01 - lateralVx * 0.0016 + Math.sin(this.elapsed * 1.2) * 0.006
+        : -lateralX * 0.022 - lateralVx * 0.0028 + rollBreath + tensionRoll;
   }
 
   resize() {

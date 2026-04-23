@@ -1375,7 +1375,7 @@ class Game {
       if (this.onLose) {
         this.onLose(stats);
       }
-    }, 1100);
+    }, 1450);
   }
 
   _handleWin() {

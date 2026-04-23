@@ -1513,73 +1513,231 @@ function makeFrenchDefaultQuestion(grammarTopic, lexicalTopic) {
   };
 }
 
+const AI_QUESTION_BATCH_SIZE = 30;
+const AI_PREFETCH_LOW_WATERMARK = 4;
+
+function isValidRemoteQuestion(question) {
+  return Boolean(
+    question &&
+      typeof question.text === 'string' &&
+      typeof question.display === 'string' &&
+      Array.isArray(question.options) &&
+      question.options.length === 4 &&
+      typeof question.correct === 'number' &&
+      question.correct >= 0 &&
+      question.correct <= 3
+  );
+}
+
+function isWordOrderTopic(topic) {
+  return /wortstellung/i.test(normalizeTopicKey(topic));
+}
+
 class QuestionManager {
   constructor(level = DEFAULT_CEFR_LEVEL, language = DEFAULT_LANGUAGE) {
-    this.level = level;
+    this.level = level || DEFAULT_CEFR_LEVEL;
     this.language = language || DEFAULT_LANGUAGE;
     this.lexicalTopic = getLanguageLexicalTopics(this.language)[0];
     this.slots = [];
-    this.history = Object.create(null);
+    this.questionPool = Object.create(null);
+    this.fetching = Object.create(null);
+    this.usedDisplays = Object.create(null);
+    this.lastQuestion = null;
   }
 
   setLevel(level) {
-    this.level = level || DEFAULT_CEFR_LEVEL;
+    const nextLevel = level || DEFAULT_CEFR_LEVEL;
+    if (this.level !== nextLevel) {
+      this.level = nextLevel;
+      this._resetPools();
+    }
   }
 
   setLanguage(language) {
-    this.language = language || DEFAULT_LANGUAGE;
+    const nextLanguage = language || DEFAULT_LANGUAGE;
+    if (this.language !== nextLanguage) {
+      this.language = nextLanguage;
+      this.lexicalTopic = getLanguageLexicalTopics(this.language)[0];
+      this._resetPools();
+      return;
+    }
+
     const lexicalTopics = getLanguageLexicalTopics(this.language);
     if (!lexicalTopics.includes(this.lexicalTopic)) {
       this.lexicalTopic = lexicalTopics[0];
+      this._resetPools();
     }
   }
 
   setLexicalTopic(topic) {
     const lexicalTopics = getLanguageLexicalTopics(this.language);
-    this.lexicalTopic = lexicalTopics.includes(topic) ? topic : lexicalTopics[0];
+    const nextTopic = lexicalTopics.includes(topic) ? topic : lexicalTopics[0];
+    if (this.lexicalTopic !== nextTopic) {
+      this.lexicalTopic = nextTopic;
+      this._resetPools();
+    }
   }
 
   configureSlots(slotConfigs) {
     this.slots = slotConfigs.filter(Boolean);
-    this.history = Object.create(null);
+    this._resetPools();
   }
 
-  getQuestion(slotId) {
+  async prefetchAll() {
+    const tasks = this.slots.map((slot) => this._ensurePool(slot.slotDef.id));
+    await Promise.allSettled(tasks);
+  }
+
+  shuffleAllPools() {
+    Object.keys(this.questionPool).forEach((slotId) => {
+      this.questionPool[slotId] = shuffleArray(this.questionPool[slotId]);
+    });
+  }
+
+  async getQuestion(slotId) {
     const slotConfig = this.slots.find((slot) => slot.slotDef.id === slotId);
     if (!slotConfig) {
       return null;
     }
 
-    let question = null;
-    let attempts = 0;
-    const memory = this.history[slotId] || new Set();
+    await this._ensurePool(slotId);
+    const pool = this.questionPool[slotId];
+    if (!pool || pool.length === 0) {
+      return this._fallbackQuestion(slotConfig);
+    }
 
-    do {
-      question = buildQuestion(slotConfig.grammarTopic, this.lexicalTopic, this.level, this.language);
-      attempts += 1;
-    } while (memory.has(question.display) && attempts < 8);
+    const rawQuestion = pool.shift();
+    this.lastQuestion = { slotId, question: rawQuestion };
 
-    memory.add(question.display);
-    this.history[slotId] = memory;
+    if (pool.length <= AI_PREFETCH_LOW_WATERMARK) {
+      this._ensurePool(slotId);
+    }
 
-    const shuffled = shuffleArray(
-      question.options.map((option, index) => ({
-        option,
-        correct: index === question.correct
-      }))
-    );
+    return this._formatQuestion(rawQuestion, slotConfig);
+  }
+
+  onCorrectAnswer(slotId) {
+    if (this.lastQuestion && this.lastQuestion.slotId === slotId) {
+      const set = this.usedDisplays[slotId] || new Set();
+      set.add(this.lastQuestion.question.display);
+      this.usedDisplays[slotId] = set;
+      this.lastQuestion = null;
+    }
+
+    if (!this.questionPool[slotId] || this.questionPool[slotId].length <= AI_PREFETCH_LOW_WATERMARK) {
+      this._ensurePool(slotId);
+    }
+  }
+
+  onWrongAnswer(slotId) {
+    if (!this.lastQuestion || this.lastQuestion.slotId !== slotId) {
+      return;
+    }
+
+    const pool = this.questionPool[slotId] || [];
+    const position = Math.floor(Math.random() * (pool.length + 1));
+    pool.splice(position, 0, this.lastQuestion.question);
+    this.questionPool[slotId] = pool;
+    this.lastQuestion = null;
+  }
+
+  _resetPools() {
+    this.questionPool = Object.create(null);
+    this.fetching = Object.create(null);
+    this.usedDisplays = Object.create(null);
+    this.lastQuestion = null;
+  }
+
+  async _ensurePool(slotId) {
+    if (this.fetching[slotId]) {
+      return this.fetching[slotId];
+    }
+
+    const pool = this.questionPool[slotId];
+    if (pool && pool.length > AI_PREFETCH_LOW_WATERMARK) {
+      return pool;
+    }
+
+    const slotConfig = this.slots.find((slot) => slot.slotDef.id === slotId);
+    if (!slotConfig) {
+      return [];
+    }
+
+    this.fetching[slotId] = this._fetchQuestions(slotConfig)
+      .catch((error) => {
+        console.warn(`Не удалось загрузить вопросы для слота ${slotId}:`, error);
+        return [];
+      })
+      .finally(() => {
+        delete this.fetching[slotId];
+      });
+
+    return this.fetching[slotId];
+  }
+
+  async _fetchQuestions(slotConfig) {
+    const slotId = slotConfig.slotDef.id;
+    const seen = Array.from(this.usedDisplays[slotId] || []).slice(-12);
+    const response = await fetch('/api/generate-questions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        level: this.level,
+        language: this.language,
+        lexicalTopic: this.lexicalTopic,
+        grammarTopic: slotConfig.grammarTopic,
+        isWortstellung: Boolean(slotConfig.slotDef.isWortstellung || isWordOrderTopic(slotConfig.grammarTopic)),
+        count: AI_QUESTION_BATCH_SIZE,
+        exclude: seen
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const data = await response.json();
+    const valid = (data.questions || []).filter((question) => isValidRemoteQuestion(question));
+    if (!valid.length) {
+      return this.questionPool[slotId] || [];
+    }
+
+    const pool = [...(this.questionPool[slotId] || []), ...shuffleArray(valid)];
+    this.questionPool[slotId] = pool;
+    return pool;
+  }
+
+  _formatQuestion(rawQuestion, slotConfig) {
+    const correctAnswer = rawQuestion.options[rawQuestion.correct];
+    const shuffledOptions = shuffleArray(rawQuestion.options);
 
     return {
-      slotId,
+      slotId: slotConfig.slotDef.id,
       slotDef: slotConfig.slotDef,
       grammarTopic: slotConfig.grammarTopic,
       level: this.level,
       language: this.language,
-      text: question.text,
-      display: question.display,
+      text: rawQuestion.text,
+      display: rawQuestion.display,
       options: {
-        options: shuffled.map((item) => item.option),
-        correctIndex: shuffled.findIndex((item) => item.correct)
+        options: shuffledOptions,
+        correctIndex: shuffledOptions.indexOf(correctAnswer)
+      }
+    };
+  }
+
+  _fallbackQuestion(slotConfig) {
+    return {
+      slotId: slotConfig.slotDef.id,
+      slotDef: slotConfig.slotDef,
+      grammarTopic: slotConfig.grammarTopic,
+      level: this.level,
+      language: this.language,
+      text: 'Резервное упражнение',
+      display: 'Сервер вопросов временно недоступен. Нажмите OK, чтобы получить бонус и не останавливать игру.',
+      options: {
+        options: ['OK', 'Пауза', 'Ошибка', 'Назад'],
+        correctIndex: 0
       }
     };
   }
