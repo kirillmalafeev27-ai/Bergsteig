@@ -24,7 +24,7 @@ const AVALANCHE_INTERVAL_MULTIPLIER = 4;
 const AVALANCHE_INITIAL_DELAY_MS = 18000 * AVALANCHE_INTERVAL_MULTIPLIER;
 const AVALANCHE_CADENCE_MIN = 14000 * AVALANCHE_INTERVAL_MULTIPLIER;
 const AVALANCHE_CADENCE_MAX = 19000 * AVALANCHE_INTERVAL_MULTIPLIER;
-const COULOIR_FISSURE_CHANCE = 0.4;
+const COULOIR_FISSURE_CHANCE = 0.5;
 const COULOIR_FISSURE_TURNS = 3;
 const COULOIR_FISSURE_MIN_AHEAD = 12;
 const COULOIR_FISSURE_MAX_AHEAD = 18;
@@ -1203,7 +1203,7 @@ class Game {
 
   _questionMetaText() {
     if (!this.couloirFissure) {
-      return '1-4 / ошибка = расщелина 40%';
+      return '1-4 / ошибка = расщелина 50%';
     }
     return `Расщелина: ${laneLabel(this.couloirFissure.lane)} · ${formatTurnCount(this.couloirFissure.turnsLeft)}`;
   }
@@ -1221,6 +1221,7 @@ class Game {
     this.couloirFissure = {
       id: `fissure-${this.hazardCounter += 1}`,
       lane,
+      maxTurns: COULOIR_FISSURE_TURNS,
       turnsLeft: COULOIR_FISSURE_TURNS,
       offsetY: randomRange(COULOIR_FISSURE_MIN_AHEAD, COULOIR_FISSURE_MAX_AHEAD),
       spawnedAt: this.currentTime
@@ -1386,6 +1387,7 @@ class Game {
           lane: this.couloirFissure.lane,
           x: laneToX(this.couloirFissure.lane),
           y: this.player.progress + this.couloirFissure.offsetY,
+          maxTurns: this.couloirFissure.maxTurns || COULOIR_FISSURE_TURNS,
           turnsLeft: this.couloirFissure.turnsLeft,
           freshness: clamp(1 - (this.currentTime - this.couloirFissure.spawnedAt) / 1200, 0, 1)
         }]
