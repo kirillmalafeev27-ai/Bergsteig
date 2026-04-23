@@ -1558,44 +1558,7 @@ body[data-atmosphere-preset="newyear"] #control-hint {
 
 @media (max-width: 640px) {
   #game-hud {
-    top: max(8px, env(safe-area-inset-top));
-    left: 8px;
-    right: 8px;
-    gap: 8px;
-  }
-
-  .hud-route-card,
-  .hud-session-card {
-    padding: 12px;
-    border-radius: 18px;
-  }
-
-  .hud-altitude-text {
-    font-size: 1.22rem;
-  }
-
-  .hud-phase-chip {
-    font-size: 0.68rem;
-  }
-
-  .hud-mini-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .hud-mini-card {
-    min-height: 0;
-  }
-
-  .hud-banner {
-    padding: 10px 12px;
-    border-radius: 16px;
-    font-size: 0.8rem;
-  }
-
-  #game-screen:has(#question-panel:not(.hidden)) #game-hud,
-  #game-screen:has(#direction-panel:not(.hidden)) #game-hud,
-  #game-screen:has(#pause-overlay:not(.hidden)) #game-hud {
-    display: none;
+    display: none !important;
   }
 
   .menu-layout {
