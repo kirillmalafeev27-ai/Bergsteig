@@ -27,13 +27,13 @@ const CONTENT_TYPES = {
   '.map': 'application/json; charset=utf-8'
 };
 
-// Cache policy: short cache for HTML so updates ship fast, long cache for
-// hashed-ish assets. We don't ship hashed URLs yet, so assets get a
-// one-hour cache with revalidation.
+// Cache policy: this project does not use hashed asset URLs yet, so scripts
+// and styles must revalidate on each load. Otherwise browsers can keep an old
+// game bundle while the server already has a newer one.
 const CACHE_CONTROL = {
   '.html': 'no-cache',
-  '.js': 'public, max-age=3600, must-revalidate',
-  '.css': 'public, max-age=3600, must-revalidate'
+  '.js': 'no-cache',
+  '.css': 'no-cache'
 };
 
 function log(message) {
