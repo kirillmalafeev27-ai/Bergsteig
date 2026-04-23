@@ -1515,6 +1515,8 @@ function makeFrenchDefaultQuestion(grammarTopic, lexicalTopic) {
 
 const AI_QUESTION_BATCH_SIZE = 30;
 const AI_PREFETCH_LOW_WATERMARK = 4;
+const AI_CLICK_WAIT_MS = 3500;
+const AI_FETCH_TIMEOUT_MS = 12000;
 
 function isValidRemoteQuestion(question) {
   return Boolean(
@@ -1533,6 +1535,19 @@ function isWordOrderTopic(topic) {
   return /wortstellung/i.test(normalizeTopicKey(topic));
 }
 
+function slotConfigSignature(slotConfigs) {
+  return slotConfigs
+    .filter(Boolean)
+    .map((slot) => `${slot.slotDef && slot.slotDef.id}:${slot.grammarTopic}`)
+    .join('|');
+}
+
+function wait(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
 class QuestionManager {
   constructor(level = DEFAULT_CEFR_LEVEL, language = DEFAULT_LANGUAGE) {
     this.level = level || DEFAULT_CEFR_LEVEL;
@@ -1543,6 +1558,7 @@ class QuestionManager {
     this.fetching = Object.create(null);
     this.usedDisplays = Object.create(null);
     this.lastQuestion = null;
+    this.slotsSignature = '';
   }
 
   setLevel(level) {
@@ -1579,8 +1595,16 @@ class QuestionManager {
   }
 
   configureSlots(slotConfigs) {
-    this.slots = slotConfigs.filter(Boolean);
-    this._resetPools();
+    const nextSlots = slotConfigs.filter(Boolean);
+    const nextSignature = slotConfigSignature(nextSlots);
+    if (this.slotsSignature !== nextSignature) {
+      this.slots = nextSlots;
+      this.slotsSignature = nextSignature;
+      this._resetPools();
+      return;
+    }
+
+    this.slots = nextSlots;
   }
 
   async prefetchAll() {
@@ -1600,7 +1624,10 @@ class QuestionManager {
       return null;
     }
 
-    await this._ensurePool(slotId);
+    await Promise.race([
+      this._ensurePool(slotId),
+      wait(AI_CLICK_WAIT_MS)
+    ]);
     const pool = this.questionPool[slotId];
     if (!pool || pool.length === 0) {
       return this._fallbackQuestion(slotConfig);
@@ -1630,6 +1657,10 @@ class QuestionManager {
   }
 
   onWrongAnswer(slotId) {
+    this.returnLastQuestion(slotId);
+  }
+
+  returnLastQuestion(slotId) {
     if (!this.lastQuestion || this.lastQuestion.slotId !== slotId) {
       return;
     }
@@ -1678,19 +1709,28 @@ class QuestionManager {
   async _fetchQuestions(slotConfig) {
     const slotId = slotConfig.slotDef.id;
     const seen = Array.from(this.usedDisplays[slotId] || []).slice(-12);
-    const response = await fetch('/api/generate-questions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        level: this.level,
-        language: this.language,
-        lexicalTopic: this.lexicalTopic,
-        grammarTopic: slotConfig.grammarTopic,
-        isWortstellung: Boolean(slotConfig.slotDef.isWortstellung || isWordOrderTopic(slotConfig.grammarTopic)),
-        count: AI_QUESTION_BATCH_SIZE,
-        exclude: seen
-      })
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), AI_FETCH_TIMEOUT_MS);
+    let response;
+
+    try {
+      response = await fetch('/api/generate-questions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
+        body: JSON.stringify({
+          level: this.level,
+          language: this.language,
+          lexicalTopic: this.lexicalTopic,
+          grammarTopic: slotConfig.grammarTopic,
+          isWortstellung: Boolean(slotConfig.slotDef.isWortstellung || isWordOrderTopic(slotConfig.grammarTopic)),
+          count: AI_QUESTION_BATCH_SIZE,
+          exclude: seen
+        })
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
 
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);

@@ -287,7 +287,9 @@ class Game {
     this.currentTime = this.startedAt;
     this.lastFrameAt = 0;
 
-    this.questionManager = new QuestionManager(settings.langLevel, settings.language);
+    if (!this.questionManager) {
+      this.questionManager = new QuestionManager(settings.langLevel, settings.language);
+    }
     this.questionManager.setLanguage(settings.language);
     this.questionManager.setLevel(settings.langLevel);
     this.questionManager.setLexicalTopic(settings.lexicalTopic);
@@ -758,12 +760,17 @@ class Game {
   }
 
   async openQuestion(slotId, direction = 0) {
-    if (this.state !== 'running' || this.player.falling || this.currentQuestion || this.pendingDirection || this.questionLoading) {
+    if (this.state !== 'running' || this.player.falling || this.pendingDirection || this.questionLoading) {
       return;
     }
 
     const slotConfig = this.slotConfigs.find((slot) => slot.slotDef.id === slotId);
     if (!slotConfig) {
+      return;
+    }
+
+    const isDirectionalRequest = isDirectionalBonus(slotId) && Boolean(direction);
+    if (this.currentQuestion && !isDirectionalRequest) {
       return;
     }
 
@@ -780,6 +787,12 @@ class Game {
       return;
     }
 
+    if (this.currentQuestion) {
+      this.questionManager.returnLastQuestion(this.currentQuestion.slotId);
+      this.currentQuestion = null;
+      this._closeQuestionPanel();
+    }
+
     this.questionLoading = true;
     this._renderTopicButtons();
     this._showMessage('Загружаем вопрос...', 1100);
@@ -787,7 +800,7 @@ class Game {
     try {
       const question = await this.questionManager.getQuestion(slotId);
       if (this.state !== 'running' || this.player.falling || this.currentQuestion || this.pendingDirection) {
-        this.questionManager.onWrongAnswer(slotId);
+        this.questionManager.returnLastQuestion(slotId);
         return;
       }
       if (!question) {
@@ -1001,6 +1014,7 @@ class Game {
   _renderTopicButtons() {
     this.ui.topicButtons.innerHTML = '';
     const questionLocked = Boolean(this.currentQuestion || this.pendingDirection || this.player.falling || this.questionLoading);
+    const canInterruptWithDirection = Boolean(this.currentQuestion && !this.pendingDirection && !this.player.falling && !this.questionLoading);
 
     this.slotConfigs.forEach((slotConfig, index) => {
       const isShield = slotConfig.slotDef.id === 'snowShield';
@@ -1035,7 +1049,7 @@ class Game {
         if (isCooldown) {
           wrapper.classList.add('cooldown');
         }
-        if (questionLocked) {
+        if (questionLocked && !(isDirectional && canInterruptWithDirection)) {
           wrapper.classList.add('locked');
         }
         wrapper.innerHTML = `
@@ -1046,7 +1060,7 @@ class Game {
           </div>
         `;
         wrapper.querySelectorAll('.topic-direction-btn').forEach((directionButton) => {
-          directionButton.disabled = questionLocked || isCooldown;
+          directionButton.disabled = (questionLocked && !canInterruptWithDirection) || isCooldown;
           directionButton.addEventListener('click', () => {
             this.openQuestion(slotConfig.slotDef.id, Number(directionButton.dataset.dir || 0));
           });
