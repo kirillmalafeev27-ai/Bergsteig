@@ -136,6 +136,22 @@ class Game {
       canvas: document.getElementById('game-canvas'),
       lensOverlay: document.getElementById('lens-overlay'),
       stormOverlay: document.getElementById('storm-overlay'),
+      messageBanner: document.getElementById('message-banner'),
+      altitudeText: document.getElementById('altitude-text'),
+      altitudeBar: document.getElementById('altitude-bar'),
+      phaseText: document.getElementById('phase-text'),
+      phaseSubtext: document.getElementById('phase-subtext'),
+      laneText: document.getElementById('lane-text'),
+      swingText: document.getElementById('swing-text'),
+      lensText: document.getElementById('lens-text'),
+      lensSubtext: document.getElementById('lens-subtext'),
+      shieldText: document.getElementById('shield-text'),
+      shieldSubtext: document.getElementById('shield-subtext'),
+      playerDisplay: document.getElementById('player-display'),
+      sessionDisplay: document.getElementById('session-display'),
+      hazardText: document.getElementById('hazard-text'),
+      pauseBtn: document.getElementById('pause-btn'),
+      muteBtn: document.getElementById('mute-btn'),
       topicPanel: document.getElementById('topic-panel'),
       topicButtons: document.getElementById('topic-buttons'),
       questionPanel: document.getElementById('question-panel'),
@@ -168,6 +184,12 @@ class Game {
     }
     if (this.ui.pauseExitBtn) {
       this.ui.pauseExitBtn.addEventListener('click', () => this._handleExit());
+    }
+    if (this.ui.pauseBtn) {
+      this.ui.pauseBtn.addEventListener('click', () => this.togglePause());
+    }
+    if (this.ui.muteBtn) {
+      this.ui.muteBtn.addEventListener('click', () => this.toggleMute());
     }
 
     this.ui.touchZones.forEach((zone) => {
@@ -385,6 +407,8 @@ class Game {
     this._closeDirectionPanel();
     this._renderTopicButtons();
     this._showMessage('Подъём начался. Следи за оранжевыми метками на склоне — там упадёт камень.', 3200);
+    this._updateHud();
+    this._updateHazardFeed();
     this._loop(this.startedAt);
   }
 
@@ -512,14 +536,14 @@ class Game {
     const icon = this.ui.muteBtn.querySelector('.hud-action-icon');
     const label = this.ui.muteBtn.querySelector('.hud-action-label');
     if (this.muted) {
-      if (icon) icon.textContent = '🔇';
-      if (label) label.textContent = 'Mute';
+      if (icon) icon.textContent = 'M';
+      if (label) label.textContent = 'Выкл';
       this.ui.muteBtn.classList.add('active');
       this.ui.muteBtn.setAttribute('aria-pressed', 'true');
       this.ui.muteBtn.setAttribute('aria-label', 'Включить звук (M)');
       this.ui.muteBtn.setAttribute('title', 'Включить звук (M)');
     } else {
-      if (icon) icon.textContent = '🔊';
+      if (icon) icon.textContent = 'S';
       if (label) label.textContent = 'Звук';
       this.ui.muteBtn.classList.remove('active');
       this.ui.muteBtn.setAttribute('aria-pressed', 'false');
@@ -545,6 +569,8 @@ class Game {
     this._updateEnvironment(dt, timestamp);
     this._updateHazards(dt, timestamp);
     this._updateFootprints(dt);
+    this._updateHud();
+    this._updateHazardFeed();
     if (this.currentQuestion) {
       this._refreshQuestionMeta();
     }
