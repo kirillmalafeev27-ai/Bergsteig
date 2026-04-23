@@ -41,6 +41,14 @@ body {
     linear-gradient(180deg, #122331 0%, #0a151d 38%, #04080d 100%);
 }
 
+body[data-atmosphere-preset="newyear"] {
+  background:
+    radial-gradient(circle at 14% 10%, rgba(255, 214, 120, 0.12), transparent 16%),
+    radial-gradient(circle at 84% 12%, rgba(255, 241, 193, 0.08), transparent 14%),
+    radial-gradient(circle at 50% -4%, rgba(137, 195, 255, 0.08), transparent 28%),
+    linear-gradient(180deg, #070a10 0%, #04060b 42%, #020308 100%);
+}
+
 button,
 input {
   font: inherit;
@@ -102,6 +110,13 @@ button {
     linear-gradient(180deg, rgba(18, 34, 49, 0.92), rgba(8, 14, 21, 0.94));
 }
 
+body[data-atmosphere-preset="newyear"] .hero-card {
+  background:
+    radial-gradient(circle at 16% 12%, rgba(255, 214, 120, 0.18), transparent 24%),
+    radial-gradient(circle at 82% 80%, rgba(143, 211, 255, 0.18), transparent 28%),
+    linear-gradient(180deg, rgba(11, 15, 24, 0.95), rgba(5, 8, 13, 0.97));
+}
+
 .hero-card::before,
 .hero-card::after,
 .setup-card::before,
@@ -139,6 +154,13 @@ button {
     radial-gradient(circle at top, rgba(141, 211, 255, 0.1), transparent 34%);
 }
 
+body[data-atmosphere-preset="newyear"] .setup-card,
+body[data-atmosphere-preset="newyear"] .end-card {
+  background:
+    linear-gradient(180deg, rgba(7, 11, 18, 0.92), rgba(3, 6, 11, 0.97)),
+    radial-gradient(circle at top, rgba(255, 214, 120, 0.1), transparent 34%);
+}
+
 .setup-card::before,
 .end-card::before {
   inset: 0 0 auto 0;
@@ -158,6 +180,12 @@ button {
   text-transform: uppercase;
   letter-spacing: 0.18em;
   font-size: 0.74rem;
+}
+
+body[data-atmosphere-preset="newyear"] .hero-kicker,
+body[data-atmosphere-preset="newyear"] .panel-kicker,
+body[data-atmosphere-preset="newyear"] .end-kicker {
+  color: #ffd87c;
 }
 
 #game-title,
@@ -217,6 +245,12 @@ button {
   background:
     radial-gradient(circle at left, rgba(141, 211, 255, 0.14), transparent 38%),
     rgba(5, 11, 18, 0.5);
+}
+
+body[data-atmosphere-preset="newyear"] .bonus-preview {
+  background:
+    radial-gradient(circle at left, rgba(255, 214, 120, 0.14), transparent 38%),
+    rgba(5, 11, 18, 0.54);
 }
 
 .bonus-preview-title {
@@ -357,12 +391,17 @@ input[type="text"]:focus {
 
 .selection-grid,
 .level-buttons,
-.language-buttons {
+.language-buttons,
+.preset-buttons {
   display: grid;
   gap: 10px;
 }
 
 .language-buttons {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.preset-buttons {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
@@ -376,6 +415,7 @@ input[type="text"]:focus {
 
 .selection-btn,
 .language-btn,
+.preset-btn,
 .level-btn,
 .bonus-slot,
 .topic-btn,
@@ -394,6 +434,7 @@ input[type="text"]:focus {
 
 .selection-btn,
 .language-btn,
+.preset-btn,
 .level-btn,
 .bonus-slot,
 .topic-btn,
@@ -411,6 +452,7 @@ input[type="text"]:focus {
 
 .selection-btn:hover,
 .language-btn:hover,
+.preset-btn:hover,
 .level-btn:hover,
 .bonus-slot:hover,
 .topic-btn:hover,
@@ -430,6 +472,7 @@ input[type="text"]:focus {
 
 .selection-btn.selected,
 .language-btn.active,
+.preset-btn.active,
 .level-btn.active,
 .bonus-slot.selected {
   border-color: rgba(141, 211, 255, 0.42);
@@ -453,6 +496,44 @@ input[type="text"]:focus {
   align-content: start;
 }
 
+.preset-btn {
+  position: relative;
+  overflow: hidden;
+  min-height: 140px;
+  padding: 14px;
+  text-align: left;
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+
+.preset-btn::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.preset-btn > * {
+  position: relative;
+  z-index: 1;
+}
+
+.preset-btn-classic::before {
+  background:
+    radial-gradient(circle at 18% 20%, rgba(141, 211, 255, 0.14), transparent 22%),
+    radial-gradient(circle at 82% 18%, rgba(255, 122, 74, 0.1), transparent 18%),
+    linear-gradient(180deg, rgba(13, 24, 35, 0.76), rgba(6, 12, 18, 0.1));
+}
+
+.preset-btn-newyear::before {
+  background:
+    radial-gradient(circle at 16% 16%, rgba(255, 221, 132, 0.22), transparent 18%),
+    radial-gradient(circle at 82% 14%, rgba(255, 242, 196, 0.12), transparent 14%),
+    radial-gradient(circle at 58% 76%, rgba(133, 198, 255, 0.16), transparent 24%),
+    linear-gradient(180deg, rgba(9, 12, 18, 0.82), rgba(4, 6, 11, 0.14));
+}
+
 .language-btn-topline {
   display: flex;
   justify-content: space-between;
@@ -460,9 +541,22 @@ input[type="text"]:focus {
   align-items: center;
 }
 
+.preset-btn-topline {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: start;
+}
+
 .language-btn-title {
   color: #fbfdff;
   font-size: 1.04rem;
+  font-weight: 700;
+}
+
+.preset-btn-title {
+  color: #fbfdff;
+  font-size: 1rem;
   font-weight: 700;
 }
 
@@ -472,6 +566,15 @@ input[type="text"]:focus {
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.05);
   color: #d4e5f0;
+  font-size: 0.72rem;
+}
+
+.preset-btn-tag {
+  padding: 5px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.05);
+  color: #ffe7bf;
   font-size: 0.72rem;
 }
 
@@ -487,10 +590,31 @@ input[type="text"]:focus {
   font-size: 0.82rem;
 }
 
+.preset-btn-teaser {
+  color: #ffd996;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
 .language-btn-copy {
   color: #9bb1c2;
   font-size: 0.84rem;
   line-height: 1.45;
+}
+
+.preset-btn-copy {
+  color: #b7c9d7;
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.preset-btn.active {
+  border-color: rgba(255, 207, 114, 0.48);
+  background:
+    linear-gradient(180deg, rgba(53, 44, 25, 0.84), rgba(11, 16, 24, 0.96)),
+    rgba(255, 255, 255, 0.04);
+  box-shadow: 0 18px 36px rgba(216, 156, 44, 0.2);
 }
 
 .level-btn {
@@ -637,6 +761,13 @@ input[type="text"]:focus {
     linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0));
 }
 
+body[data-atmosphere-preset="newyear"] #game-screen::before {
+  background:
+    radial-gradient(circle at 18% 0%, rgba(255, 214, 120, 0.08), transparent 22%),
+    radial-gradient(circle at 82% 8%, rgba(196, 228, 255, 0.12), transparent 22%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0));
+}
+
 #game-screen::after {
   background:
     radial-gradient(circle at 50% 100%, rgba(255, 122, 74, 0.08), transparent 24%),
@@ -680,6 +811,13 @@ input[type="text"]:focus {
   background-size: 280px 280px, 280px 280px, 100% 100%;
   mix-blend-mode: screen;
   animation: drift-storm 16s linear infinite;
+}
+
+body[data-atmosphere-preset="newyear"] #storm-overlay {
+  background:
+    linear-gradient(120deg, rgba(255, 221, 136, 0) 0%, rgba(255, 221, 136, 0.06) 46%, rgba(255, 221, 136, 0) 54%),
+    linear-gradient(300deg, rgba(210, 233, 255, 0) 0%, rgba(210, 233, 255, 0.05) 44%, rgba(210, 233, 255, 0) 52%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 221, 136, 0));
 }
 
 @keyframes drift-storm {
@@ -815,6 +953,15 @@ body.paused #lens-overlay {
     rgba(5, 10, 15, 0.36);
   box-shadow: 0 18px 34px rgba(0, 0, 0, 0.24);
   backdrop-filter: blur(14px);
+}
+
+body[data-atmosphere-preset="newyear"] .floating-panel,
+body[data-atmosphere-preset="newyear"] #control-hint {
+  border-color: rgba(255, 221, 136, 0.12);
+  background:
+    linear-gradient(180deg, rgba(8, 12, 20, 0.9), rgba(5, 8, 14, 0.7)),
+    radial-gradient(circle at top, rgba(255, 214, 120, 0.08), rgba(255, 214, 120, 0) 42%),
+    rgba(5, 10, 15, 0.36);
 }
 
 .floating-panel {
@@ -1130,6 +1277,10 @@ body.paused #lens-overlay {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .preset-buttons {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .level-buttons {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
@@ -1182,6 +1333,7 @@ body.paused #lens-overlay {
   .selection-grid,
   .bonus-slots,
   .language-buttons,
+  .preset-buttons,
   .level-buttons {
     grid-template-columns: 1fr;
   }
