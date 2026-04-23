@@ -10,3 +10,5 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      - key: AITUNNEL_API_KEY
+        sync: false
