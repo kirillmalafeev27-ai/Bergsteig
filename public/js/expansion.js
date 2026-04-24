@@ -10,7 +10,7 @@
     oxygenDrainAltitude: 1.18,
     oxygenClampMax: 100,
     dawnHoursPerSecond: 0.08,
-    summitQuietMinMs: 40000,
+    summitQuietMinMs: 8500,
     routeSampleCadenceMs: 1000,
     inscriptionsMax: 5,
     ghostRouteMax: 6
@@ -254,7 +254,7 @@
       startedAt: 0
     };
     this.liveCarvings = [];
-    this.memoryInscriptions = (this.sessionProfile.journal || []).slice(0, 3).map((entry, index) => ({
+    this.memoryInscriptions = (this.sessionProfile.journal || []).slice(0, EXT.inscriptionsMax).map((entry, index) => ({
       id: `memory-inscription-${index}`,
       phrase: entry.phrase,
       translation: entry.translation,
@@ -320,16 +320,23 @@
   };
 
   Game.prototype._fetchGhostRoutes = async function _fetchGhostRoutes() {
-    this.ghostRoutes = [];
+    const localRoutes = BERG_MEMORY.getGhostRoutes ? BERG_MEMORY.getGhostRoutes() : [];
+    this.ghostRoutes = localRoutes.slice(0, EXT.ghostRouteMax);
     try {
       const response = await fetch('/api/ghost-routes');
       if (!response.ok) {
         return;
       }
       const payload = await response.json();
-      this.ghostRoutes = Array.isArray(payload.routes)
-        ? payload.routes.slice(0, EXT.ghostRouteMax)
-        : [];
+      const serverRoutes = Array.isArray(payload.routes) ? payload.routes : [];
+      const seen = new Set(this.ghostRoutes.map((route) => route.id));
+      serverRoutes.forEach((route) => {
+        if (!seen.has(route.id)) {
+          this.ghostRoutes.push(route);
+          seen.add(route.id);
+        }
+      });
+      this.ghostRoutes = this.ghostRoutes.slice(0, EXT.ghostRouteMax);
     } catch (error) {
       console.warn('Ghost routes unavailable:', error);
     }
@@ -339,19 +346,25 @@
     if (!Array.isArray(this.routeLog) || this.routeLog.length < 2) {
       return;
     }
+    const routePayload = {
+      id: `local-ghost-route-${Date.now()}`,
+      createdAt: nowIso(),
+      playerName: this.player.name,
+      relicId: this.relic && this.relic.id,
+      won: Boolean(won),
+      durationSeconds: Math.max(1, Math.round((this.currentTime - this.startedAt) / 1000)),
+      route: this.routeLog
+    };
+    if (BERG_MEMORY.recordGhostRoute) {
+      BERG_MEMORY.recordGhostRoute(routePayload);
+    }
     try {
       await fetch('/api/ghost-routes/log', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({
-          playerName: this.player.name,
-          relicId: this.relic && this.relic.id,
-          won: Boolean(won),
-          durationSeconds: Math.max(1, Math.round((this.currentTime - this.startedAt) / 1000)),
-          route: this.routeLog
-        })
+        body: JSON.stringify(routePayload)
       });
     } catch (error) {
       console.warn('Ghost route send failed:', error);
@@ -359,16 +372,36 @@
   };
 
   Game.prototype._queueTranslationRequest = async function _queueTranslationRequest() {
-    if (!this.sessionPhraseCandidate) {
+    const entries = (this.liveCarvings || [])
+      .filter((entry) => entry && entry.phrase)
+      .map((entry) => ({
+        phrase: entry.phrase,
+        translation: entry.translation || '',
+        language: this.player.language,
+        sourceTopic: this.player.lexicalTopic,
+        sourceLevel: this.player.level,
+        origin: 'session'
+      }));
+    if (!entries.length && this.sessionPhraseCandidate) {
+      entries.push({
+        phrase: this.sessionPhraseCandidate,
+        translation: '',
+        language: this.player.language,
+        sourceTopic: this.player.lexicalTopic,
+        sourceLevel: this.player.level,
+        origin: 'session'
+      });
+    }
+    if (!entries.length) {
       return;
     }
-    BERG_MEMORY.queuePendingPhrase({
-      phrase: this.sessionPhraseCandidate,
-      language: this.player.language,
-      sourceTopic: this.player.lexicalTopic,
-      sourceLevel: this.player.level,
-      origin: 'session'
+    entries.forEach((entry) => {
+      if (BERG_MEMORY.recordPhrase) {
+        BERG_MEMORY.recordPhrase(entry);
+      }
     });
+    const lastEntry = entries[entries.length - 1];
+    BERG_MEMORY.queuePendingPhrase(lastEntry);
     try {
       const response = await fetch('/api/translate-phrase', {
         method: 'POST',
@@ -376,19 +409,23 @@
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          phrase: this.sessionPhraseCandidate,
+          phrase: lastEntry.phrase,
           language: this.player.language
         })
       });
       if (!response.ok) {
+        BERG_MEMORY.completePendingPhrase('');
         return;
       }
       const payload = await response.json();
       if (payload.translation) {
         BERG_MEMORY.completePendingPhrase(payload.translation);
+      } else {
+        BERG_MEMORY.completePendingPhrase('');
       }
     } catch (error) {
       console.warn('Deferred translation request failed:', error);
+      BERG_MEMORY.completePendingPhrase('');
     }
   };
 
@@ -757,9 +794,14 @@
     if (this.summitView && this.summitView.active) {
       return;
     }
+    const summitProgress = Math.max(this.player.progress || 0, this.dynamicSummitHeight || 100);
+    this.player.progress = summitProgress;
+    this.player.climbTarget = summitProgress;
+    this.player.climbing = false;
     this.summitView = {
       active: true,
-      startedAt: this.currentTime
+      startedAt: this.currentTime,
+      duration: EXT.summitQuietMinMs
     };
     this.currentQuestion = null;
     this.pendingDirection = null;
@@ -771,6 +813,7 @@
     this.serenityTarget = 1;
     this._captureMoment('panorama', 140 + this.player.progress);
     if (this.audio) {
+      this.audio.playWin();
       this.audio.setPanoramaDuck(1);
     }
   };
@@ -832,7 +875,13 @@
     snapshot.memoryInscriptions = deepClone(this.memoryInscriptions || []);
     snapshot.ghostRoutes = deepClone(this.ghostRoutes || []);
     snapshot.activeEcho = this.activeEcho || null;
-    snapshot.summitView = this.summitView && this.summitView.active;
+    snapshot.summitView = this.summitView && this.summitView.active
+      ? {
+        active: true,
+        elapsedMs: Math.max(0, this.currentTime - this.summitView.startedAt),
+        durationMs: this.summitView.duration || EXT.summitQuietMinMs
+      }
+      : false;
     return snapshot;
   };
 
@@ -922,7 +971,7 @@
       renderSnapshot.memoryInscriptions = snapshot.memoryInscriptions || [];
       renderSnapshot.ghostRoutes = snapshot.ghostRoutes || [];
       renderSnapshot.activeEcho = snapshot.activeEcho || null;
-      renderSnapshot.summitView = Boolean(snapshot.summitView);
+      renderSnapshot.summitView = snapshot.summitView || false;
       return renderSnapshot;
     };
   })(BergRenderer.prototype._buildRenderSnapshot);
@@ -1178,17 +1227,31 @@
   };
 
   BergRenderer.prototype._createGhostNode = function _createGhostNode(route, index) {
-    const group = new THREE.Group();
-    const body = new THREE.Mesh(
-      THREE.CapsuleGeometry ? new THREE.CapsuleGeometry(0.14, 0.4, 4, 8) : new THREE.CylinderGeometry(0.14, 0.16, 0.7, 10),
-      new THREE.MeshBasicMaterial({
-        color: 0xd9e9f5,
-        transparent: true,
-        opacity: 0.42
-      })
-    );
-    group.add(body);
+    const group = this.playerGroup.clone(true);
     group.userData.side = index % 2 === 0 ? -1 : 1;
+    group.userData.phase = index * 0.7;
+    group.traverse((child) => {
+      if (child.isLight) {
+        child.visible = false;
+      }
+      if (!child.material) {
+        return;
+      }
+      const materials = Array.isArray(child.material) ? child.material : [child.material];
+      const ghostMats = materials.map((material) => {
+        const clone = material.clone ? material.clone() : material;
+        clone.transparent = true;
+        clone.depthWrite = false;
+        if (clone.color) {
+          clone.color.lerp(new THREE.Color(0xcfeaff), 0.72);
+        }
+        if (typeof clone.opacity === 'number') {
+          clone.opacity = Math.min(0.34, Math.max(0.16, clone.opacity * 0.34));
+        }
+        return clone;
+      });
+      child.material = Array.isArray(child.material) ? ghostMats : ghostMats[0];
+    });
     return group;
   };
 
@@ -1234,9 +1297,13 @@
       node.visible = true;
       const y = this._sceneYFromGameY(point.progress || 0);
       const side = node.userData.side || 1;
-      node.position.set(side * (18 + (point.lane || 0) * 1.2), y, -30 - index * 3);
-      node.scale.setScalar(0.8 + (route.won ? 0.08 : 0));
-      node.rotation.z = side * 0.12;
+      const laneX = laneToX(point.lane || 0);
+      const laneOffset = side * (0.74 + Math.floor(index / 2) * 0.18);
+      node.position.set(laneX + laneOffset, y, 1.28 - index * 0.04);
+      node.scale.setScalar(0.84 + (route.won ? 0.05 : 0));
+      node.rotation.x = -0.18 + Math.sin(this.elapsed * 0.7 + node.userData.phase) * 0.02;
+      node.rotation.y = side * 0.1;
+      node.rotation.z = side * 0.08;
     });
 
     Array.from(this.ghostNodes.entries()).forEach(([id, node]) => {

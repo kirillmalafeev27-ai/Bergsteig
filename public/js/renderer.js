@@ -1655,21 +1655,24 @@ class BergRenderer {
     this.summitAura.visible = false;
     this.summitGroup.add(this.summitAura);
 
-    for (let index = 0; index < 10; index += 1) {
-      const panel = new THREE.Mesh(
-        new THREE.PlaneGeometry(3.5 + Math.random() * 4.5, 9 + Math.random() * 16),
-        this.materials.glacier.clone()
-      );
-      panel.position.set(
-        -5.2 + Math.random() * 10.4,
-        14 + index * 18 + Math.random() * 8,
-        1.4 + Math.random() * 0.5
-      );
-      panel.rotation.z = -0.25 + Math.random() * 0.5;
-      panel.rotation.y = -0.08 + Math.random() * 0.16;
-      panel.material.opacity = 0.12 + Math.random() * 0.14;
-      this.icePanels.push(panel);
-      this.environmentGroup.add(panel);
+    const showIcePanels = false;
+    if (showIcePanels) {
+      for (let index = 0; index < 10; index += 1) {
+        const panel = new THREE.Mesh(
+          new THREE.PlaneGeometry(3.5 + Math.random() * 4.5, 9 + Math.random() * 16),
+          this.materials.glacier.clone()
+        );
+        panel.position.set(
+          -5.2 + Math.random() * 10.4,
+          14 + index * 18 + Math.random() * 8,
+          1.4 + Math.random() * 0.5
+        );
+        panel.rotation.z = -0.25 + Math.random() * 0.5;
+        panel.rotation.y = -0.08 + Math.random() * 0.16;
+        panel.material.opacity = 0.12 + Math.random() * 0.14;
+        this.icePanels.push(panel);
+        this.environmentGroup.add(panel);
+      }
     }
 
     const crackCurves = [
@@ -1701,10 +1704,12 @@ class BergRenderer {
       metalness: 0.02,
       flatShading: true
     });
+    const showAltitudeMarkers = false;
 
-    // 1) Wide ice ledge at ~30m — wedge carved out of the face so the top
-    // reads as a walkable shelf and the underside as an overhang.
-    {
+    if (showAltitudeMarkers) {
+      // 1) Wide ice ledge at ~30m — wedge carved out of the face so the top
+      // reads as a walkable shelf and the underside as an overhang.
+      {
       const anchor = this._faceAnchor(-3.2, 70, 0.35);
       const shape = new THREE.Shape();
       shape.moveTo(-4.4, 0);
@@ -1724,10 +1729,10 @@ class BergRenderer {
       ledge.receiveShadow = true;
       this.environmentGroup.add(ledge);
       this.altitudeMarkers.push(ledge);
-    }
+      }
 
-    // 2) Serac (leaning ice tower) at ~55m — sunk into the face, leaning out.
-    {
+      // 2) Serac (leaning ice tower) at ~55m — sunk into the face, leaning out.
+      {
       const anchor = this._faceAnchor(2.6, 120, 0.8);
       const serac = new THREE.Mesh(
         new THREE.ConeGeometry(1.6, 5, 14, 4, false),
@@ -1739,12 +1744,12 @@ class BergRenderer {
       serac.castShadow = true;
       this.environmentGroup.add(serac);
       this.altitudeMarkers.push(serac);
-    }
+      }
 
-    // 3) Old rope stub with frayed cloth at ~70m. The rope is a real cylinder
-    // driven slightly into the face; the cloth is a three-segment strip with
-    // a twist so it reads as a torn flag, not a 2D sticker.
-    {
+      // 3) Old rope stub with frayed cloth at ~70m. The rope is a real cylinder
+      // driven slightly into the face; the cloth is a three-segment strip with
+      // a twist so it reads as a torn flag, not a 2D sticker.
+      {
       const anchor = this._faceAnchor(-2.2, 158, 0.15);
       const oldRope = new THREE.Mesh(
         new THREE.CylinderGeometry(0.08, 0.08, 2.6, 14),
@@ -1778,11 +1783,11 @@ class BergRenderer {
       oldRopeFlag.rotation.z = 0.12;
       this.environmentGroup.add(oldRopeFlag);
       this.altitudeMarkers.push(oldRopeFlag);
-    }
+      }
 
-    // 4) Overhanging ice curtain at ~85m — a trio of icicles clipped to the
-    // wall rather than one floating cone.
-    {
+      // 4) Overhanging ice curtain at ~85m — a trio of icicles clipped to the
+      // wall rather than one floating cone.
+      {
       const curtainGroup = new THREE.Group();
       const anchor = this._faceAnchor(3.4, 190, 0.2);
       const curtainMat = ledgeMat.clone();
@@ -1800,12 +1805,12 @@ class BergRenderer {
       curtainGroup.position.set(anchor.x, anchor.y, anchor.z);
       this.environmentGroup.add(curtainGroup);
       this.altitudeMarkers.push(curtainGroup);
-    }
+      }
 
-    // 5) Bergschrund — a real crack carved into the face, built from a
-    // curved tube that hugs the slope. Reads as volumetric shadow, not a
-    // dark rectangle pasted on top.
-    {
+      // 5) Bergschrund — a real crack carved into the face, built from a
+      // curved tube that hugs the slope. Reads as volumetric shadow, not a
+      // dark rectangle pasted on top.
+      {
       const crackPoints = [];
       const segments = 12;
       for (let i = 0; i <= segments; i += 1) {
@@ -1831,6 +1836,7 @@ class BergRenderer {
       bergschrund.receiveShadow = true;
       this.environmentGroup.add(bergschrund);
       this.altitudeMarkers.push(bergschrund);
+      }
     }
 
     if (this.isNewYearPreset) {
@@ -2149,45 +2155,49 @@ class BergRenderer {
     neck.position.set(0, 1.56, 0);
     this.playerGroup.add(neck);
 
+    this.headGroup = new THREE.Group();
+    this.headGroup.position.set(0, 1.78, 0.02);
+    this.playerGroup.add(this.headGroup);
+
     const head = new THREE.Mesh(new THREE.SphereGeometry(0.22, 24, 18), this.materials.skin);
-    head.position.set(0, 1.82, 0.02);
+    head.position.set(0, 0.04, 0);
     head.castShadow = true;
-    this.playerGroup.add(head);
+    this.headGroup.add(head);
 
     const helmet = new THREE.Mesh(
       new THREE.SphereGeometry(0.26, 28, 20, 0, Math.PI * 2, 0, Math.PI * 0.58),
       this.materials.helmet
     );
-    helmet.position.set(0, 1.92, 0.0);
+    helmet.position.set(0, 0.14, -0.02);
     helmet.rotation.x = 0.12;
     helmet.castShadow = true;
-    this.playerGroup.add(helmet);
+    this.headGroup.add(helmet);
 
     // Helmet brim: the dark visor band gives the shape its silhouette.
     const brim = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.05, 0.34), this.materials.strap);
-    brim.position.set(0, 1.82, 0.08);
-    this.playerGroup.add(brim);
+    brim.position.set(0, 0.04, 0.06);
+    this.headGroup.add(brim);
 
     // Chin strap — two thin verticals from helmet to neck.
     const chinStrapL = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.16, 0.02), this.materials.strap);
-    chinStrapL.position.set(-0.18, 1.75, 0.14);
-    this.playerGroup.add(chinStrapL);
+    chinStrapL.position.set(-0.18, -0.03, 0.12);
+    this.headGroup.add(chinStrapL);
     const chinStrapR = chinStrapL.clone();
     chinStrapR.position.x = 0.18;
-    this.playerGroup.add(chinStrapR);
+    this.headGroup.add(chinStrapR);
 
     // Darker visor glass for eyes — avoids the doll-face pale sphere.
     const visor = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.08, 0.08), this.materials.visor);
-    visor.position.set(0, 1.82, 0.22);
-    this.playerGroup.add(visor);
+    visor.position.set(0, 0.04, 0.2);
+    this.headGroup.add(visor);
 
     this.headlamp = new THREE.PointLight(0xbfe4f2, 1.2, 14, 2);
-    this.headlamp.position.set(0, 1.92, 0.26);
-    this.playerGroup.add(this.headlamp);
+    this.headlamp.position.set(0, 0.14, 0.24);
+    this.headGroup.add(this.headlamp);
 
     const headlampBody = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.08, 0.08), this.materials.metal);
     headlampBody.position.copy(this.headlamp.position);
-    this.playerGroup.add(headlampBody);
+    this.headGroup.add(headlampBody);
 
     const belt = new THREE.Mesh(new THREE.BoxGeometry(0.92, 0.12, 0.58), this.materials.strap);
     belt.position.set(0, 0.34, 0);
@@ -2794,6 +2804,14 @@ class BergRenderer {
     const heatMix = clamp01((phase - 0.78) / 0.22);
     const torsoLean = iceMix * 0.12 - heatMix * 0.08;
     const shieldRaise = heatMix * 1.15;
+    const summitView = snapshot.summitView && snapshot.summitView.active ? snapshot.summitView : null;
+    const summitRatio = summitView
+      ? smoothStep(0, 1, (summitView.elapsedMs || 0) / Math.max(1, summitView.durationMs || 1))
+      : 0;
+
+    if (this.headGroup) {
+      this.headGroup.rotation.set(0, 0, 0);
+    }
 
     this.playerGroup.rotation.z = -sway * 0.7;
     this.playerGroup.rotation.x = -0.16 + climbPulse * 0.08 - torsoLean;
@@ -2814,7 +2832,32 @@ class BergRenderer {
 
     this.headlamp.intensity = 1.8 + Math.sin(this.elapsed * 8) * 0.18;
 
-    if (snapshot.player.shieldActive) {
+    if (summitRatio > 0 && !falling) {
+      const settle = summitRatio;
+      this.playerGroup.rotation.x = (-0.16 + climbPulse * 0.04) * (1 - settle) - 0.03 * settle;
+      this.playerGroup.rotation.y = 0.42 * settle;
+      this.playerGroup.rotation.z = (-sway * 0.28) * (1 - settle);
+
+      this.leftArmPivot.rotation.x = 1.36 + climbPulse * 0.08 * (1 - settle);
+      this.leftArmPivot.rotation.z = -0.22 - sway * 0.06;
+      this.leftForearmPivot.rotation.x = -0.34;
+      this.rightArmPivot.rotation.x = 1.18 - climbPulse * 0.06 * (1 - settle);
+      this.rightArmPivot.rotation.z = 0.22 - sway * 0.05;
+      this.rightForearmPivot.rotation.x = -0.38;
+      this.leftLegPivot.rotation.x = 0.16 - climbPulse * 0.08 * (1 - settle);
+      this.leftShinPivot.rotation.x = -0.22;
+      this.rightLegPivot.rotation.x = 0.16 + climbPulse * 0.08 * (1 - settle);
+      this.rightShinPivot.rotation.x = -0.22;
+
+      if (this.headGroup) {
+        this.headGroup.rotation.y = -1.2 * settle;
+        this.headGroup.rotation.x = -0.08 * settle;
+        this.headGroup.rotation.z = Math.sin(this.elapsed * 0.6) * 0.015 * settle;
+      }
+      this.headlamp.intensity = 0.65 + Math.sin(this.elapsed * 2.2) * 0.05;
+    }
+
+    if (snapshot.player.shieldActive && summitRatio <= 0) {
       this.shieldBillboard.visible = true;
       this.shieldBillboard.material.opacity = 0.18 + Math.sin(this.elapsed * 6) * 0.08;
       this.shieldBillboard.scale.set(4.6 + Math.sin(this.elapsed * 4.2) * 0.2, 6.2 + Math.sin(this.elapsed * 3.3) * 0.25, 1);
@@ -3696,6 +3739,10 @@ class BergRenderer {
     const falling = Boolean(snapshot.player.falling);
     const fallRatio = snapshot.player.fallRatio || 0;
     const fallOffsetWorld = this._worldY((snapshot.player.fallOffset || 0) * 0.38);
+    const summitView = snapshot.summitView && snapshot.summitView.active ? snapshot.summitView : null;
+    const summitReveal = summitView
+      ? smoothStep(0, 1, (summitView.elapsedMs || 0) / Math.max(1, summitView.durationMs || 1))
+      : 0;
 
     // Over-the-shoulder POV with weight. The camera lags the climber, leans
     // into the slope when they climb, and sways gently against their
@@ -3705,7 +3752,7 @@ class BergRenderer {
     const serenityForFov = Math.max(0, Math.min(1, snapshot.serenity || 0));
     const desiredFov = falling
       ? 81 + fallRatio * 4
-      : 74 - progressRatio * 4 + (climbing ? 1.6 : 0) + panoramaIntensityForFov * 5.5 + serenityForFov * 1.8;
+      : 74 - progressRatio * 4 + (climbing ? 1.6 : 0) + panoramaIntensityForFov * 5.5 + serenityForFov * 1.8 + summitReveal * 7;
     if (Math.abs(this.camera.fov - desiredFov) > 0.02) {
       this.camera.fov += (desiredFov - this.camera.fov) * Math.min(1, dt * 2.2);
       this.camera.updateProjectionMatrix();
@@ -3765,12 +3812,27 @@ class BergRenderer {
         lookZ
       );
 
+    if (summitReveal > 0 && !falling) {
+      const reveal = smoothStep(0.04, 0.82, summitReveal);
+      const headHeight = shoulderWorldY + this._worldY(0.2);
+      targetPosition.set(
+        lateralX * 0.16 + cameraLaneShift * 0.32 + reveal * 4.8,
+        playerWorldY + headHeight + 0.72 + reveal * 1.65,
+        this.playerRender.z + 3.0 + reveal * 4.8
+      );
+      targetLook.set(
+        lateralX * 0.06 + lookLaneShift * 0.18 - reveal * 1.1,
+        playerWorldY + headHeight + 0.38 + reveal * 0.72,
+        -4.5 - reveal * 23
+      );
+    }
+
     // Panorama pull-back. The game freezes the world at a phase change and
     // asks the rig to widen: the camera drifts back + up, the look-target
     // lifts toward the summit so the distant peak enters frame, and the
     // roll/shake bleed off. Intensity is 0..1 eased in game.js.
     const panoramaIntensity = (snapshot.panorama && snapshot.panorama.intensity) || 0;
-    if (panoramaIntensity > 0 && !falling) {
+    if (panoramaIntensity > 0 && !falling && summitReveal <= 0) {
       const lift = this._worldY(panoramaIntensity * 1.8);
       targetPosition.y += lift;
       targetPosition.z += panoramaIntensity * 2.6;

@@ -1682,9 +1682,6 @@ class Game {
     const nextStep = this._panoramaPhaseStep(phaseRatio);
     if (nextStep > this.phaseStepIndex) {
       this.phaseStepIndex = nextStep;
-      if (!this.player.falling && this.state === 'running') {
-        this.panorama.pending = true;
-      }
     }
   }
 

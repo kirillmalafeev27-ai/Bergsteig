@@ -4,6 +4,7 @@
   const MAX_POLAROIDS = 12;
   const MAX_MARKERS = 24;
   const MAX_CAIRNS = 16;
+  const MAX_GHOST_ROUTES = 8;
 
   const RELICS = [
     {
@@ -11,15 +12,15 @@
       title: 'Компас',
       kicker: 'Маршрутчик',
       plus: 'Показывает линию следующего камня',
-      minus: 'Снежный щит недоступен',
-      copy: 'Сухой латунный компас. Даёт одну точную подсказку, но оставляет без щита.'
+      minus: 'Подсказка не спасает от ошибки',
+      copy: 'Сухой латунный компас. Даёт одну точную подсказку, но решение всё равно остаётся за тобой.'
     },
     {
       id: 'rosary',
       title: 'Чётки',
       kicker: 'Тихий ритм',
       plus: 'Кислород уходит медленнее',
-      minus: 'Панорамы короче и спокойнее',
+      minus: 'Темп подъёма спокойнее',
       copy: 'Помогают держать дыхание ровным, но сбивают азарт подъёма.'
     },
     {
@@ -27,8 +28,8 @@
       title: 'Шнапс',
       kicker: 'Тепло внутри',
       plus: 'Время на склоне слегка замедляется',
-      minus: 'Слоты 4 и 5 закрыты',
-      copy: 'Согревает и тянет время, зато два последних бонуса остаются в рюкзаке.'
+      minus: 'Лавины становятся капризнее',
+      copy: 'Согревает и тянет время, но гора отвечает более нервным ритмом.'
     },
     {
       id: 'photo',
@@ -87,6 +88,7 @@
       nextEcho: null,
       activeEcho: null,
       lastSession: null,
+      ghostRoutes: [],
       laneFalls: {
         left: 0,
         center: 0,
@@ -113,6 +115,7 @@
       nextEcho: rawProfile.nextEcho && typeof rawProfile.nextEcho === 'object' ? rawProfile.nextEcho : null,
       activeEcho: rawProfile.activeEcho && typeof rawProfile.activeEcho === 'object' ? rawProfile.activeEcho : null,
       lastSession: rawProfile.lastSession && typeof rawProfile.lastSession === 'object' ? rawProfile.lastSession : null,
+      ghostRoutes: Array.isArray(rawProfile.ghostRoutes) ? rawProfile.ghostRoutes.slice(0, MAX_GHOST_ROUTES) : [],
       laneFalls: {
         left: Number(rawProfile.laneFalls && rawProfile.laneFalls.left) || 0,
         center: Number(rawProfile.laneFalls && rawProfile.laneFalls.center) || 0,
@@ -159,6 +162,37 @@
     }
   }
 
+  function normalizePhrase(value) {
+    return String(value || '').replace(/\s+/g, ' ').trim();
+  }
+
+  function pushJournalPhrase(profile, entry) {
+    const phrase = normalizePhrase(entry && entry.phrase);
+    if (!phrase) {
+      return;
+    }
+
+    const translation = normalizePhrase(entry.translation) || 'Перевод не получен';
+    const duplicate = profile.journal.find((item) => normalizePhrase(item.phrase).toLowerCase() === phrase.toLowerCase());
+    if (duplicate) {
+      if (translation && (!duplicate.translation || duplicate.translation === 'Перевод не получен')) {
+        duplicate.translation = translation;
+      }
+      return;
+    }
+
+    pushBounded(profile.journal, {
+      id: `journal-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      createdAt: new Date().toISOString(),
+      phrase,
+      translation,
+      language: entry.language || 'de',
+      sourceTopic: entry.sourceTopic || '',
+      sourceLevel: entry.sourceLevel || '',
+      origin: entry.origin || 'session'
+    }, MAX_JOURNAL_ENTRIES);
+  }
+
   function laneKeyFromNumber(lane) {
     if (lane < 0) {
       return 'left';
@@ -174,13 +208,6 @@
   }
 
   function enabledBonusIdsForRelic(relicId) {
-    const id = normalizeRelicId(relicId);
-    if (id === 'schnapps') {
-      return ['climb', 'sidestep', 'powerSwing'];
-    }
-    if (id === 'compass') {
-      return ['climb', 'sidestep', 'powerSwing', 'cleanLens'];
-    }
     return ['climb', 'sidestep', 'powerSwing', 'snowShield', 'cleanLens'];
   }
 
@@ -284,17 +311,21 @@
         if (!pending) {
           return;
         }
-        pushBounded(profile.journal, {
-          id: `journal-${Date.now()}`,
-          createdAt: new Date().toISOString(),
+        pushJournalPhrase(profile, {
           phrase: pending.phrase,
-          translation: translation || pending.translation || 'Перевод не получен',
+          translation: translation || pending.translation || '',
           language: pending.language || 'de',
           sourceTopic: pending.sourceTopic || '',
           sourceLevel: pending.sourceLevel || '',
           origin: meta.origin || pending.origin || 'session'
-        }, MAX_JOURNAL_ENTRIES);
+        });
         profile.pendingPhrase = null;
+      });
+    },
+
+    recordPhrase(entry) {
+      return updateProfile((profile) => {
+        pushJournalPhrase(profile, entry || {});
       });
     },
 
@@ -380,6 +411,36 @@
         if (nextEcho) {
           profile.nextEcho = nextEcho;
         }
+      });
+    },
+
+    getGhostRoutes() {
+      const profile = loadProfile();
+      return deepClone(profile.ghostRoutes || []);
+    },
+
+    recordGhostRoute(route) {
+      if (!route || !Array.isArray(route.route) || route.route.length < 2) {
+        return loadProfile();
+      }
+      return updateProfile((profile) => {
+        const sanitizedRoute = route.route
+          .map((point) => ({
+            t: Math.max(0, Number(point.t) || 0),
+            progress: Math.max(0, Math.min(100, Number(point.progress) || 0)),
+            lane: Math.max(-1, Math.min(1, Number(point.lane) || 0))
+          }))
+          .sort((left, right) => left.t - right.t);
+
+        pushBounded(profile.ghostRoutes, {
+          id: route.id || `local-ghost-route-${Date.now()}`,
+          createdAt: route.createdAt || new Date().toISOString(),
+          playerName: String(route.playerName || 'Climber').slice(0, 32),
+          won: Boolean(route.won),
+          relicId: String(route.relicId || ''),
+          durationSeconds: Math.max(1, Number(route.durationSeconds) || sanitizedRoute[sanitizedRoute.length - 1].t || 1),
+          route: sanitizedRoute
+        }, MAX_GHOST_ROUTES);
       });
     }
   };
