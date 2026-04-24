@@ -2594,6 +2594,10 @@ class BergRenderer {
     const phase = snapshot.phaseRatio;
     const progressRatio = Math.min(1, snapshot.player.progressY / 100);
     const danger = snapshot.dangerLevel || 0;
+    // Streak-driven serenity: clean haze pushes back, distant peaks sharpen.
+    // Effect is subtle on purpose — the overlay and audio already carry
+    // the "storm stepping back" read; this just makes depth open up too.
+    const serenity = Math.max(0, Math.min(1, snapshot.serenity || 0));
 
     if (this.isNewYearPreset) {
       this.skyUniforms.topColor.value.setRGB(
@@ -2617,8 +2621,8 @@ class BergRenderer {
         0.06 + phase * 0.02,
         0.10 + phase * 0.03
       );
-      this.scene.fog.near = 58 - danger * 4;
-      this.scene.fog.far = 220 - phase * 16 - danger * 10;
+      this.scene.fog.near = 58 - danger * 4 + serenity * 10;
+      this.scene.fog.far = 220 - phase * 16 - danger * 10 + serenity * 60;
 
       this.renderer.setClearColor(
         new THREE.Color().setRGB(
@@ -2705,8 +2709,8 @@ class BergRenderer {
       0.16 + phase * 0.02,
       0.20 - phase * 0.03
     );
-    this.scene.fog.near = 48 - phase * 8;
-    this.scene.fog.far = 190 - phase * 28 - danger * 8;
+    this.scene.fog.near = 48 - phase * 8 + serenity * 10;
+    this.scene.fog.far = 190 - phase * 28 - danger * 8 + serenity * 65;
 
     this.renderer.setClearColor(
       new THREE.Color().setRGB(
@@ -3698,9 +3702,10 @@ class BergRenderer {
     // lateral motion so the rig reads as attached to a body breathing
     // on a rope — not a locked follow-cam.
     const panoramaIntensityForFov = (snapshot.panorama && snapshot.panorama.intensity) || 0;
+    const serenityForFov = Math.max(0, Math.min(1, snapshot.serenity || 0));
     const desiredFov = falling
       ? 81 + fallRatio * 4
-      : 74 - progressRatio * 4 + (climbing ? 1.6 : 0) + panoramaIntensityForFov * 5.5;
+      : 74 - progressRatio * 4 + (climbing ? 1.6 : 0) + panoramaIntensityForFov * 5.5 + serenityForFov * 1.8;
     if (Math.abs(this.camera.fov - desiredFov) > 0.02) {
       this.camera.fov += (desiredFov - this.camera.fov) * Math.min(1, dt * 2.2);
       this.camera.updateProjectionMatrix();

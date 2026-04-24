@@ -45,6 +45,14 @@ const PANORAMA_CLEAN_BONUS_MS = 2100;
 const PANORAMA_FADE_IN_MS = 420;
 const PANORAMA_FADE_OUT_MS = 520;
 
+// Streak-driven serenity. A run of correct answers physically opens the
+// world: wind ducks, sky lifts, FOV widens. A single wrong answer snaps
+// the storm back. SERENITY_SATURATION is the streak length that maps to
+// full-open sky; RISE/FALL are first-order blend rates (per second).
+const SERENITY_SATURATION = 5;
+const SERENITY_RISE_RATE = 1.15;
+const SERENITY_FALL_RATE = 6.4;
+
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
@@ -428,6 +436,14 @@ class Game {
       intensity: 0
     };
 
+    // Streak-driven "serenity": 0 = storm as usual, 1 = open sky. Built from
+    // consecutive correct answers; reset to 0 the instant a wrong answer
+    // lands (handled in answerQuestion). `serenity` is the smoothed render
+    // value; `serenityTarget` is the raw step function off correctStreak.
+    this.correctStreak = 0;
+    this.serenity = 0;
+    this.serenityTarget = 0;
+
     this.currentQuestion = null;
     this.questionLoading = false;
     this.pendingDirection = null;
@@ -596,6 +612,11 @@ class Game {
     this.lastFrameAt = timestamp;
     this.currentTime = timestamp;
 
+    // Serenity: smooth climb toward the streak target, fast drop on mistake.
+    // Exponential blend keeps both directions frame-rate independent.
+    const serenityRate = this.serenityTarget > this.serenity ? SERENITY_RISE_RATE : SERENITY_FALL_RATE;
+    this.serenity += (this.serenityTarget - this.serenity) * (1 - Math.exp(-serenityRate * dt));
+
     // Kick off a deferred panorama once the climber is free of question/direction
     // UI. The phase-change check itself runs inside _updateEnvironment.
     if (this.panorama.pending && !this.panorama.active && !this.currentQuestion && !this.pendingDirection && !this.player.falling) {
@@ -614,6 +635,7 @@ class Game {
         this.renderer.render(this._buildSnapshot(), dt);
       }
       if (this.audio) {
+        this.audio.setSerenity(this.serenity);
         this.audio.setAtmosphere(this.player.progress / SUMMIT_HEIGHT, this._dangerLevel());
       }
       if (this.state !== 'idle') {
@@ -635,6 +657,7 @@ class Game {
       this.renderer.render(this._buildSnapshot(), dt);
     }
     if (this.audio) {
+      this.audio.setSerenity(this.serenity);
       this.audio.setAtmosphere(this.player.progress / SUMMIT_HEIGHT, this._dangerLevel());
     }
 
@@ -951,11 +974,19 @@ class Game {
     this.stats.answers += 1;
     if (correct) {
       this.stats.correct += 1;
+      this.correctStreak += 1;
+      this.serenityTarget = clamp(this.correctStreak / SERENITY_SATURATION, 0, 1);
       if (this.questionManager) {
         this.questionManager.onCorrectAnswer(resolvedSlotId);
       }
-    } else if (this.questionManager) {
-      this.questionManager.onWrongAnswer(resolvedSlotId);
+    } else {
+      // Mistake snaps the storm back. Streak and serenity target drop
+      // instantly; the rendered serenity catches up fast via SERENITY_FALL_RATE.
+      this.correctStreak = 0;
+      this.serenityTarget = 0;
+      if (this.questionManager) {
+        this.questionManager.onWrongAnswer(resolvedSlotId);
+      }
     }
 
     const optionButtons = Array.from(this.ui.questionOptions.querySelectorAll('.option-btn'));
@@ -1443,7 +1474,13 @@ class Game {
   _buildSnapshot() {
     const stormPresetMultiplier = this.atmospherePreset === 'newyear' ? 0.52 : 1;
     const panoramaIntensity = this.panorama.active ? this.panorama.intensity : 0;
-    const stormStrength = (0.32 + this._phaseRatio() * 0.18 + this._dangerLevel() * 0.28) * stormPresetMultiplier * (1 - panoramaIntensity * 0.9);
+    const serenity = clamp(this.serenity, 0, 1);
+    // Storm fades ~70% at max serenity (never fully — the mountain still
+    // has weather) and ~90% during panorama (silent beat dominates).
+    const stormStrength = (0.32 + this._phaseRatio() * 0.18 + this._dangerLevel() * 0.28)
+      * stormPresetMultiplier
+      * (1 - panoramaIntensity * 0.9)
+      * (1 - serenity * 0.7);
 
     return {
       atmospherePreset: this.atmospherePreset,
@@ -1455,6 +1492,8 @@ class Game {
         active: this.panorama.active,
         intensity: panoramaIntensity
       },
+      serenity,
+      correctStreak: this.correctStreak,
       player: {
         x: this.player.x,
         baseLane: this.player.baseLane,

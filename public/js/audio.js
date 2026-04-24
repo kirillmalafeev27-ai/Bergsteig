@@ -50,6 +50,9 @@ class AudioManager {
     // 0 = normal mix. 1 = panorama silence: wind/threat ducked toward zero.
     // setAtmosphere multiplies its live targets by (1 - panoramaDuck).
     this.panoramaDuck = 0;
+    // Streak-driven serenity (0..1). Partial duck: caps wind at ~45% down
+    // and threat at ~70% down, so even a perfect run still has weather.
+    this.serenity = 0;
   }
 
   init() {
@@ -150,9 +153,11 @@ class AudioManager {
       return;
     }
 
-    const duckFactor = 1 - this.panoramaDuck;
-    const windTarget = (0.52 + progressRatio * 0.38 + dangerLevel * 0.26) * duckFactor;
-    const threatTarget = (0.06 + progressRatio * 0.08 + dangerLevel * 0.18) * duckFactor;
+    const panoramaFactor = 1 - this.panoramaDuck;
+    const windSerenityFactor = 1 - this.serenity * 0.45;
+    const threatSerenityFactor = 1 - this.serenity * 0.7;
+    const windTarget = (0.52 + progressRatio * 0.38 + dangerLevel * 0.26) * panoramaFactor * windSerenityFactor;
+    const threatTarget = (0.06 + progressRatio * 0.08 + dangerLevel * 0.18) * panoramaFactor * threatSerenityFactor;
     this.windGain.gain.setTargetAtTime(windTarget, this.ctx.currentTime, 0.36);
     this.threatGain.gain.setTargetAtTime(threatTarget, this.ctx.currentTime, 0.28);
   }
@@ -165,6 +170,15 @@ class AudioManager {
     this.panoramaDuck = clamped;
     // Re-push current atmosphere so the duck takes effect immediately with
     // the existing setTargetAtTime smoothing.
+    this.setAtmosphere(this.atmosphereProgress, this.atmosphereDanger);
+  }
+
+  setSerenity(amount) {
+    const clamped = Math.max(0, Math.min(1, amount || 0));
+    if (Math.abs(clamped - this.serenity) < 0.01) {
+      return;
+    }
+    this.serenity = clamped;
     this.setAtmosphere(this.atmosphereProgress, this.atmosphereDanger);
   }
 
