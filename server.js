@@ -4,12 +4,21 @@ const path = require('path');
 
 const PORT = Number(process.env.PORT) || 3000;
 const PUBLIC_DIR = path.join(__dirname, 'public');
+const DATA_DIR = path.join(__dirname, 'data');
+const GHOST_ROUTE_FILE = path.join(DATA_DIR, 'ghost-routes.json');
 const AITUNNEL_BASE_URL = process.env.AITUNNEL_BASE_URL || 'https://api.aitunnel.ru/v1';
 const AITUNNEL_MODEL = process.env.AITUNNEL_MODEL || 'gpt-5.4';
 const MAX_JSON_BODY_BYTES = 1024 * 1024;
 const DEFAULT_QUESTION_COUNT = 30;
+const MAX_GHOST_ROUTES = 24;
+const EXTERNAL_GHOST_ROUTE_LIMIT = 8;
 
 const questionPool = Object.create(null);
+const ghostRoutes = loadGhostRoutes();
+let ghostRouteCounter = ghostRoutes.reduce((maxId, route) => {
+  const match = /^ghost-route-(\d+)$/.exec(String(route && route.id || ''));
+  return match ? Math.max(maxId, Number(match[1]) || 0) : maxId;
+}, 0);
 
 const CONTENT_TYPES = {
   '.css': 'text/css; charset=utf-8',
@@ -39,6 +48,29 @@ const CACHE_CONTROL = {
 function log(message) {
   const now = new Date().toISOString();
   console.log(`[${now}] ${message}`);
+}
+
+function loadGhostRoutes() {
+  try {
+    if (!fs.existsSync(GHOST_ROUTE_FILE)) {
+      return [];
+    }
+    const raw = fs.readFileSync(GHOST_ROUTE_FILE, 'utf8');
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.slice(0, MAX_GHOST_ROUTES) : [];
+  } catch (error) {
+    log(`ghost route load failed: ${error.message}`);
+    return [];
+  }
+}
+
+function saveGhostRoutes() {
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(GHOST_ROUTE_FILE, JSON.stringify(ghostRoutes, null, 2), 'utf8');
+  } catch (error) {
+    log(`ghost route save failed: ${error.message}`);
+  }
 }
 
 function sendJson(res, statusCode, payload) {
@@ -286,7 +318,7 @@ async function readJsonBody(req) {
   });
 }
 
-async function requestAiQuestions(prompt) {
+async function requestAiText(messages, maxCompletionTokens = 8192) {
   const response = await fetch(`${AITUNNEL_BASE_URL.replace(/\/$/, '')}/chat/completions`, {
     method: 'POST',
     headers: {
@@ -295,8 +327,8 @@ async function requestAiQuestions(prompt) {
     },
     body: JSON.stringify({
       model: AITUNNEL_MODEL,
-      max_completion_tokens: 8192,
-      messages: [{ role: 'user', content: prompt }]
+      max_completion_tokens: maxCompletionTokens,
+      messages
     })
   });
 
@@ -310,6 +342,12 @@ async function requestAiQuestions(prompt) {
   if (!text) {
     throw new Error('AITunnel returned an empty completion');
   }
+
+  return text;
+}
+
+async function requestAiQuestions(prompt) {
+  const text = await requestAiText([{ role: 'user', content: prompt }], 8192);
 
   const jsonMatch = text.match(/\[[\s\S]*\]/);
   const jsonText = jsonMatch ? jsonMatch[0] : text;
@@ -396,28 +434,144 @@ async function handleGenerateQuestions(req, res) {
   }
 }
 
+async function handleTranslatePhrase(req, res) {
+  if (req.method !== 'POST') {
+    sendJson(res, 405, { error: 'Method not allowed' });
+    return;
+  }
+
+  let body;
+  try {
+    body = await readJsonBody(req);
+  } catch (error) {
+    sendJson(res, 400, { error: error.message });
+    return;
+  }
+
+  const phrase = String(body.phrase || '').trim();
+  const language = String(body.language || 'de').trim();
+  if (!phrase) {
+    sendJson(res, 400, { error: 'phrase is required' });
+    return;
+  }
+
+  if (!process.env.AITUNNEL_API_KEY) {
+    sendJson(res, 503, { error: 'AITUNNEL_API_KEY is not configured' });
+    return;
+  }
+
+  try {
+    const text = await requestAiText([
+      {
+        role: 'system',
+        content: 'Ты переводчик. Возвращай только короткий перевод на русский без пояснений, кавычек и дополнительных фраз.'
+      },
+      {
+        role: 'user',
+        content: `Переведи на русский короткую фразу из игрового задания (${language}): ${phrase}`
+      }
+    ], 256);
+
+    const translation = text
+      .replace(/^["'«»]+|["'«»]+$/g, '')
+      .split('\n')[0]
+      .trim();
+
+    sendJson(res, 200, {
+      phrase,
+      translation: translation || 'Перевод не получен'
+    });
+  } catch (error) {
+    log(`AITunnel translation error: ${error.message}`);
+    sendJson(res, 500, { error: 'Failed to translate phrase', detail: error.message });
+  }
+}
+
+async function handleGhostRoutes(req, res) {
+  if (req.method === 'GET') {
+    sendJson(res, 200, {
+      routes: ghostRoutes.slice(0, EXTERNAL_GHOST_ROUTE_LIMIT)
+    });
+    return;
+  }
+
+  if (req.method !== 'POST') {
+    sendJson(res, 405, { error: 'Method not allowed' });
+    return;
+  }
+
+  let body;
+  try {
+    body = await readJsonBody(req);
+  } catch (error) {
+    sendJson(res, 400, { error: error.message });
+    return;
+  }
+
+  const route = Array.isArray(body.route) ? body.route : [];
+  if (route.length < 2) {
+    sendJson(res, 400, { error: 'route must contain at least two points' });
+    return;
+  }
+
+  const sanitizedRoute = route
+    .map((point) => ({
+      t: Math.max(0, Number(point.t) || 0),
+      progress: Math.max(0, Math.min(100, Number(point.progress) || 0)),
+      lane: Math.max(-1, Math.min(1, Number(point.lane) || 0))
+    }))
+    .sort((left, right) => left.t - right.t);
+
+  ghostRoutes.unshift({
+    id: `ghost-route-${ghostRouteCounter += 1}`,
+    createdAt: new Date().toISOString(),
+    playerName: String(body.playerName || 'Climber').slice(0, 32),
+    won: Boolean(body.won),
+    relicId: String(body.relicId || ''),
+    durationSeconds: Math.max(1, Number(body.durationSeconds) || sanitizedRoute[sanitizedRoute.length - 1].t || 1),
+    route: sanitizedRoute
+  });
+  if (ghostRoutes.length > MAX_GHOST_ROUTES) {
+    ghostRoutes.length = MAX_GHOST_ROUTES;
+  }
+  saveGhostRoutes();
+
+  sendJson(res, 200, { ok: true });
+}
+
 async function handleRequest(req, res) {
   const pathname = req.url || '/';
+  const routePath = pathname.split('?')[0];
 
-  if (pathname === '/healthz') {
+  if (routePath === '/healthz') {
     sendJson(res, 200, { ok: true, service: 'bergstieg' });
     return;
   }
 
-  if (pathname.split('?')[0] === '/api/generate-questions') {
+  if (routePath === '/api/generate-questions') {
     await handleGenerateQuestions(req, res);
+    return;
+  }
+
+  if (routePath === '/api/translate-phrase') {
+    await handleTranslatePhrase(req, res);
+    return;
+  }
+
+  if (routePath === '/api/ghost-routes' || routePath === '/api/ghost-routes/log') {
+    await handleGhostRoutes(req, res);
     return;
   }
 
   // Browsers always ask for /favicon.ico. Return an empty 204 until an icon
   // is shipped so it doesn't spam logs or fall through to the SPA handler.
-  if (pathname === '/favicon.ico') {
+  if (routePath === '/favicon.ico') {
     res.writeHead(204);
     res.end();
     return;
   }
 
-  const resolvedPath = resolveRequestedFile(pathname);
+  const resolvedPath = resolveRequestedFile(routePath);
   if (!resolvedPath) {
     sendJson(res, 403, { error: 'Forbidden' });
     return;
