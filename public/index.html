@@ -6,7 +6,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>BERGSTIEG — кинематографичный подъём на немецком</title>
-  <meta name="description" content="Bergstieg: кинематографичный подъём на вершину, где каждое упражнение по немецкому языку становится выбором выживания. Уворачивайся от камней, опереди лавину, дойди до пика.">
+  <meta name="description" content="Bergstieg: кинематографичный подъём на вершину, где каждое упражнение по языку становится выбором выживания. Уворачивайся от камней, переживи лавины и доберись до тихого вида на вершине.">
   <meta name="theme-color" content="#0e1821">
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2212%22%20fill%3D%22%230e1821%22%2F%3E%3Cpath%20d%3D%22M8%2052L24%2022L34%2036L44%2018L56%2052Z%22%20fill%3D%22%23e5f0f7%22%2F%3E%3Cpath%20d%3D%22M24%2022L34%2036L44%2018L40%2016L32%2030L26%2020Z%22%20fill%3D%22%23b2c6d4%22%2F%3E%3C%2Fsvg%3E">
   <link rel="stylesheet" href="css/style.css">
@@ -19,24 +19,24 @@
           <div class="hero-kicker">Язык как восхождение</div>
           <h1 id="game-title">BERGSTIEG</h1>
           <p class="hero-subtitle">
-            Кинематографичный подъём на вершину, где каждое упражнение по немецкому или французскому становится выбором выживания.
-            Камни срываются с гребня, лавины сносят к подножию, метель налипает на камеру,
-            а склон меняется от снежной стены к раскалённому вулкану — за одну сессию.
+            Кинематографичный подъём на вершину, где каждое упражнение по немецкому или французскому становится
+            выбором выживания. Камни срываются с гребня, лавины сносят к подножию, метель липнет на объектив,
+            а каждая сессия оставляет после себя следы в самой горе.
           </p>
         </div>
 
         <div class="hero-grid">
           <article class="hero-panel">
-            <div class="hero-panel-title">Кинематографичная камера</div>
-            <p>Камера за плечом альпиниста, трос перед лицом, пропасть внизу и вершина всегда в кадре. Каждый кадр — как в фильме о Восточных Альпах.</p>
+            <div class="hero-panel-title">Камера за плечом</div>
+            <p>Камера держится за альпинистом, трос проходит по кадру, а дальний пик всегда маячит впереди.</p>
           </article>
           <article class="hero-panel">
-            <div class="hero-panel-title">Сессия под вас</div>
-            <p>Вы выбираете язык, уровень CEFR, лексическую тему и пять грамматических тем. У немецкого и французского свои отдельные наборы тем и вопросов.</p>
+            <div class="hero-panel-title">Сессия под тебя</div>
+            <p>Выбираешь язык, уровень CEFR, одну лексику на подъём и пять грамматических тем под бонусы.</p>
           </article>
           <article class="hero-panel">
-            <div class="hero-panel-title">Цена ошибки</div>
-            <p>Камень сбивает с троса. Лавина отбрасывает на три хода вниз. Пока вы думаете над ответом, опасности продолжают приближаться — как в жизни.</p>
+            <div class="hero-panel-title">Память маршрута</div>
+            <p>Следы прошлых сессий, высеченные фразы, полароиды и редкие эхо-события остаются на горе между подъёмами.</p>
           </article>
         </div>
 
@@ -62,64 +62,100 @@
           </div>
         </div>
 
-        <div id="setup-step1" class="setup-step">
-          <h2 class="step-title">Кто поднимается</h2>
-          <p id="step1-text" class="step-text">Выберите язык сессии, уровень и имя альпиниста. Для немецкого откроются только немецкие темы и немецкие вопросы.</p>
+        <div class="setup-mode-tabs" role="tablist" aria-label="Разделы меню">
+          <button type="button" class="setup-mode-tab active" data-menu-pane="setup" aria-selected="true">Подготовка</button>
+          <button type="button" class="setup-mode-tab" data-menu-pane="journal" aria-selected="false">Дневник</button>
+          <button type="button" class="setup-mode-tab" data-menu-pane="album" aria-selected="false">Фотоальбом</button>
+        </div>
 
-          <div class="form-group">
-            <label>Язык сессии</label>
-            <div id="language-buttons" class="language-buttons"></div>
+        <div id="menu-pane-setup" class="menu-pane active">
+          <div id="setup-step1" class="setup-step">
+            <h2 class="step-title">Кто поднимается</h2>
+            <p id="step1-text" class="step-text">Выберите язык сессии, уровень и имя альпиниста.</p>
+
+            <div class="form-group">
+              <label>Язык сессии</label>
+              <div id="language-buttons" class="language-buttons"></div>
+            </div>
+
+            <div class="form-group">
+              <label for="player-name">Имя альпиниста</label>
+              <input type="text" id="player-name" maxlength="24" placeholder="Например, Лея" autocomplete="given-name">
+            </div>
+
+            <div class="form-group">
+              <label id="level-label">Уровень языка (CEFR)</label>
+              <div id="level-buttons" class="level-buttons"></div>
+            </div>
+
+            <div class="form-group">
+              <label id="preset-label"></label>
+              <div id="preset-buttons" class="preset-buttons"></div>
+            </div>
+
+            <div class="form-group">
+              <label>Предмет на полке</label>
+              <div id="relic-shelf" class="relic-shelf"></div>
+            </div>
+
+            <div class="setup-actions">
+              <button id="to-step2-btn" class="btn-primary" type="button">Дальше</button>
+            </div>
           </div>
 
-          <div class="form-group">
-            <label for="player-name">Имя альпиниста</label>
-            <input type="text" id="player-name" maxlength="24" placeholder="Например, Лея" autocomplete="given-name">
+          <div id="setup-step2" class="setup-step hidden">
+            <h2 class="step-title">Лексическая тема</h2>
+            <p id="step2-text" class="step-text">Одна тема на весь подъём. Она задаёт словарь и настроение сессии.</p>
+            <div id="lexical-grid" class="selection-grid" role="list"></div>
+
+            <div class="setup-actions">
+              <button id="back-to-step1" class="btn-secondary" type="button">Назад</button>
+              <button id="to-step3-btn" class="btn-primary" type="button">Дальше</button>
+            </div>
           </div>
 
-          <div class="form-group">
-            <label id="level-label">Уровень немецкого (CEFR)</label>
-            <div id="level-buttons" class="level-buttons"></div>
-          </div>
+          <div id="setup-step3" class="setup-step hidden">
+            <h2 class="step-title">Пять грамматических тем</h2>
+            <p class="step-text">
+              Каждая тема закрепляется за отдельным бонусом. У обычного и сильного рывка внутри карточки две половины:
+              влево и вправо. Некоторые предметы могут закрывать отдельные слоты.
+            </p>
 
-          <div class="form-group">
-            <label id="preset-label"></label>
-            <div id="preset-buttons" class="preset-buttons"></div>
-          </div>
+            <div id="bonus-slots" class="bonus-slots"></div>
 
-          <div class="setup-actions">
-            <button id="to-step2-btn" class="btn-primary" type="button">Дальше</button>
+            <div class="picker-header">
+              <span id="grammar-label">Доступные грамматические темы</span>
+              <span id="selection-counter">0 / 5</span>
+            </div>
+            <div id="grammar-picker" class="selection-grid grammar-grid" role="list"></div>
+
+            <div class="setup-actions">
+              <button id="back-to-step2" class="btn-secondary" type="button">Назад</button>
+              <button id="start-btn" class="btn-primary" type="button" disabled>Начать подъём</button>
+            </div>
           </div>
         </div>
 
-        <div id="setup-step2" class="setup-step hidden">
-          <h2 class="step-title">Лексическая тема</h2>
-          <p id="step2-text" class="step-text">Одна тема на всю сессию. Она задаёт рамку для упражнений по немецкому и настроение карточек во время подъёма.</p>
-          <div id="lexical-grid" class="selection-grid" role="list"></div>
+        <div id="menu-pane-journal" class="menu-pane hidden">
+          <h2 class="step-title">Дневник восхождения</h2>
+          <p class="step-text">Здесь остаются высеченные фразы, их переводы и редкие отголоски прошлых сессий.</p>
 
-          <div class="setup-actions">
-            <button id="back-to-step1" class="btn-secondary" type="button">Назад</button>
-            <button id="to-step3-btn" class="btn-primary" type="button">Дальше</button>
-          </div>
+          <article id="echo-card" class="story-card hidden" aria-live="polite">
+            <div class="panel-kicker">Отголосок</div>
+            <div id="echo-title" class="panel-title">Тихий след</div>
+            <p id="echo-copy" class="story-copy"></p>
+          </article>
+
+          <div id="journal-empty" class="empty-pane">Дневник пока пуст. После первой сессии здесь появятся фразы со склона и их перевод.</div>
+          <div id="journal-list" class="journal-list"></div>
         </div>
 
-        <div id="setup-step3" class="setup-step hidden">
-          <h2 class="step-title">Пять грамматических тем</h2>
-          <p class="step-text">
-            Каждая выбранная тема закрепляется за отдельным бонусом. У обычного и сильного рывка внутри карточки есть две половины: влево и вправо. У снежного щита кулдаун 3 минуты; остальные бонусы без кулдауна.
-          </p>
+        <div id="menu-pane-album" class="menu-pane hidden">
+          <h2 class="step-title">Фотоальбом восходителя</h2>
+          <p class="step-text">Одна полароидная карточка на сессию: лучший момент панорамы, серии ответов или редкого события.</p>
 
-          <div id="bonus-slots" class="bonus-slots"></div>
-
-          <div class="picker-header">
-            <span id="grammar-label">Доступные грамматические темы по немецкому</span>
-            <span id="selection-counter">0 / 5</span>
-          </div>
-          <div id="grammar-picker" class="selection-grid grammar-grid" role="list"></div>
-
-          <div class="setup-actions">
-            <button id="back-to-step2" class="btn-secondary" type="button">Назад</button>
-            <button id="start-btn" class="btn-primary" type="button" disabled>Начать подъём</button>
-          </div>
+          <div id="album-empty" class="empty-pane">Фотоальбом пока пуст. Лучшие моменты начнут копиться после первого подъёма.</div>
+          <div id="album-grid" class="album-grid"></div>
         </div>
       </section>
     </div>
@@ -178,11 +214,21 @@
               <div id="shield-text" class="hud-mini-value">Не активен</div>
               <div id="shield-subtext" class="hud-mini-copy">Готов к использованию.</div>
             </div>
+            <div class="hud-mini-card">
+              <div class="hud-mini-label">Кислород</div>
+              <div id="oxygen-text" class="hud-mini-value">100%</div>
+              <div id="oxygen-subtext" class="hud-mini-copy">Внизу воздух ещё густой.</div>
+            </div>
+            <div class="hud-mini-card">
+              <div class="hud-mini-label">Напарник</div>
+              <div id="companion-text" class="hud-mini-value">Держится</div>
+              <div id="companion-subtext" class="hud-mini-copy">Идёт сбоку и держит канат.</div>
+            </div>
           </div>
 
           <div class="hud-hazard-strip">
             <div class="hud-mini-label">Опасность</div>
-            <p id="hazard-text" class="hud-hazard-text">Пока тихо. Камни и лавины еще не подошли вплотную.</p>
+            <p id="hazard-text" class="hud-hazard-text">Пока тихо. Камни и лавины ещё не подошли вплотную.</p>
           </div>
         </section>
 
@@ -249,8 +295,8 @@
     </div>
 
     <div id="control-hint">
-      <span class="control-hint-desktop">Темы: 1–5 · Ответ: 1–4 · Рывок на линию: A / D или кнопки влево / вправо · Сильный рывок: Shift+A / Shift+D · Пауза: Esc · Звук: M</span>
-      <span class="control-hint-touch">Касание по краям экрана — смещение, а если зарядов смещения нет, сработает сильный рывок. Кнопки внизу — темы и ответы.</span>
+      <span class="control-hint-desktop">Темы: 1-5 · Ответ: 1-4 · Рывок на линию: A / D · Сильный рывок: Shift+A / Shift+D · Пауза: Esc · Звук: M</span>
+      <span class="control-hint-touch">Касание по краям экрана — смещение, а если зарядов нет, сработает сильный рывок. Кнопки внизу — темы и ответы.</span>
     </div>
 
     <div id="pause-overlay" class="overlay-screen hidden" role="dialog" aria-labelledby="pause-title">
@@ -264,6 +310,8 @@
         </div>
       </div>
     </div>
+
+    <div id="summit-overlay" class="overlay-screen hidden" aria-hidden="true"></div>
   </div>
 
   <div id="win-screen" class="screen">
@@ -293,8 +341,10 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   <script src="js/audio.js"></script>
   <script src="js/questions.js"></script>
+  <script src="js/memory.js"></script>
   <script src="js/renderer.js"></script>
   <script src="js/game.js"></script>
+  <script src="js/expansion.js"></script>
   <script src="js/main.js"></script>
 </body>
 </html>
