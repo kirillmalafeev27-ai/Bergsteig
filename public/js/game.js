@@ -1006,8 +1006,9 @@ class Game {
       }
     } else {
       // Mistake snaps the storm back. Streak and serenity target drop
-      // instantly; the rendered serenity catches up fast via SERENITY_FALL_RATE.
+      // instantly; the mountain should close back in on the same beat.
       this.correctStreak = 0;
+      this.serenity = 0;
       this.serenityTarget = 0;
       if (this.questionManager) {
         this.questionManager.onWrongAnswer(resolvedSlotId);

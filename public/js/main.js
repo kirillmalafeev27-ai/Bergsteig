@@ -12,17 +12,17 @@ const DEFAULT_ATMOSPHERE_PRESET = 'classic';
 const ATMOSPHERE_PRESETS = [
   {
     id: 'classic',
-    title: '\u0428\u0442\u0443\u0440\u043c\u043e\u0432\u043e\u0439 \u043f\u043e\u0434\u044a\u0451\u043c',
-    tag: '\u0411\u0430\u0437\u043e\u0432\u044b\u0439',
-    teaser: '\u0425\u043e\u043b\u043e\u0434, \u0441\u043d\u0435\u0433 \u0438 \u0434\u0430\u0432\u043b\u0435\u043d\u0438\u0435 \u0433\u043e\u0440\u044b',
-    copy: '\u041e\u0441\u043d\u043e\u0432\u043d\u0430\u044f \u043a\u0438\u043d\u043e\u0448\u043d\u0430\u044f \u0430\u0442\u043c\u043e\u0441\u0444\u0435\u0440\u0430: \u0445\u043e\u043b\u043e\u0434\u043d\u044b\u0439 \u0441\u0432\u0435\u0442, \u043c\u0435\u0442\u0435\u043b\u044c, \u0442\u0443\u043c\u0430\u043d \u0438 \u0441\u0443\u0440\u043e\u0432\u043e\u0435 \u0432\u043e\u0441\u0445\u043e\u0436\u0434\u0435\u043d\u0438\u0435.'
+    title: 'Штормовой подъём',
+    tag: 'Базовый',
+    teaser: 'Холод, снег и давление горы',
+    copy: 'Основная киношная атмосфера: холодный свет, метель, туман и суровое восхождение.'
   },
   {
     id: 'newyear',
-    title: '\u041d\u043e\u0432\u043e\u0433\u043e\u0434\u043d\u044f\u044f \u043d\u043e\u0447\u044c',
-    tag: '\u041d\u043e\u0432\u044b\u0439',
-    teaser: '\u0427\u0451\u0440\u043d\u043e\u0435 \u043d\u0435\u0431\u043e, \u0437\u043e\u043b\u043e\u0442\u044b\u0435 \u0437\u0432\u0451\u0437\u0434\u044b \u0438 \u0444\u043e\u043d\u0430\u0440\u0438 \u043d\u0430 \u043c\u0430\u0440\u0448\u0440\u0443\u0442\u0435',
-    copy: '\u041f\u0440\u0430\u0437\u0434\u043d\u0438\u0447\u043d\u044b\u0439 \u043a\u043e\u043d\u0442\u0440\u0430\u0441\u0442: \u0447\u0451\u0440\u043d\u043e\u0435 \u043d\u0435\u0431\u043e, \u043b\u0435\u0434\u044f\u043d\u043e-\u0433\u043e\u043b\u0443\u0431\u044b\u0435 \u0433\u043e\u0440\u044b \u0438 \u0442\u0451\u043f\u043b\u043e\u0435 \u0437\u043e\u043b\u043e\u0442\u043e\u0435 \u0441\u0432\u0435\u0447\u0435\u043d\u0438\u0435 \u0444\u043e\u043d\u0430\u0440\u0435\u0439.'
+    title: 'Новогодняя ночь',
+    tag: 'Новый',
+    teaser: 'Чёрное небо, золотые звёзды и фонари на маршруте',
+    copy: 'Праздничный контраст: чёрное небо, ледяно-голубые горы и тёплое золотое свечение.'
   }
 ];
 
@@ -69,7 +69,6 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   const game = new Game();
-
   const ui = {
     menuScreen: document.getElementById('menu-screen'),
     gameScreen: document.getElementById('game-screen'),
@@ -82,6 +81,7 @@ document.addEventListener('DOMContentLoaded', () => {
     levelButtons: document.getElementById('level-buttons'),
     presetLabel: document.getElementById('preset-label'),
     presetButtons: document.getElementById('preset-buttons'),
+    relicShelf: document.getElementById('relic-shelf'),
     step2Text: document.getElementById('step2-text'),
     lexicalGrid: document.getElementById('lexical-grid'),
     bonusSlots: document.getElementById('bonus-slots'),
@@ -92,13 +92,27 @@ document.addEventListener('DOMContentLoaded', () => {
     winStats: document.getElementById('win-stats'),
     loseStats: document.getElementById('lose-stats'),
     loseMessage: document.getElementById('lose-message'),
-    themeColorMeta: document.querySelector('meta[name="theme-color"]')
+    themeColorMeta: document.querySelector('meta[name="theme-color"]'),
+    menuPaneTabs: Array.from(document.querySelectorAll('.setup-mode-tab')),
+    menuPanes: {
+      setup: document.getElementById('menu-pane-setup'),
+      journal: document.getElementById('menu-pane-journal'),
+      album: document.getElementById('menu-pane-album')
+    },
+    echoCard: document.getElementById('echo-card'),
+    echoTitle: document.getElementById('echo-title'),
+    echoCopy: document.getElementById('echo-copy'),
+    journalEmpty: document.getElementById('journal-empty'),
+    journalList: document.getElementById('journal-list'),
+    albumEmpty: document.getElementById('album-empty'),
+    albumGrid: document.getElementById('album-grid')
   };
 
   let selectedLanguage = safeStorageGet(STORAGE_KEYS.language, DEFAULT_LANGUAGE) || DEFAULT_LANGUAGE;
   if (!LANGUAGE_OPTIONS.some((option) => option.id === selectedLanguage)) {
     selectedLanguage = DEFAULT_LANGUAGE;
   }
+
   let selectedAtmospherePreset = normalizeAtmospherePreset(
     safeStorageGet(STORAGE_KEYS.preset, DEFAULT_ATMOSPHERE_PRESET) || DEFAULT_ATMOSPHERE_PRESET
   );
@@ -106,10 +120,14 @@ document.addEventListener('DOMContentLoaded', () => {
   let selectedLexical = null;
   let selectedSlotIndex = 0;
   let slotAssignments = [];
+  let activeMenuPane = 'setup';
+  let selectedRelicId = BERG_MEMORY.getSelectedRelic().id;
+  let translationInFlight = false;
 
   ui.playerName.value = safeStorageGet(STORAGE_KEYS.playerName, '');
   applyAtmospherePreview();
   loadSelectionsForLanguage(selectedLanguage);
+  normalizeSelectionForRelic();
 
   const storedMute = safeStorageGet(STORAGE_KEYS.muted, '0');
   game.setMuted(storedMute === '1');
@@ -120,28 +138,32 @@ document.addEventListener('DOMContentLoaded', () => {
   game.onExit = () => {
     game.destroy(false);
     setScreen('menu-screen');
+    setMenuPane('setup');
     showStep(stepForCurrentState());
+    refreshPersistentViews();
   };
 
-  game.onWin = (stats) => {
-    ui.winStats.textContent =
-      `${stats.playerName} добрался до вершины. Точность: ${stats.accuracy}%. ` +
-      `Ответов: ${stats.correct}/${stats.answers}. Время: ${stats.durationSeconds} сек. ` +
-      `Лавины заблокированы: ${stats.avalanchesBlocked}.`;
-    setScreen('win-screen');
+  game.onWin = () => {
+    game.destroy(false);
+    setScreen('menu-screen');
+    refreshPersistentViews();
+    setMenuPane('album');
+    showStep(1);
   };
 
   game.onLose = (stats) => {
     ui.loseMessage.textContent =
-      `Достигнуто: ${stats.progress} м из ${SUMMIT_HEIGHT}. Лавины сбивали назад ${stats.avalanchesHit} раз.`;
+      `Достигнуто: ${stats.progress} м. Лавины отбросили назад ${stats.avalanchesHit} раз.`;
     ui.loseStats.textContent =
       `Точность: ${stats.accuracy}%. Верных ответов: ${stats.correct}/${stats.answers}. ` +
-      `Удачных уходов от опасностей: ${stats.nearMisses}.`;
+      `Опасных проходов рядом с камнями: ${stats.nearMisses}.`;
+    refreshPersistentViews();
     setScreen('lose-screen');
   };
 
   renderLanguageButtons();
   renderPresetButtons();
+  renderRelicShelf();
   updateSetupCopy();
   renderLevelButtons();
   renderLexicalGrid();
@@ -150,8 +172,22 @@ document.addEventListener('DOMContentLoaded', () => {
   updateSelectionCounter();
   updateStartButton();
   showStep(1);
+  setMenuPane('setup');
+  refreshPersistentViews();
+  flushPendingTranslation();
+
+  window.addEventListener('berg-memory-updated', () => {
+    refreshPersistentViews();
+  });
+
+  ui.menuPaneTabs.forEach((button) => {
+    button.addEventListener('click', () => {
+      setMenuPane(button.dataset.menuPane || 'setup');
+    });
+  });
 
   document.getElementById('to-step2-btn').addEventListener('click', () => {
+    setMenuPane('setup');
     showStep(2);
   });
 
@@ -159,6 +195,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!selectedLexical) {
       return;
     }
+    setMenuPane('setup');
     showStep(3);
   });
 
@@ -188,6 +225,8 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('win-restart').addEventListener('click', () => {
     game.destroy();
     setScreen('menu-screen');
+    refreshPersistentViews();
+    setMenuPane('setup');
     showStep(1);
   });
 
@@ -199,17 +238,60 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('lose-menu').addEventListener('click', () => {
     game.destroy(false);
     setScreen('menu-screen');
+    refreshPersistentViews();
+    setMenuPane('setup');
     showStep(1);
   });
+
+  function enabledBonusIds() {
+    return BERG_MEMORY.enabledBonusIdsForRelic(selectedRelicId);
+  }
+
+  function isSlotEnabled(slotDefOrIndex) {
+    const slotId = typeof slotDefOrIndex === 'number'
+      ? BONUS_SLOTS[slotDefOrIndex] && BONUS_SLOTS[slotDefOrIndex].id
+      : slotDefOrIndex && slotDefOrIndex.id;
+    return enabledBonusIds().includes(slotId);
+  }
+
+  function firstEnabledEmptySlotIndex() {
+    for (let index = 0; index < BONUS_SLOTS.length; index += 1) {
+      if (!isSlotEnabled(index)) {
+        continue;
+      }
+      if (!slotAssignments[index]) {
+        return index;
+      }
+    }
+    for (let index = 0; index < BONUS_SLOTS.length; index += 1) {
+      if (isSlotEnabled(index)) {
+        return index;
+      }
+    }
+    return 0;
+  }
+
+  function normalizeSelectionForRelic() {
+    if (!isSlotEnabled(selectedSlotIndex)) {
+      selectedSlotIndex = firstEnabledEmptySlotIndex();
+    }
+  }
 
   function stepForCurrentState() {
     if (!selectedLexical) {
       return 2;
     }
-    if (slotAssignments.some((slot) => !slot)) {
+    if (requiredSlots().some((slotIndex) => !slotAssignments[slotIndex])) {
       return 3;
     }
     return 3;
+  }
+
+  function requiredSlots() {
+    return BONUS_SLOTS
+      .map((slot, index) => ({ slot, index }))
+      .filter(({ slot }) => isSlotEnabled(slot))
+      .map(({ index }) => index);
   }
 
   function showStep(step) {
@@ -230,6 +312,22 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  function setMenuPane(paneId) {
+    activeMenuPane = paneId;
+    Object.entries(ui.menuPanes).forEach(([id, node]) => {
+      if (!node) {
+        return;
+      }
+      node.classList.toggle('hidden', id !== paneId);
+      node.classList.toggle('active', id === paneId);
+    });
+    ui.menuPaneTabs.forEach((button) => {
+      const active = button.dataset.menuPane === paneId;
+      button.classList.toggle('active', active);
+      button.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+  }
+
   function loadSelectionsForLanguage(language) {
     const languageConfig = getLanguageConfig(language);
     const storedLevel = safeStorageGet(languageStorageKey(STORAGE_KEYS.level, language), DEFAULT_CEFR_LEVEL) || DEFAULT_CEFR_LEVEL;
@@ -237,8 +335,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const storedLexical = safeStorageGet(languageStorageKey(STORAGE_KEYS.lexical, language), '');
     selectedLexical = languageConfig.lexicalTopics.includes(storedLexical) ? storedLexical : null;
     slotAssignments = restoreSlotAssignments(language);
-    const firstEmpty = slotAssignments.findIndex((slot) => !slot);
-    selectedSlotIndex = firstEmpty >= 0 ? firstEmpty : 0;
+    selectedSlotIndex = firstEnabledEmptySlotIndex();
   }
 
   function persistSelectionsForLanguage(language = selectedLanguage) {
@@ -267,7 +364,7 @@ document.addEventListener('DOMContentLoaded', () => {
       ui.playerName.placeholder = languageConfig.playerPlaceholder;
     }
     if (ui.presetLabel) {
-      ui.presetLabel.textContent = '\u0410\u0442\u043c\u043e\u0441\u0444\u0435\u0440\u0430 \u0441\u0435\u0441\u0441\u0438\u0438';
+      ui.presetLabel.textContent = 'Атмосфера сессии';
     }
   }
 
@@ -300,6 +397,7 @@ document.addEventListener('DOMContentLoaded', () => {
         selectedLanguage = option.id;
         safeStorageSet(STORAGE_KEYS.language, selectedLanguage);
         loadSelectionsForLanguage(selectedLanguage);
+        normalizeSelectionForRelic();
         renderLanguageButtons();
         updateSetupCopy();
         renderLevelButtons();
@@ -362,6 +460,40 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  function renderRelicShelf() {
+    if (!ui.relicShelf) {
+      return;
+    }
+    ui.relicShelf.innerHTML = '';
+    BERG_MEMORY.RELICS.forEach((relic) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'relic-card';
+      button.classList.toggle('active', relic.id === selectedRelicId);
+      button.innerHTML = `
+        <div class="relic-kicker">${relic.kicker}</div>
+        <div class="relic-title">${relic.title}</div>
+        <div class="relic-meta">+ ${relic.plus}</div>
+        <div class="relic-meta">− ${relic.minus}</div>
+        <div class="relic-copy">${relic.copy}</div>
+      `;
+      button.addEventListener('click', () => {
+        if (relic.id === selectedRelicId) {
+          return;
+        }
+        selectedRelicId = relic.id;
+        BERG_MEMORY.setSelectedRelic(selectedRelicId);
+        normalizeSelectionForRelic();
+        renderRelicShelf();
+        renderBonusSlots();
+        renderGrammarPicker();
+        updateSelectionCounter();
+        updateStartButton();
+      });
+      ui.relicShelf.appendChild(button);
+    });
+  }
+
   function renderLexicalGrid() {
     ui.lexicalGrid.innerHTML = '';
     getLanguageLexicalTopics(selectedLanguage).forEach((topic) => {
@@ -380,10 +512,23 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  function disabledSlotReason(slot, index) {
+    if (selectedRelicId === 'compass' && slot.id === 'snowShield') {
+      return 'Компас отключает щит';
+    }
+    if (selectedRelicId === 'schnapps' && index >= 3) {
+      return 'Шнапс закрывает слоты 4 и 5';
+    }
+    return 'Недоступно';
+  }
+
   function renderBonusSlots() {
     ui.bonusSlots.innerHTML = '';
     BONUS_SLOTS.forEach((slot, index) => {
       const node = document.createElement('button');
+      node.className = 'bonus-slot';
+      node.type = 'button';
+      const enabled = isSlotEnabled(slot);
       const directionSlots = slot.splitDirections
         ? `
           <div class="slot-directions" aria-hidden="true">
@@ -392,22 +537,28 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
         `
         : '';
-      node.className = 'bonus-slot';
-      node.type = 'button';
-      if (selectedSlotIndex === index) {
+
+      if (selectedSlotIndex === index && enabled) {
         node.classList.add('selected');
       }
       if (slotAssignments[index]) {
         node.classList.add('ready');
       }
+      if (!enabled) {
+        node.classList.add('cooldown');
+        node.disabled = true;
+      }
       node.innerHTML = `
         <div class="slot-kicker">Бонус ${index + 1}</div>
         <div class="slot-title">${slot.bonusLabel}</div>
         ${directionSlots}
-        <div class="slot-topic">${slotAssignments[index] || 'Тема ещё не выбрана'}</div>
+        <div class="slot-topic">${enabled ? (slotAssignments[index] || 'Тема ещё не выбрана') : disabledSlotReason(slot, index)}</div>
         <div class="slot-help">${slot.help}</div>
       `;
       node.addEventListener('click', () => {
+        if (!enabled) {
+          return;
+        }
         selectedSlotIndex = index;
         renderBonusSlots();
         renderGrammarPicker();
@@ -419,6 +570,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function renderGrammarPicker() {
     ui.grammarPicker.innerHTML = '';
     const usedTopics = slotAssignments.filter(Boolean);
+    const targetSlotEnabled = isSlotEnabled(selectedSlotIndex);
 
     getLanguageGrammarTopics(selectedLanguage).forEach((topic) => {
       const button = document.createElement('button');
@@ -427,6 +579,9 @@ document.addEventListener('DOMContentLoaded', () => {
       button.textContent = topic;
       if (usedTopics.includes(topic)) {
         button.classList.add('used');
+      }
+      if (!targetSlotEnabled) {
+        button.disabled = true;
       }
       button.addEventListener('click', () => {
         assignTopicToSlot(topic);
@@ -440,15 +595,17 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    const targetIndex = selectedSlotIndex !== null ? selectedSlotIndex : slotAssignments.findIndex((slot) => !slot);
-    if (targetIndex < 0) {
+    const fallbackIndex = firstEnabledEmptySlotIndex();
+    const targetIndex = isSlotEnabled(selectedSlotIndex)
+      ? selectedSlotIndex
+      : fallbackIndex;
+    if (targetIndex < 0 || !isSlotEnabled(targetIndex)) {
       return;
     }
 
     slotAssignments[targetIndex] = topic;
     persistSelectionsForLanguage();
-    const nextEmpty = slotAssignments.findIndex((slot) => !slot);
-    selectedSlotIndex = nextEmpty >= 0 ? nextEmpty : targetIndex;
+    selectedSlotIndex = firstEnabledEmptySlotIndex();
     renderBonusSlots();
     renderGrammarPicker();
     updateSelectionCounter();
@@ -456,20 +613,22 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function updateSelectionCounter() {
-    const selectedCount = slotAssignments.filter(Boolean).length;
-    ui.selectionCounter.textContent = `${selectedCount} / ${BONUS_SLOTS.length}`;
+    const required = requiredSlots();
+    const selectedCount = required.filter((slotIndex) => slotAssignments[slotIndex]).length;
+    ui.selectionCounter.textContent = `${selectedCount} / ${required.length}`;
   }
 
   function updateStartButton() {
-    ui.startButton.disabled = !selectedLexical || slotAssignments.some((topic) => !topic);
+    ui.startButton.disabled = !selectedLexical || requiredSlots().some((topicIndex) => !slotAssignments[topicIndex]);
   }
 
   function buildSettings() {
-    if (!selectedLexical || slotAssignments.some((topic) => !topic)) {
+    if (!selectedLexical || requiredSlots().some((slotIndex) => !slotAssignments[slotIndex])) {
       return null;
     }
 
     const languageConfig = getLanguageConfig(selectedLanguage);
+    const profileSnapshot = BERG_MEMORY.startSession();
 
     return {
       language: selectedLanguage,
@@ -478,10 +637,11 @@ document.addEventListener('DOMContentLoaded', () => {
       atmospherePreset: selectedAtmospherePreset,
       langLevel: selectedLevel,
       lexicalTopic: selectedLexical,
-      slotConfigs: BONUS_SLOTS.map((slotDef, index) => ({
-        slotDef,
-        grammarTopic: slotAssignments[index]
-      }))
+      relic: BERG_MEMORY.getRelic(selectedRelicId),
+      memoryProfile: profileSnapshot,
+      slotConfigs: BONUS_SLOTS
+        .map((slotDef, index) => ({ slotDef, grammarTopic: slotAssignments[index] }))
+        .filter((slotConfig) => isSlotEnabled(slotConfig.slotDef))
     };
   }
 
@@ -512,6 +672,119 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (error) {
       console.warn('Saved slot assignments could not be restored:', error);
       return empty;
+    }
+  }
+
+  function appendTextElement(parent, tagName, className, text) {
+    const node = document.createElement(tagName);
+    if (className) {
+      node.className = className;
+    }
+    node.textContent = text || '';
+    parent.appendChild(node);
+    return node;
+  }
+
+  function safePhotoDataUrl(value) {
+    const src = String(value || '');
+    return /^data:image\/(?:png|jpe?g|webp);base64,[a-z0-9+/=]+$/i.test(src) ? src : '';
+  }
+
+  function renderJournal() {
+    const entries = BERG_MEMORY.getJournalEntries();
+    ui.journalList.innerHTML = '';
+    ui.journalEmpty.classList.toggle('hidden', entries.length > 0);
+    entries.forEach((entry) => {
+      const node = document.createElement('article');
+      node.className = 'journal-entry';
+      const createdAt = new Date(entry.createdAt || Date.now()).toLocaleDateString('ru-RU');
+      const meta = appendTextElement(node, 'div', 'journal-meta', '');
+      appendTextElement(meta, 'span', '', entry.sourceTopic || 'Скальная фраза');
+      appendTextElement(meta, 'span', '', createdAt);
+      appendTextElement(node, 'div', 'journal-phrase', entry.phrase);
+      appendTextElement(node, 'div', 'journal-translation', entry.translation);
+      ui.journalList.appendChild(node);
+    });
+  }
+
+  function renderAlbum() {
+    const photos = BERG_MEMORY.getPhotos();
+    ui.albumGrid.innerHTML = '';
+    ui.albumEmpty.classList.toggle('hidden', photos.length > 0);
+    photos.forEach((photo) => {
+      const node = document.createElement('article');
+      node.className = 'polaroid-card';
+      const createdAt = new Date(photo.createdAt || Date.now()).toLocaleDateString('ru-RU');
+      const caption = photo.caption || 'Лучший момент подъёма';
+      const src = safePhotoDataUrl(photo.imageDataUrl);
+
+      if (src) {
+        const image = document.createElement('img');
+        image.className = 'polaroid-image';
+        image.src = src;
+        image.alt = caption || 'Полароид сессии';
+        node.appendChild(image);
+      } else {
+        appendTextElement(node, 'div', 'polaroid-image polaroid-image-empty', 'Кадр недоступен');
+      }
+
+      appendTextElement(node, 'div', 'polaroid-caption', caption);
+      appendTextElement(node, 'div', 'polaroid-meta', `${createdAt} · ${photo.momentType || 'панорама'}`);
+      ui.albumGrid.appendChild(node);
+    });
+  }
+
+  function renderEcho() {
+    const profile = BERG_MEMORY.loadProfile();
+    const echo = profile.activeEcho;
+    if (!echo) {
+      ui.echoCard.classList.add('hidden');
+      return;
+    }
+    ui.echoTitle.textContent = echo.title;
+    ui.echoCopy.textContent = echo.copy;
+    ui.echoCard.classList.remove('hidden');
+  }
+
+  function refreshPersistentViews() {
+    renderRelicShelf();
+    renderJournal();
+    renderAlbum();
+    renderEcho();
+  }
+
+  async function flushPendingTranslation() {
+    if (translationInFlight) {
+      return;
+    }
+    const pending = BERG_MEMORY.getPendingPhrase();
+    if (!pending || !pending.phrase) {
+      renderJournal();
+      return;
+    }
+
+    translationInFlight = true;
+    try {
+      const response = await fetch('/api/translate-phrase', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          phrase: pending.phrase,
+          language: pending.language || selectedLanguage
+        })
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      const payload = await response.json();
+      BERG_MEMORY.completePendingPhrase(payload.translation || 'Перевод не получен');
+    } catch (error) {
+      console.warn('Phrase translation failed:', error);
+    } finally {
+      translationInFlight = false;
+      renderJournal();
     }
   }
 
