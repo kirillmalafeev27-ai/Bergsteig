@@ -36,6 +36,15 @@ const LENS_STAGE_LIGHT = 0.3;
 const LENS_STAGE_HEAVY = 0.65;
 const LENS_STAGE_FULL = 1;
 
+// Phase-change panorama. The HUD already splits the climb by phaseRatio at
+// 0.45 and 0.78 — the same thresholds gate the panorama so the visible phase
+// name change lines up with the silent beat.
+const PANORAMA_PHASE_RATIO_STEPS = [0.45, 0.78];
+const PANORAMA_BASE_MS = 900;
+const PANORAMA_CLEAN_BONUS_MS = 2100;
+const PANORAMA_FADE_IN_MS = 420;
+const PANORAMA_FADE_OUT_MS = 520;
+
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
@@ -210,6 +219,10 @@ class Game {
 
       if (event.key === 'Escape') {
         event.preventDefault();
+        if (this.panorama.active) {
+          this._endPanorama(performance.now());
+          return;
+        }
         this.togglePause();
         return;
       }
@@ -400,6 +413,21 @@ class Game {
     this.nextRockSpawnAt = this.startedAt + 13000;
     this.nextAvalancheSpawnAt = this.startedAt + AVALANCHE_INITIAL_DELAY_MS;
 
+    // Panorama-pause state. `phaseStepIndex` tracks how many of the HUD phase
+    // thresholds the climber has already crossed. `cleanClimb` flips to false
+    // on the first avalanche hit — a dirty run still gets a short panorama,
+    // but loses the scaling bonus. The panorama never fires while a question
+    // is open, the climber is falling, or a panorama is already active.
+    this.phaseStepIndex = 0;
+    this.cleanClimb = true;
+    this.panorama = {
+      active: false,
+      pending: false,
+      startedAt: 0,
+      duration: 0,
+      intensity: 0
+    };
+
     this.currentQuestion = null;
     this.questionLoading = false;
     this.pendingDirection = null;
@@ -467,6 +495,9 @@ class Game {
     const shouldPause = typeof force === 'boolean' ? force : this.state === 'running';
 
     if (shouldPause && this.state === 'running') {
+      if (this.panorama.active) {
+        this._endPanorama(performance.now());
+      }
       this.state = 'paused';
       this.pausedAt = performance.now();
       if (this.frameId) {
@@ -565,6 +596,32 @@ class Game {
     this.lastFrameAt = timestamp;
     this.currentTime = timestamp;
 
+    // Kick off a deferred panorama once the climber is free of question/direction
+    // UI. The phase-change check itself runs inside _updateEnvironment.
+    if (this.panorama.pending && !this.panorama.active && !this.currentQuestion && !this.pendingDirection && !this.player.falling) {
+      this._startPanorama(timestamp);
+    }
+
+    if (this.panorama.active) {
+      this._tickPanorama(dt, timestamp);
+      // World is frozen: no physics, no hazards, no spawns. Environment still
+      // ticks so the storm overlay/lens can settle toward the quiet look.
+      this._updateEnvironment(dt, timestamp);
+      this._updateFootprints(dt);
+      this._updateHud();
+      this._updateHazardFeed();
+      if (this.renderer) {
+        this.renderer.render(this._buildSnapshot(), dt);
+      }
+      if (this.audio) {
+        this.audio.setAtmosphere(this.player.progress / SUMMIT_HEIGHT, this._dangerLevel());
+      }
+      if (this.state !== 'idle') {
+        this.frameId = requestAnimationFrame(this._loop);
+      }
+      return;
+    }
+
     this._updatePlayerPhysics(dt, timestamp);
     this._updateEnvironment(dt, timestamp);
     this._updateHazards(dt, timestamp);
@@ -647,6 +704,7 @@ class Game {
 
   _updateEnvironment(dt, now) {
     const phaseRatio = this._phaseRatio();
+    this._checkPanoramaTrigger(phaseRatio);
     const shieldFactor = this.player.shieldCharges > 0 ? 0.58 : 1;
     this.player.lens = clamp(
       this.player.lens + dt * (
@@ -671,7 +729,7 @@ class Game {
     this.ui.lensOverlay.style.setProperty('--lens-haze', (this.player.lensVisual * lensHazeFactor).toFixed(3));
     this.ui.lensOverlay.style.setProperty('--lens-frost', clamp(this.player.lensVisual * lensFrostFactor, 0, 1).toFixed(3));
 
-    if (!this.player.falling) {
+    if (!this.player.falling && !this.panorama.active) {
       if (now >= this.nextRockSpawnAt) {
         if (this._canSpawnRockWave(now)) {
           this._spawnRockWave(now);
@@ -742,6 +800,7 @@ class Game {
         }
 
         this.stats.avalanchesHit += 1;
+        this.cleanClimb = false;
         // Knockback as a target, not a snap — the fast down-rate in
         // _updatePlayerPhysics covers the distance quickly but still
         // sells direction and weight instead of teleporting.
@@ -1383,14 +1442,19 @@ class Game {
 
   _buildSnapshot() {
     const stormPresetMultiplier = this.atmospherePreset === 'newyear' ? 0.52 : 1;
-    const stormStrength = (0.32 + this._phaseRatio() * 0.18 + this._dangerLevel() * 0.28) * stormPresetMultiplier;
+    const panoramaIntensity = this.panorama.active ? this.panorama.intensity : 0;
+    const stormStrength = (0.32 + this._phaseRatio() * 0.18 + this._dangerLevel() * 0.28) * stormPresetMultiplier * (1 - panoramaIntensity * 0.9);
 
     return {
       atmospherePreset: this.atmospherePreset,
       phaseRatio: this._phaseRatio(),
       stormStrength,
       dangerLevel: this._dangerLevel(),
-      cameraShake: this.cameraShake,
+      cameraShake: this.cameraShake * (1 - panoramaIntensity),
+      panorama: {
+        active: this.panorama.active,
+        intensity: panoramaIntensity
+      },
       player: {
         x: this.player.x,
         baseLane: this.player.baseLane,
@@ -1466,6 +1530,8 @@ class Game {
     this.state = 'falling';
     this.player.falling = true;
     this.player.fallStartedAt = this.currentTime;
+    this.cleanClimb = false;
+    this._cancelPanorama(this.currentTime);
     this.currentQuestion = null;
     this.pendingDirection = null;
     this._closeQuestionPanel();
@@ -1526,6 +1592,96 @@ class Game {
 
   _phaseRatio() {
     return clamp((this.player.progress / SUMMIT_HEIGHT - 0.42) / 0.4, 0, 1);
+  }
+
+  _panoramaPhaseStep(phaseRatio) {
+    let step = 0;
+    for (let i = 0; i < PANORAMA_PHASE_RATIO_STEPS.length; i += 1) {
+      if (phaseRatio >= PANORAMA_PHASE_RATIO_STEPS[i]) {
+        step = i + 1;
+      }
+    }
+    return step;
+  }
+
+  _checkPanoramaTrigger(phaseRatio) {
+    const nextStep = this._panoramaPhaseStep(phaseRatio);
+    if (nextStep > this.phaseStepIndex) {
+      this.phaseStepIndex = nextStep;
+      if (!this.player.falling && this.state === 'running') {
+        this.panorama.pending = true;
+      }
+    }
+  }
+
+  _startPanorama(now) {
+    const bonusRatio = this.cleanClimb ? clamp(this.phaseStepIndex / PANORAMA_PHASE_RATIO_STEPS.length, 0, 1) : 0;
+    this.panorama.active = true;
+    this.panorama.pending = false;
+    this.panorama.startedAt = now;
+    this.panorama.duration = PANORAMA_BASE_MS + bonusRatio * PANORAMA_CLEAN_BONUS_MS;
+    this.panorama.intensity = 0;
+    if (this.audio) {
+      this.audio.setPanoramaDuck(1);
+    }
+  }
+
+  _endPanorama(now) {
+    if (!this.panorama.active) {
+      return;
+    }
+    const pausedDelta = Math.max(0, now - this.panorama.startedAt);
+    // Hazards were frozen during panorama but their absolute-time fields
+    // (spawn schedules, shield/burst deadlines, armed-warning windows,
+    // fissure spawn stamp) kept ticking. Shift them forward the same way
+    // togglePause does so nothing expires in the silent beat.
+    this.startedAt += pausedDelta;
+    this.nextRockSpawnAt += pausedDelta;
+    this.nextAvalancheSpawnAt += pausedDelta;
+    this.rockSpawnBlockedUntil += pausedDelta;
+    this.avalancheSpawnBlockedUntil += pausedDelta;
+    if (this.player.burst) {
+      this.player.burst.until += pausedDelta;
+    }
+    if (this.player.shieldUntil) {
+      this.player.shieldUntil += pausedDelta;
+    }
+    if (this.player.shieldCooldownUntil) {
+      this.player.shieldCooldownUntil += pausedDelta;
+    }
+    if (this.couloirFissure) {
+      this.couloirFissure.spawnedAt += pausedDelta;
+    }
+    this.hazards.rocks.forEach((rock) => {
+      rock.armedUntil += pausedDelta;
+    });
+
+    this.panorama.active = false;
+    this.panorama.intensity = 0;
+    if (this.audio) {
+      this.audio.setPanoramaDuck(0);
+    }
+  }
+
+  _tickPanorama(dt, now) {
+    const elapsed = now - this.panorama.startedAt;
+    const duration = this.panorama.duration;
+    if (elapsed >= duration) {
+      this._endPanorama(now);
+      return;
+    }
+    const fadeIn = clamp(elapsed / PANORAMA_FADE_IN_MS, 0, 1);
+    const fadeOut = clamp((duration - elapsed) / PANORAMA_FADE_OUT_MS, 0, 1);
+    const raw = Math.min(fadeIn, fadeOut);
+    // Smoothstep so the pull-back eases in and out instead of snapping.
+    this.panorama.intensity = raw * raw * (3 - 2 * raw);
+  }
+
+  _cancelPanorama(now) {
+    if (this.panorama.active) {
+      this._endPanorama(now);
+    }
+    this.panorama.pending = false;
   }
 
   _dangerLevel() {

@@ -47,6 +47,9 @@ class AudioManager {
     this.loadGeneration = 0;
     this.atmosphereProgress = 0;
     this.atmosphereDanger = 0;
+    // 0 = normal mix. 1 = panorama silence: wind/threat ducked toward zero.
+    // setAtmosphere multiplies its live targets by (1 - panoramaDuck).
+    this.panoramaDuck = 0;
   }
 
   init() {
@@ -147,10 +150,22 @@ class AudioManager {
       return;
     }
 
-    const windTarget = 0.52 + progressRatio * 0.38 + dangerLevel * 0.26;
-    const threatTarget = 0.06 + progressRatio * 0.08 + dangerLevel * 0.18;
+    const duckFactor = 1 - this.panoramaDuck;
+    const windTarget = (0.52 + progressRatio * 0.38 + dangerLevel * 0.26) * duckFactor;
+    const threatTarget = (0.06 + progressRatio * 0.08 + dangerLevel * 0.18) * duckFactor;
     this.windGain.gain.setTargetAtTime(windTarget, this.ctx.currentTime, 0.36);
     this.threatGain.gain.setTargetAtTime(threatTarget, this.ctx.currentTime, 0.28);
+  }
+
+  setPanoramaDuck(amount) {
+    const clamped = Math.max(0, Math.min(1, amount || 0));
+    if (clamped === this.panoramaDuck) {
+      return;
+    }
+    this.panoramaDuck = clamped;
+    // Re-push current atmosphere so the duck takes effect immediately with
+    // the existing setTargetAtTime smoothing.
+    this.setAtmosphere(this.atmosphereProgress, this.atmosphereDanger);
   }
 
   playCorrectAnswer() {

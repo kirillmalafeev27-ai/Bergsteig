@@ -3697,9 +3697,10 @@ class BergRenderer {
     // into the slope when they climb, and sways gently against their
     // lateral motion so the rig reads as attached to a body breathing
     // on a rope — not a locked follow-cam.
+    const panoramaIntensityForFov = (snapshot.panorama && snapshot.panorama.intensity) || 0;
     const desiredFov = falling
       ? 81 + fallRatio * 4
-      : 74 - progressRatio * 4 + (climbing ? 1.6 : 0);
+      : 74 - progressRatio * 4 + (climbing ? 1.6 : 0) + panoramaIntensityForFov * 5.5;
     if (Math.abs(this.camera.fov - desiredFov) > 0.02) {
       this.camera.fov += (desiredFov - this.camera.fov) * Math.min(1, dt * 2.2);
       this.camera.updateProjectionMatrix();
@@ -3759,6 +3760,21 @@ class BergRenderer {
         lookZ
       );
 
+    // Panorama pull-back. The game freezes the world at a phase change and
+    // asks the rig to widen: the camera drifts back + up, the look-target
+    // lifts toward the summit so the distant peak enters frame, and the
+    // roll/shake bleed off. Intensity is 0..1 eased in game.js.
+    const panoramaIntensity = (snapshot.panorama && snapshot.panorama.intensity) || 0;
+    if (panoramaIntensity > 0 && !falling) {
+      const lift = this._worldY(panoramaIntensity * 1.8);
+      targetPosition.y += lift;
+      targetPosition.z += panoramaIntensity * 2.6;
+      targetPosition.x *= 1 - panoramaIntensity * 0.35;
+      const liftedLook = summitWorldY + 1.4;
+      targetLook.y += (liftedLook - targetLook.y) * panoramaIntensity * 0.55;
+      targetLook.x *= 1 - panoramaIntensity * 0.55;
+    }
+
     // Heavier damping — exp(-dt*3.2) lags ~0.3s vs the old ~0.15s.
     // Gives the rig real mass and turns the old "whip to target" feel
     // into a weighted follow.
@@ -3767,9 +3783,10 @@ class BergRenderer {
 
     // Breathing: deeper amplitude under load, syncopated X so it's not a
     // simple bob. Extra pulse when actively climbing — the axe/foot
-    // cadence bleeds into the rig.
+    // cadence bleeds into the rig. Panorama slows breath toward stillness.
     const load = (climbing ? 0.5 : 0) + danger * 0.4 + (falling ? 0.18 : 0);
-    const breathAmp = 0.06 + progressRatio * 0.09 + load * 0.08;
+    const breathDamp = 1 - panoramaIntensity * 0.85;
+    const breathAmp = (0.06 + progressRatio * 0.09 + load * 0.08) * breathDamp;
     const breath = Math.sin(this.elapsed * (0.9 + load * 0.4)) * breathAmp;
     const breathSway = Math.sin(this.elapsed * 0.6 + 0.4) * breathAmp * 0.55;
     this.camera.position.y += falling ? breath * 0.26 : breath;
@@ -3777,10 +3794,10 @@ class BergRenderer {
 
     // Axe-plant micro-dolly: a short forward bump timed to the climb
     // stroke phase, then a settle. Gives the rig a living, reactive feel.
-    if (climbing && !falling) {
+    if (climbing && !falling && panoramaIntensity < 0.98) {
       const stroke = (snapshot.player.climbStrokePhase || 0);
       const phaseOffset = stroke * Math.PI;
-      const kick = Math.max(0, Math.sin(this.elapsed * 4.8 + phaseOffset));
+      const kick = Math.max(0, Math.sin(this.elapsed * 4.8 + phaseOffset)) * (1 - panoramaIntensity);
       this.camera.position.z -= kick * kick * 0.08;
       this.camera.position.y += kick * kick * 0.04;
     }
@@ -3793,13 +3810,14 @@ class BergRenderer {
 
     // Roll responds to tether tension (up-vector pulling the climber
     // tight) plus lateral swing. A touch of idle breath keeps it alive
-    // even when the climber is still.
-    const rollBreath = Math.sin(this.elapsed * 0.7 + 1.2) * (0.003 + progressRatio * 0.004);
-    const tensionRoll = climbing ? Math.sin(this.elapsed * 2.1) * 0.012 : 0;
+    // even when the climber is still. Panorama calms the roll too.
+    const rollDamp = 1 - panoramaIntensity * 0.92;
+    const rollBreath = Math.sin(this.elapsed * 0.7 + 1.2) * (0.003 + progressRatio * 0.004) * rollDamp;
+    const tensionRoll = climbing ? Math.sin(this.elapsed * 2.1) * 0.012 * rollDamp : 0;
     this.camera.rotation.z =
       falling
         ? -lateralX * 0.01 - lateralVx * 0.0016 + Math.sin(this.elapsed * 1.2) * 0.006
-        : -lateralX * 0.022 - lateralVx * 0.0028 + rollBreath + tensionRoll;
+        : (-lateralX * 0.022 - lateralVx * 0.0028) * rollDamp + rollBreath + tensionRoll;
   }
 
   resize() {
