@@ -53,6 +53,17 @@ const SERENITY_SATURATION = 5;
 const SERENITY_RISE_RATE = 1.15;
 const SERENITY_FALL_RATE = 6.4;
 
+// Numb fingers. Time without a correct answer accumulates "cold seconds".
+// Two thresholds gate a 200ms and 400ms lag on sidesteps — the lane move
+// still executes, just with a felt delay. Each correct answer refunds
+// NUMB_CORRECT_RELIEF_SEC of cold time, so three rights in a row fully
+// thaw even from the deepest numb.
+const NUMB_LEVEL_1_SEC = 15;
+const NUMB_LEVEL_2_SEC = 30;
+const NUMB_DELAYS_MS = [0, 200, 400];
+const NUMB_CORRECT_RELIEF_SEC = 20;
+const NUMB_COLD_MAX_SEC = NUMB_LEVEL_2_SEC + 20;
+
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
@@ -444,6 +455,13 @@ class Game {
     this.serenity = 0;
     this.serenityTarget = 0;
 
+    // Numb-fingers state. `coldSeconds` grows at 1×dt; correct answers
+    // refund time. `numbLevel` is derived from thresholds — only the level
+    // transition triggers a narrative message so the player gets a signal
+    // when the lag kicks in, not on every sidestep.
+    this.coldSeconds = 0;
+    this.numbLevel = 0;
+
     this.currentQuestion = null;
     this.questionLoading = false;
     this.pendingDirection = null;
@@ -616,6 +634,11 @@ class Game {
     // Exponential blend keeps both directions frame-rate independent.
     const serenityRate = this.serenityTarget > this.serenity ? SERENITY_RISE_RATE : SERENITY_FALL_RATE;
     this.serenity += (this.serenityTarget - this.serenity) * (1 - Math.exp(-serenityRate * dt));
+
+    // Cold clock. Numbness level transitions produce one-shot narrative
+    // messages so the player learns why their sidestep suddenly lags.
+    this.coldSeconds = clamp(this.coldSeconds + dt, 0, NUMB_COLD_MAX_SEC);
+    this._updateNumbLevel();
 
     // Kick off a deferred panorama once the climber is free of question/direction
     // UI. The phase-change check itself runs inside _updateEnvironment.
@@ -976,6 +999,8 @@ class Game {
       this.stats.correct += 1;
       this.correctStreak += 1;
       this.serenityTarget = clamp(this.correctStreak / SERENITY_SATURATION, 0, 1);
+      this.coldSeconds = Math.max(0, this.coldSeconds - NUMB_CORRECT_RELIEF_SEC);
+      this._updateNumbLevel();
       if (this.questionManager) {
         this.questionManager.onCorrectAnswer(resolvedSlotId);
       }
@@ -1073,12 +1098,21 @@ class Game {
         this._renderTopicButtons();
         break;
 
-      case 'sidestep':
+      case 'sidestep': {
         this.currentQuestion = null;
         this._closeQuestionPanel();
-        this._performSidestep(direction);
+        const numbDelay = NUMB_DELAYS_MS[this.numbLevel] || 0;
+        if (numbDelay > 0) {
+          // Lane still changes on the answered direction — just with a felt
+          // lag. Hazards keep closing in during the delay, which is the
+          // whole point of the numb-fingers mechanic.
+          this._schedule(() => this._performSidestep(direction), numbDelay);
+        } else {
+          this._performSidestep(direction);
+        }
         this._renderTopicButtons();
         break;
+      }
 
       case 'powerSwing':
         this.currentQuestion = null;
@@ -1721,6 +1755,33 @@ class Game {
       this._endPanorama(now);
     }
     this.panorama.pending = false;
+  }
+
+  _coldLevelFor(seconds) {
+    if (seconds >= NUMB_LEVEL_2_SEC) {
+      return 2;
+    }
+    if (seconds >= NUMB_LEVEL_1_SEC) {
+      return 1;
+    }
+    return 0;
+  }
+
+  _updateNumbLevel() {
+    const nextLevel = this._coldLevelFor(this.coldSeconds);
+    if (nextLevel === this.numbLevel) {
+      return;
+    }
+    const previous = this.numbLevel;
+    this.numbLevel = nextLevel;
+    if (nextLevel > previous) {
+      const msg = nextLevel === 1
+        ? 'Пальцы начинают неметь. Ответ — и руки отогреются.'
+        : 'Пальцы почти не гнутся. Рывок запаздывает.';
+      this._showMessage(msg, 1800);
+    } else if (nextLevel === 0) {
+      this._showMessage('Руки снова гибкие.', 1400);
+    }
   }
 
   _dangerLevel() {
