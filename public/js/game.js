@@ -17,6 +17,7 @@ const CLIMB_SPEED_DOWN = 11;
 const SUMMIT_ROCK_STOP_DISTANCE = 10;
 const ROCK_SPAWN_MIN_AHEAD = 62;
 const ROCK_SPAWN_MAX_AHEAD = 82;
+const ROCK_HIT_GRACE_MS = 1400;
 const ROCK_POST_AVALANCHE_LOCK_MS = 5200;
 const AVALANCHE_POST_ROCK_LOCK_MS = 2600;
 const AVALANCHE_ROCK_CLEARANCE = 28;
@@ -418,6 +419,7 @@ class Game {
     this.hazardCounter = 0;
     this.cameraShake = 0;
     this.couloirFissure = null;
+    this.rockImpactGraceUntil = 0;
     this.rockSpawnBlockedUntil = 0;
     this.avalancheSpawnBlockedUntil = 0;
 
@@ -554,6 +556,7 @@ class Game {
       this.startedAt += pausedDelta;
       this.nextRockSpawnAt += pausedDelta;
       this.nextAvalancheSpawnAt += pausedDelta;
+      this.rockImpactGraceUntil += pausedDelta;
       if (this.player.burst) {
         this.player.burst.until += pausedDelta;
       }
@@ -801,7 +804,11 @@ class Game {
       return;
     }
 
+    let rockHitThisFrame = false;
     this.hazards.rocks.forEach((rock) => {
+      if (rock.processed || rockHitThisFrame) {
+        return;
+      }
       rock.y -= rock.speed * dt;
       rock.warning = now < rock.armedUntil;
       const closeCallY = 1.5 + rock.size * 0.95;
@@ -814,7 +821,10 @@ class Game {
         this.player.lens = clamp(this.player.lens + 0.01, 0, 1);
       }
 
-      if (Math.abs(rock.y - this.player.progress) < hitY && Math.abs(this.player.x - rock.x) < hitX) {
+      if (now >= this.rockImpactGraceUntil && Math.abs(rock.y - this.player.progress) < hitY && Math.abs(this.player.x - rock.x) < hitX) {
+        rock.processed = true;
+        rockHitThisFrame = true;
+        this.rockImpactGraceUntil = now + ROCK_HIT_GRACE_MS;
         this._handleRockHit();
       }
     });
@@ -865,7 +875,7 @@ class Game {
       }
     });
 
-    this.hazards.rocks = this.hazards.rocks.filter((rock) => rock.y > this.player.progress - 18);
+    this.hazards.rocks = this.hazards.rocks.filter((rock) => !rock.processed && rock.y > this.player.progress - 18);
     this.hazards.avalanches = this.hazards.avalanches.filter((avalanche) => avalanche.y > this.player.progress - 18);
   }
 
@@ -899,7 +909,8 @@ class Game {
         size: randomRange(0.58, 0.86),
         armedUntil: now + 720,
         warning: true,
-        closeCallDone: false
+        closeCallDone: false,
+        processed: false
       });
     }
 
@@ -1711,6 +1722,7 @@ class Game {
     this.nextAvalancheSpawnAt += pausedDelta;
     this.rockSpawnBlockedUntil += pausedDelta;
     this.avalancheSpawnBlockedUntil += pausedDelta;
+    this.rockImpactGraceUntil += pausedDelta;
     if (this.player.burst) {
       this.player.burst.until += pausedDelta;
     }
