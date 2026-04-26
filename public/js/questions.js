@@ -1513,10 +1513,9 @@ function makeFrenchDefaultQuestion(grammarTopic, lexicalTopic) {
   };
 }
 
-const AI_QUESTION_BATCH_SIZE = 10;
-const AI_CLICK_WAIT_MS = 3500;
+const AI_QUESTION_BATCH_SIZE = 4;
 const AI_FETCH_TIMEOUT_MS = 12000;
-const AI_FETCH_RETRY_LIMIT = 4;
+const AI_FETCH_RETRY_LIMIT = 1;
 const AI_FETCH_RETRY_BASE_MS = 1500;
 
 function isValidRemoteQuestion(question) {
@@ -1547,6 +1546,17 @@ function wait(ms) {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
+}
+
+async function readQuestionError(response) {
+  const fallback = `HTTP ${response.status}`;
+  try {
+    const data = await response.clone().json();
+    return String(data.detail || data.error || fallback).trim();
+  } catch (error) {
+    const text = await response.text().catch(() => '');
+    return String(text || fallback).trim();
+  }
 }
 
 class QuestionManager {
@@ -1732,6 +1742,9 @@ class QuestionManager {
       } catch (error) {
         lastError = error;
         console.warn(`Попытка ${attempt}/${AI_FETCH_RETRY_LIMIT} загрузки слота ${slotId} провалилась:`, error);
+        if (error && error.retryable === false) {
+          break;
+        }
       }
 
       if (attempt < AI_FETCH_RETRY_LIMIT) {
@@ -1769,7 +1782,11 @@ class QuestionManager {
     }
 
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
+      const detail = await readQuestionError(response);
+      const error = new Error(`HTTP ${response.status}${detail ? `: ${detail}` : ''}`);
+      error.status = response.status;
+      error.retryable = response.status >= 500 && !/api_key|not configured/i.test(detail);
+      throw error;
     }
 
     const data = await response.json();

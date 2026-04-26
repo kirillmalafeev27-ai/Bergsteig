@@ -374,18 +374,6 @@ class Game {
     this.questionManager.setLexicalTopic(settings.lexicalTopic);
     this.questionManager.configureSlots(settings.slotConfigs);
 
-    this._showPrepOverlay('Готовим упражнения по выбранным темам...');
-    try {
-      await this.questionManager.prefetchAll((progress) => {
-        const slotLabel = this._slotLabel(progress.slotId);
-        const message = progress.status === 'loading'
-          ? `Готовим тему ${progress.done + 1}/${progress.total}: ${slotLabel}...`
-          : `Готово ${progress.done}/${progress.total}.`;
-        this._updatePrepOverlay(message);
-      });
-    } catch (error) {
-      console.warn('Question prefetch failed:', error);
-    }
     this._hidePrepOverlay();
 
     this.state = 'running';
@@ -1010,7 +998,7 @@ class Game {
     if (poolEmpty) {
       this._beginPoolRefillFreeze(slotId);
     } else {
-      this._showMessage('Загружаем вопрос...', 1100);
+      this._showMessage('Открываем вопрос...', 900);
     }
 
     try {
@@ -1047,7 +1035,7 @@ class Game {
       return;
     }
     this.poolRefillFreezeActive = true;
-    this._showPrepOverlay(`Пул темы «${this._slotLabel(slotId)}» исчерпан. Готовим новые упражнения...`);
+    this._showPrepOverlay(`Запрашиваем вопрос по теме «${this._slotLabel(slotId)}»...`);
     if (this.state === 'running') {
       this.togglePause(true);
       if (this.ui.pauseOverlay) {
