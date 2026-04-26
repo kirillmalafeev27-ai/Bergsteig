@@ -1168,25 +1168,25 @@ float bergFbm(vec3 p) {
         const mountain = gltf.scene;
         mountain.name = 'SnowyMountainAsset';
 
+        // Replace the GLB's baked Sketchfab material with a uniform white
+        // snow material so dark props/rocks read clearly against it. The
+        // procedural noise injector below adds shaded micro-relief, so the
+        // surface still has visible texture without any baked map.
+        const snowMaterial = new THREE.MeshStandardMaterial({
+          color: 0xffffff,
+          roughness: 0.94,
+          metalness: 0.02,
+          side: THREE.DoubleSide
+        });
         const noiseInjector = this._mountainProceduralNoiseInjector();
+        noiseInjector(snowMaterial);
         mountain.traverse((child) => {
           if (!child.isMesh) {
             return;
           }
           child.castShadow = true;
           child.receiveShadow = true;
-          const materials = Array.isArray(child.material) ? child.material : [child.material];
-          materials.forEach((material) => {
-            if (!material) {
-              return;
-            }
-            material.side = THREE.DoubleSide;
-            material.roughness = Math.max(material.roughness || 0.78, 0.86);
-            if (material.map) {
-              material.map.encoding = THREE.sRGBEncoding;
-            }
-            noiseInjector(material);
-          });
+          child.material = snowMaterial;
         });
 
         // Sketchfab/FBX-derived GLBs ship with nested matrices that leave the
@@ -1782,38 +1782,69 @@ float bergFbm(vec3 p) {
       });
     }
 
-    // Route-adjacent outcrops: small rocks tucked between lanes for parallax.
-    const innerCount = 18;
-    for (let index = 0; index < innerCount; index += 1) {
-      const side = index % 2 === 0 ? -1 : 1;
-      const baseX = side * (LANE_X * 0.5 + (Math.random() - 0.5) * 0.6);
-      const worldY = 6 + Math.random() * 228;
-      const radius = 0.38 + Math.random() * 0.46;
-      placeBoulder({
-        baseX,
-        worldY,
-        radius,
-        matIndex: index + 2,
-        wide: 1,
-        tall: 0.42 + Math.random() * 0.22,
-        depth: 0.55 + Math.random() * 0.28
-      });
-    }
+    // Roadside rock spires: jagged outcrops sitting just outside the climb
+    // route so the lane stays clear but the periphery reads as broken cliff
+    // rather than empty snow. ConeGeometry vertices get angular displacement
+    // to break the smooth silhouette into facets that look like fractured
+    // stone instead of bowling balls.
+    const placeRockSpire = ({ baseX, worldY, height, baseRadius, tilt, seed }) => {
+      const rand = (i) => this._seededUnit(seed + i * 13.7);
+      const spireGeom = new THREE.ConeGeometry(baseRadius, height, 9, 5, false);
+      const sp = spireGeom.attributes.position;
+      for (let i = 0; i < sp.count; i += 1) {
+        const px = sp.getX(i);
+        const py = sp.getY(i);
+        const pz = sp.getZ(i);
+        // 0 at base, 1 at tip — heavier displacement near base, finer toward tip
+        const heightFrac = clamp01((py + height * 0.5) / Math.max(height, 1e-4));
+        const ang = Math.atan2(pz, px);
+        const radial = Math.hypot(px, pz);
+        const jitter = (1.0 - heightFrac * 0.65) * baseRadius * 0.6;
+        const radialNoise =
+          (rand(i) - 0.5) * jitter +
+          Math.sin(ang * 5.0 + heightFrac * 3.4 + seed) * jitter * 0.45;
+        const newR = Math.max(0.04, radial + radialNoise);
+        sp.setX(i, Math.cos(ang) * newR);
+        sp.setZ(i, Math.sin(ang) * newR);
+        sp.setY(i, py + (rand(i + 999) - 0.5) * jitter * 0.35);
+      }
+      spireGeom.computeVertexNormals();
 
-    const dividerOutcropCount = 18;
-    for (let index = 0; index < dividerOutcropCount; index += 1) {
+      const anchor = this._faceAnchor(baseX, worldY, 0.35);
+      const tint = 0x2c3540 + Math.floor(rand(3) * 0x121212);
+      const spireMat = this.materials.cliffShadow.clone();
+      spireMat.color.setHex(tint);
+      spireMat.roughness = 1;
+      const spire = new THREE.Mesh(spireGeom, spireMat);
+      spire.position.set(anchor.x, anchor.y + height * 0.5 - 0.4, anchor.z + 0.25);
+      spire.rotation.set(
+        (rand(11) - 0.5) * 0.18,
+        rand(13) * Math.PI * 2,
+        tilt + (rand(17) - 0.5) * 0.14
+      );
+      spire.castShadow = true;
+      spire.receiveShadow = true;
+      this.environmentGroup.add(spire);
+    };
+
+    const spireCount = 36;
+    for (let index = 0; index < spireCount; index += 1) {
       const side = index % 2 === 0 ? -1 : 1;
-      const baseX = side * (LANE_X * (0.58 + Math.random() * 0.24) + (Math.random() - 0.5) * 0.35);
-      const worldY = 10 + Math.random() * 224;
-      const radius = 0.5 + Math.random() * 0.72;
-      placeBoulder({
+      // Sit just outside the climb corridor: never within ROUTE_HALF, never
+      // farther than ~3.5 units past it (otherwise they merge with the flank
+      // boulders above).
+      const baseX = side * (ROUTE_HALF + 0.45 + Math.random() * 3.2);
+      const worldY = 4 + Math.random() * 232;
+      const height = 3.4 + Math.random() * 7.8;
+      const baseRadius = 0.65 + Math.random() * 0.95;
+      const tilt = -side * (0.06 + Math.random() * 0.16);
+      placeRockSpire({
         baseX,
         worldY,
-        radius,
-        matIndex: index + flankCount,
-        wide: 1 + Math.random() * 0.18,
-        tall: 0.44 + Math.random() * 0.22,
-        depth: 0.72 + Math.random() * 0.24
+        height,
+        baseRadius,
+        tilt,
+        seed: 1000 + index * 17
       });
     }
 
