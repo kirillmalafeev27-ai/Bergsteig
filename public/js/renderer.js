@@ -1116,23 +1116,27 @@ class BergRenderer {
         mountain.updateMatrixWorld(true);
         this._installMountainAssetSurfaceSampler(mountain);
 
-        // The imported GLB becomes the visible climb face. The procedural
-        // meshes stay alive as fallback collision data until the sampler is ready.
-        if (this.assetSurfaceReady) {
-          if (this.mountain) {
-            this.mountain.visible = false;
-          }
-          if (this.glacierSheen) {
-            this.glacierSheen.visible = false;
-          }
-          if (this.moltenFace) {
-            this.moltenFace.visible = false;
-          }
+        // The imported GLB is the visible climb face — hide the procedural
+        // meshes unconditionally so they don't occlude it. The procedural
+        // surface profile is a pure function and stays available as a
+        // fallback for placement math even when these meshes are hidden.
+        if (this.mountain) {
+          this.mountain.visible = false;
+        }
+        if (this.glacierSheen) {
+          this.glacierSheen.visible = false;
+        }
+        if (this.moltenFace) {
+          this.moltenFace.visible = false;
+        }
+
+        if (!this.assetSurfaceReady) {
+          console.warn('Mountain asset loaded, but surface sampler could not extract triangles; using procedural profile for placement.');
         }
       },
       undefined,
       (error) => {
-        console.warn('Mountain asset failed to load:', error);
+        console.warn('Mountain asset failed to load; keeping procedural mountain visible as fallback:', error);
       }
     );
   }
