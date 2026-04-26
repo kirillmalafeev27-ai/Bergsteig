@@ -1088,8 +1088,6 @@ class BergRenderer {
       (gltf) => {
         const mountain = gltf.scene;
         mountain.name = 'SnowyMountainAsset';
-        mountain.position.set(0, meta.BASE_Y, -7.8);
-        mountain.scale.set(meta.MOUNT_HALF_W, meta.MOUNT_HALF_H, 16.5);
 
         mountain.traverse((child) => {
           if (!child.isMesh) {
@@ -1109,6 +1107,36 @@ class BergRenderer {
             }
           });
         });
+
+        // Sketchfab/FBX-derived GLBs ship with nested matrices that leave the
+        // post-rotation bounds non-uniform (e.g. Y collapsed to [0, 0.6]).
+        // Measure the actual AABB and stretch the asset to fill the climb box
+        // [-MOUNT_HALF_W, MOUNT_HALF_W] × [BASE_Y - MOUNT_HALF_H, BASE_Y + MOUNT_HALF_H]
+        // so the GLB occupies the same volume the procedural mountain used.
+        mountain.position.set(0, 0, 0);
+        mountain.rotation.set(0, 0, 0);
+        mountain.scale.set(1, 1, 1);
+        mountain.updateMatrixWorld(true);
+
+        const bbox = new THREE.Box3().setFromObject(mountain);
+        const size = new THREE.Vector3();
+        const center = new THREE.Vector3();
+        bbox.getSize(size);
+        bbox.getCenter(center);
+
+        const safe = (v) => (Number.isFinite(v) && v > 1e-5 ? v : 1);
+        const scaleX = meta.MOUNT_WIDTH / safe(size.x);
+        const scaleY = meta.MOUNT_HEIGHT / safe(size.y);
+        // Keep depth roughly proportional to the procedural cliff (≈16.5 across
+        // a 264-wide footprint = 0.0625 of width) so the imported model isn't
+        // squashed paper-thin or ballooned past the camera.
+        const depthScale = Math.min(scaleX, scaleY) * 0.125;
+        mountain.scale.set(scaleX, scaleY, depthScale);
+        mountain.position.set(
+          -center.x * scaleX,
+          meta.BASE_Y - center.y * scaleY,
+          -7.8 - center.z * depthScale
+        );
 
         this.environmentGroup.add(mountain);
         this.assetMountain = mountain;
