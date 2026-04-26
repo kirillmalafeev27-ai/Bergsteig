@@ -8,12 +8,13 @@ const DATA_DIR = path.join(__dirname, 'data');
 const GHOST_ROUTE_FILE = path.join(DATA_DIR, 'ghost-routes.json');
 const AITUNNEL_BASE_URL = process.env.AITUNNEL_BASE_URL || 'https://api.aitunnel.ru/v1';
 const AITUNNEL_MODEL = process.env.AITUNNEL_MODEL || 'gpt-5.4';
+const AITUNNEL_QUESTION_MODEL = process.env.AITUNNEL_QUESTION_MODEL || 'gpt-5.4';
+const AITUNNEL_REQUEST_TIMEOUT_MS = Math.max(10000, Number(process.env.AITUNNEL_TIMEOUT_MS) || 45000);
 const MAX_JSON_BODY_BYTES = 1024 * 1024;
-const DEFAULT_QUESTION_COUNT = 4;
-const MAX_QUESTION_COUNT = 12;
-const QUESTION_COMPLETION_BASE_TOKENS = 700;
-const QUESTION_COMPLETION_TOKENS_PER_ITEM = 260;
-const QUESTION_COMPLETION_MAX_TOKENS = 3200;
+const DEFAULT_QUESTION_COUNT = 5;
+const MAX_QUESTION_COUNT = 50;
+const QUESTION_MAX_COMPLETION_TOKENS = 8192;
+const QUESTION_GENERATION_ATTEMPTS = 1;
 const MAX_GHOST_ROUTES = 24;
 const EXTERNAL_GHOST_ROUTE_LIMIT = 8;
 
@@ -297,8 +298,8 @@ QUALITAETSKONTROLLE - pruefe JEDE Uebung BEVOR du sie ausgibst:
 4. Passt die Uebung zum Thema "${grammarTopic}" und zum Niveau ${level}?
 5. Sind die Saetze natuerlich und vollstaendig?
 
-Antworte NUR mit einem validen JSON-Array, KEIN Markdown, KEINE Erklaerungen:
-[{"text":"Anweisung auf Russisch","display":"Text","options":["A","B","C","D"],"correct":0}]`;
+Antworte NUR mit einem validen JSON-Objekt nach dem vorgegebenen Schema, KEIN Markdown, KEINE Erklaerungen:
+{"questions":[{"text":"Anweisung auf Russisch","display":"Text","options":["A","B","C","D"],"correct":0}]}`;
 }
 
 async function readJsonBody(req) {
@@ -322,15 +323,7 @@ async function readJsonBody(req) {
   });
 }
 
-function completionTokensForQuestionCount(count) {
-  const requested = Number(count) || 1;
-  return Math.min(
-    QUESTION_COMPLETION_MAX_TOKENS,
-    QUESTION_COMPLETION_BASE_TOKENS + Math.max(1, requested) * QUESTION_COMPLETION_TOKENS_PER_ITEM
-  );
-}
-
-async function requestAiText(messages, maxCompletionTokens = 512) {
+async function requestAiText(messages, maxCompletionTokens = 512, model = AITUNNEL_MODEL) {
   const response = await fetch(`${AITUNNEL_BASE_URL.replace(/\/$/, '')}/chat/completions`, {
     method: 'POST',
     headers: {
@@ -338,7 +331,7 @@ async function requestAiText(messages, maxCompletionTokens = 512) {
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      model: AITUNNEL_MODEL,
+      model,
       max_completion_tokens: maxCompletionTokens,
       messages
     })
@@ -361,16 +354,181 @@ async function requestAiText(messages, maxCompletionTokens = 512) {
   return text;
 }
 
-async function requestAiQuestions(prompt, questionsCount) {
-  const text = await requestAiText(
-    [{ role: 'user', content: prompt }],
-    completionTokensForQuestionCount(questionsCount)
-  );
+function buildQuestionSystemPrompt(language = 'de') {
+  const targetLanguage = language === 'fr' ? 'Franzoesisch' : 'Deutsch';
+  return `Du bist ein sehr genauer Autor fuer ${targetLanguage}-Uebungen. Befolge alle Regeln strikt, schreibe natuerliche Saetze und liefere nur Inhalte, die exakt zur geforderten JSON-Struktur passen.`;
+}
 
-  const jsonMatch = text.match(/\[[\s\S]*\]/);
-  const jsonText = jsonMatch ? jsonMatch[0] : text;
+function buildQuestionSchema({ isWortstellung, questionsCount, language }) {
+  const targetLanguage = language === 'fr' ? 'franzoesische' : 'deutsche';
+  const displayDescription = isWortstellung
+    ? `${targetLanguage} Woerter oder Satzteile, getrennt durch " / ", in zufaelliger Reihenfolge. Darf nicht der korrekten Reihenfolge entsprechen.`
+    : `Ein ${targetLanguage}r Satz oder ein Satzfragment mit genau einer Luecke ___.`;
+
+  return {
+    name: isWortstellung ? 'word_order_questions' : 'grammar_questions',
+    strict: true,
+    schema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['questions'],
+      properties: {
+        questions: {
+          type: 'array',
+          minItems: questionsCount,
+          maxItems: questionsCount,
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['text', 'display', 'options', 'correct'],
+            properties: {
+              text: {
+                type: 'string',
+                description: 'Kurze Anweisung auf Russisch.'
+              },
+              display: {
+                type: 'string',
+                description: displayDescription
+              },
+              options: {
+                type: 'array',
+                minItems: 4,
+                maxItems: 4,
+                items: {
+                  type: 'string'
+                },
+                description: `Vier ${targetLanguage} Antwortoptionen. Genau eine ist korrekt.`
+              },
+              correct: {
+                type: 'integer',
+                minimum: 0,
+                maximum: 3,
+                description: 'Index der einzig richtigen Antwort.'
+              }
+            }
+          }
+        }
+      }
+    }
+  };
+}
+
+function extractMessageText(content) {
+  if (typeof content === 'string') {
+    return content.trim();
+  }
+
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => {
+        if (typeof part === 'string') {
+          return part;
+        }
+        if (part && typeof part.text === 'string') {
+          return part.text;
+        }
+        return '';
+      })
+      .join('')
+      .trim();
+  }
+
+  if (content && typeof content === 'object') {
+    return JSON.stringify(content);
+  }
+
+  return '';
+}
+
+function parseGeneratedQuestions(payload) {
+  const message = payload && payload.choices && payload.choices[0] && payload.choices[0].message;
+  if (!message) {
+    throw new Error('AITunnel returned no message content');
+  }
+
+  if (message.refusal) {
+    throw new Error(`Model refused the request: ${message.refusal}`);
+  }
+
+  const rawText = extractMessageText(message.content);
+  if (!rawText) {
+    throw new Error('AITunnel returned an empty completion');
+  }
+
+  const jsonText = rawText.replace(/^```json\s*|\s*```$/g, '').trim();
   const parsed = JSON.parse(jsonText);
-  return Array.isArray(parsed) ? parsed : [];
+  const questions = Array.isArray(parsed) ? parsed : parsed.questions;
+
+  if (!Array.isArray(questions)) {
+    throw new Error('Model response does not contain a questions array');
+  }
+
+  return questions;
+}
+
+async function requestQuestionsFromAitunnel({ prompt, isWortstellung, questionsCount, language }) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), AITUNNEL_REQUEST_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(`${AITUNNEL_BASE_URL.replace(/\/$/, '')}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${process.env.AITUNNEL_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: AITUNNEL_QUESTION_MODEL,
+        max_tokens: QUESTION_MAX_COMPLETION_TOKENS,
+        messages: [
+          { role: 'system', content: buildQuestionSystemPrompt(language) },
+          { role: 'user', content: prompt }
+        ],
+        structured_outputs: true,
+        response_format: {
+          type: 'json_schema',
+          json_schema: buildQuestionSchema({ isWortstellung, questionsCount, language })
+        }
+      })
+    });
+
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) {
+      const detail =
+        payload && payload.error && (payload.error.message || payload.error.code)
+          ? payload.error.message || payload.error.code
+          : response.statusText || 'Unknown AITunnel error';
+      const error = new Error(`AITunnel HTTP ${response.status}: ${detail}`);
+      error.status = response.status;
+      error.detail = detail;
+      throw error;
+    }
+
+    return payload;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function requestAiQuestions({ prompt, isWortstellung, questionsCount, language }) {
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= QUESTION_GENERATION_ATTEMPTS; attempt += 1) {
+    try {
+      const payload = await requestQuestionsFromAitunnel({
+        prompt,
+        isWortstellung,
+        questionsCount,
+        language
+      });
+      return parseGeneratedQuestions(payload);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError || new Error('Не удалось получить вопросы от AITunnel');
 }
 
 async function handleGenerateQuestions(req, res) {
@@ -433,7 +591,12 @@ async function handleGenerateQuestions(req, res) {
   });
 
   try {
-    const parsed = await requestAiQuestions(prompt, questionsCount);
+    const parsed = await requestAiQuestions({
+      prompt,
+      isWortstellung: wordOrderMode,
+      questionsCount,
+      language
+    });
     const valid = parsed
       .map(sanitizeQuestion)
       .filter(isValidQuestion);

@@ -12,3 +12,7 @@ services:
         value: production
       - key: AITUNNEL_API_KEY
         sync: false
+      - key: AITUNNEL_MODEL
+        value: gpt-5.4
+      - key: AITUNNEL_QUESTION_MODEL
+        value: gpt-5.4
