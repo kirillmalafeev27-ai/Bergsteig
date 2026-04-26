@@ -735,7 +735,15 @@ float bergFbm(vec3 p) {
       const bumpInjection = `
 #include <normal_fragment_maps>
 {
-  float h = bergFbm(vBergWorldPos * 0.55) + 0.45 * bergFbm(vBergWorldPos * 2.7);
+  // Approx world-space size of one screen pixel at this fragment. Used as
+  // an LOD knob: any fbm octave whose wavelength falls below the pixel
+  // gets faded out, so distant geometry doesn't sample undersampled noise
+  // and produce per-pixel white-noise speckling.
+  float bergPixel = max(length(dFdx(vBergWorldPos)), length(dFdy(vBergWorldPos)));
+  float bergCoarseFade = clamp(1.0 - bergPixel * 0.45, 0.0, 1.0);
+  float bergFineFade   = clamp(1.0 - bergPixel * 2.4, 0.0, 1.0);
+  float h = bergFbm(vBergWorldPos * 0.55) * bergCoarseFade
+          + 0.45 * bergFbm(vBergWorldPos * 2.7) * bergFineFade;
   float hx = dFdx(h);
   float hy = dFdy(h);
   vec3 dPdx = dFdx(vBergWorldPos);
@@ -743,7 +751,7 @@ float bergFbm(vec3 p) {
   vec3 R1 = cross(dPdy, normal);
   vec3 R2 = cross(normal, dPdx);
   float det = dot(dPdx, R1);
-  float bumpScale = 1.4;
+  float bumpScale = 1.4 * bergCoarseFade;
   vec3 grad = sign(det) * bumpScale * (hx * R1 + hy * R2);
   normal = normalize(abs(det) * normal - grad);
 }`;
@@ -776,9 +784,14 @@ float bergFbm(vec3 p) {
 
   // Sparkle: high-freq spikes in emissive, gated to bright snow patches and
   // suppressed inside dark rock patches so it doesn't pop on cliff bands.
-  float bergSparkle = bergValueNoise(vBergWorldPos * 13.0);
-  float bergSparkleMask = smoothstep(0.86, 0.95, bergSparkle) * clamp(bergSnow, 0.0, 1.0) * (1.0 - bergT2 * 0.7);
-  totalEmissiveRadiance += vec3(0.85, 0.92, 1.05) * bergSparkleMask * 0.55;
+  // Drop the frequency from 13 to 5 (wavelength 0.2 wu) and fade it by the
+  // same screen-space LOD knob so the brightest pixel-scale highlights stop
+  // aliasing into white noise on distant slopes and the silhouette ridge.
+  float bergPixelTint = max(length(dFdx(vBergWorldPos)), length(dFdy(vBergWorldPos)));
+  float bergSparkleFade = smoothstep(0.18, 0.045, bergPixelTint);
+  float bergSparkle = bergValueNoise(vBergWorldPos * 5.0);
+  float bergSparkleMask = smoothstep(0.78, 0.93, bergSparkle) * clamp(bergSnow, 0.0, 1.0) * (1.0 - bergT2 * 0.7);
+  totalEmissiveRadiance += vec3(0.85, 0.92, 1.05) * bergSparkleMask * bergSparkleFade * 0.45;
 }`;
 
       shader.fragmentShader = shader.fragmentShader
