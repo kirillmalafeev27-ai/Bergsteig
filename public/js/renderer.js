@@ -35,11 +35,7 @@ class BergRenderer {
       powerPreference: 'high-performance'
     });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
-    this.maxPixelRatio = Math.min(window.devicePixelRatio || 1, 2);
-    this.currentPixelRatio = this.maxPixelRatio;
-    this.frameCostEma = 16.7;
-    this.pixelRatioCooldown = 0;
-    this.renderer.setPixelRatio(this.currentPixelRatio);
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     this.renderer.outputEncoding = THREE.sRGBEncoding;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     // Lower exposure + the denser fog give the frame the cold, silvery
@@ -62,13 +58,6 @@ class BergRenderer {
     this.tempVecF = new THREE.Vector3();
     this.tempVecG = new THREE.Vector3();
     this.tempMatA = new THREE.Matrix4();
-    this.mountainSurfaceUniforms = {
-      time: { value: 0 },
-      phase: { value: 0 },
-      danger: { value: 0 },
-      serenity: { value: 0 },
-      newYear: { value: this.isNewYearPreset ? 1 : 0 }
-    };
 
     this.rockMeshes = new Map();
     this.fissureMeshes = new Map();
@@ -222,6 +211,29 @@ class BergRenderer {
       }
     });
 
+    const lavaMap = this._makeTexture(512, (ctx, size) => {
+      const gradient = ctx.createLinearGradient(0, 0, 0, size);
+      gradient.addColorStop(0, '#ffe5a8');
+      gradient.addColorStop(0.18, '#ffb15f');
+      gradient.addColorStop(0.42, '#ff6c3c');
+      gradient.addColorStop(0.72, '#5b221d');
+      gradient.addColorStop(1, '#1c0908');
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, size, size);
+
+      for (let index = 0; index < 1200; index += 1) {
+        const x = Math.random() * size;
+        const y = Math.random() * size;
+        const radius = 4 + Math.random() * 18;
+        const glow = ctx.createRadialGradient(x, y, 0, x, y, radius);
+        glow.addColorStop(0, `rgba(255,240,180,${0.15 + Math.random() * 0.25})`);
+        glow.addColorStop(0.35, `rgba(255,120,60,${0.08 + Math.random() * 0.12})`);
+        glow.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = glow;
+        ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2);
+      }
+    });
+
     const fabricMap = this._makeTexture(256, (ctx, size) => {
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(0, 0, size, size);
@@ -346,6 +358,15 @@ class BergRenderer {
         opacity: 0.24,
         roughness: 0.25,
         metalness: 0.08
+      }),
+      moltenFace: new THREE.MeshStandardMaterial({
+        map: lavaMap,
+        color: 0xff8a52,
+        emissive: 0xff632d,
+        emissiveIntensity: 0.9,
+        transparent: true,
+        opacity: 0,
+        roughness: 0.82
       }),
       crack: new THREE.MeshStandardMaterial({
         color: 0xff8d57,
@@ -648,194 +669,107 @@ class BergRenderer {
   }
 
   _applyMountainSurfaceShader(material) {
-    const uniforms = this.mountainSurfaceUniforms;
-    material.extensions = material.extensions || {};
-    material.extensions.derivatives = true;
+    const cacheKey = 'bergstieg-mountain-surface-v3-stable';
+    const previous = material.onBeforeCompile;
     material.onBeforeCompile = (shader) => {
-      shader.uniforms.uMountainTime = uniforms.time;
-      shader.uniforms.uMountainPhase = uniforms.phase;
-      shader.uniforms.uMountainDanger = uniforms.danger;
-      shader.uniforms.uMountainSerenity = uniforms.serenity;
-      shader.uniforms.uMountainNewYear = uniforms.newYear;
+      if (typeof previous === 'function') {
+        previous(shader);
+      }
 
       shader.vertexShader = shader.vertexShader
         .replace(
-          'varying vec3 vViewPosition;',
-          `varying vec3 vViewPosition;
-varying vec3 vMountainWorldPosition;
-varying vec3 vMountainWorldNormal;`
+          '#include <common>',
+          '#include <common>\nvarying vec3 vBergWorldPos;'
         )
         .replace(
-          '#include <worldpos_vertex>',
-          `#include <worldpos_vertex>
-vec4 mountainWorldPosition = modelMatrix * vec4(transformed, 1.0);
-vMountainWorldPosition = mountainWorldPosition.xyz;
-vMountainWorldNormal = normalize(mat3(modelMatrix) * objectNormal);`
+          '#include <fog_vertex>',
+          '#include <fog_vertex>\nvBergWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;'
         );
 
-      shader.fragmentShader = shader.fragmentShader
-        .replace(
-          '#include <common>',
-          `#include <common>
-uniform float uMountainTime;
-uniform float uMountainPhase;
-uniform float uMountainDanger;
-uniform float uMountainSerenity;
-uniform float uMountainNewYear;
-varying vec3 vMountainWorldPosition;
-varying vec3 vMountainWorldNormal;
-
-float mountainHash(vec3 p) {
-  return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453123);
+      const noisePars = `
+varying vec3 vBergWorldPos;
+float bergHash(vec3 p) {
+  p = fract(p * 0.3183099 + vec3(0.71, 0.113, 0.419));
+  p *= 17.0;
+  return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
 }
-
-float mountainNoise(vec3 p) {
+float bergValueNoise(vec3 p) {
   vec3 i = floor(p);
   vec3 f = fract(p);
   f = f * f * (3.0 - 2.0 * f);
-  float n000 = mountainHash(i + vec3(0.0, 0.0, 0.0));
-  float n100 = mountainHash(i + vec3(1.0, 0.0, 0.0));
-  float n010 = mountainHash(i + vec3(0.0, 1.0, 0.0));
-  float n110 = mountainHash(i + vec3(1.0, 1.0, 0.0));
-  float n001 = mountainHash(i + vec3(0.0, 0.0, 1.0));
-  float n101 = mountainHash(i + vec3(1.0, 0.0, 1.0));
-  float n011 = mountainHash(i + vec3(0.0, 1.0, 1.0));
-  float n111 = mountainHash(i + vec3(1.0, 1.0, 1.0));
-  float nx00 = mix(n000, n100, f.x);
-  float nx10 = mix(n010, n110, f.x);
-  float nx01 = mix(n001, n101, f.x);
-  float nx11 = mix(n011, n111, f.x);
-  float nxy0 = mix(nx00, nx10, f.y);
-  float nxy1 = mix(nx01, nx11, f.y);
-  return mix(nxy0, nxy1, f.z);
+  return mix(
+    mix(mix(bergHash(i + vec3(0.0,0.0,0.0)), bergHash(i + vec3(1.0,0.0,0.0)), f.x),
+        mix(bergHash(i + vec3(0.0,1.0,0.0)), bergHash(i + vec3(1.0,1.0,0.0)), f.x), f.y),
+    mix(mix(bergHash(i + vec3(0.0,0.0,1.0)), bergHash(i + vec3(1.0,0.0,1.0)), f.x),
+        mix(bergHash(i + vec3(0.0,1.0,1.0)), bergHash(i + vec3(1.0,1.0,1.0)), f.x), f.y),
+    f.z
+  );
 }
-
-float mountainFbm(vec3 p) {
-  float value = 0.0;
-  float amp = 0.5;
-  for (int i = 0; i < 5; i++) {
-    value += mountainNoise(p) * amp;
-    p = p * 2.03 + vec3(31.7, 17.1, 9.2);
-    amp *= 0.5;
+float bergFbm(vec3 p) {
+  float v = 0.0;
+  float a = 0.5;
+  for (int i = 0; i < 4; i++) {
+    v += a * bergValueNoise(p);
+    p *= 2.13;
+    a *= 0.5;
   }
-  return value;
-}
+  return v;
+}`;
 
-float mountainFracture(vec3 p) {
-  float strata = abs(sin(p.y * 0.22 + p.x * 0.38 + mountainFbm(p * 0.045) * 4.6));
-  float crossCut = abs(sin(p.y * 0.09 - p.x * 0.76 + mountainFbm(p * 0.12) * 3.4));
-  return max(smoothstep(0.74, 0.98, strata), smoothstep(0.82, 0.985, crossCut) * 0.75);
-}
+      const bumpInjection = `
+#include <normal_fragment_maps>
+{
+  float bergPixel = max(length(dFdx(vBergWorldPos)), length(dFdy(vBergWorldPos)));
+  float bergCoarseFade = 1.0 - smoothstep(0.45, 1.85, bergPixel);
+  float bergFineFade = 1.0 - smoothstep(0.10, 0.34, bergPixel);
+  float h =
+    bergFbm(vBergWorldPos * 0.55) * bergCoarseFade +
+    0.45 * bergFbm(vBergWorldPos * 2.7) * bergFineFade;
+  float hx = dFdx(h);
+  float hy = dFdy(h);
+  vec3 dpDx = dFdx(vBergWorldPos);
+  vec3 dpDy = dFdy(vBergWorldPos);
+  vec3 R1 = cross(dpDy, normal);
+  vec3 R2 = cross(normal, dpDx);
+  float det = dot(dpDx, R1);
+  float bumpScale = 1.25 * bergCoarseFade;
+  vec3 grad = sign(det) * bumpScale * (hx * R1 + hy * R2);
+  normal = normalize(abs(det) * normal - grad);
+}`;
 
-vec3 mountainPerturbNormal(vec3 eyePos, vec3 surfNormal, float height) {
-  vec3 dpdx = dFdx(eyePos);
-  vec3 dpdy = dFdy(eyePos);
-  vec3 r1 = cross(dpdy, surfNormal);
-  vec3 r2 = cross(surfNormal, dpdx);
-  float det = dot(dpdx, r1);
-  vec3 grad = sign(det) * (dFdx(height) * r1 + dFdy(height) * r2);
-  return normalize(abs(det) * surfNormal - grad);
-}`
-        )
-        .replace(
-          '#include <color_fragment>',
-          `#include <color_fragment>
+      const tintInjection = `
+#include <emissivemap_fragment>
 {
-  vec3 mountainPos = vMountainWorldPosition;
-  vec3 mountainNormal = normalize(vMountainWorldNormal);
-  float altitude = clamp((mountainPos.y + 18.0) / 185.0, 0.0, 1.0);
-  float ledgeSnow = smoothstep(0.12, 0.58, mountainNormal.y) * smoothstep(0.08, 0.78, altitude);
-  float routeSnow = (1.0 - smoothstep(2.2, 18.5, abs(mountainPos.x))) * (0.22 + altitude * 0.2);
-  float snowMask = clamp(ledgeSnow * 0.74 + routeSnow, 0.0, 1.0);
-  float broadGrain = mountainFbm(mountainPos * vec3(0.026, 0.034, 0.018));
-  float fineGrain = mountainFbm(mountainPos * vec3(0.16, 0.11, 0.22) + vec3(11.0, 3.0, 7.0));
-  float fracture = mountainFracture(mountainPos);
-  vec3 coldRock = vec3(0.57, 0.66, 0.72);
-  vec3 warmRock = vec3(0.68, 0.61, 0.54);
-  vec3 blueShade = vec3(0.46, 0.56, 0.66);
-  vec3 snowTint = mix(vec3(0.83, 0.93, 1.0), vec3(1.0, 0.985, 0.92), uMountainPhase * 0.24);
-  diffuseColor.rgb *= mix(warmRock, coldRock, broadGrain);
-  diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * blueShade, fracture * (0.24 - snowMask * 0.08));
-  diffuseColor.rgb = mix(diffuseColor.rgb, snowTint, snowMask * (0.26 + fineGrain * 0.18));
-  float iceSheen = snowMask * smoothstep(0.56, 0.93, fineGrain) * (0.12 + (1.0 - uMountainPhase) * 0.1 + uMountainNewYear * 0.06);
-  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.74, 0.92, 1.0), iceSheen);
-  float lavaWash = smoothstep(0.62, 1.0, uMountainPhase) * fracture * (0.08 + uMountainDanger * 0.08);
-  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.95, 0.46, 0.28), lavaWash);
-}`
-        )
-        .replace(
-          '#include <normal_fragment_begin>',
-          `#include <normal_fragment_begin>
-{
-  vec3 mountainPos = vMountainWorldPosition;
-  float macroHeight = mountainFbm(mountainPos * vec3(0.18, 0.13, 0.18));
-  float chiselHeight = mountainFbm(mountainPos * vec3(0.68, 0.44, 0.72) + vec3(7.0, 19.0, 3.0));
-  float fractureHeight = mountainFracture(mountainPos) * 0.7;
-  float bumpStrength = mix(0.46, 0.32, uMountainSerenity) * (1.0 - smoothstep(0.7, 1.0, uMountainPhase) * 0.18);
-  float height = (macroHeight * 0.52 + chiselHeight * 0.24 + fractureHeight * 0.22) * bumpStrength;
-  normal = mountainPerturbNormal(-vViewPosition, normal, height);
-}`
-        )
-        .replace(
-          '#include <emissivemap_fragment>',
-          `#include <emissivemap_fragment>
-{
-  vec3 mountainPos = vMountainWorldPosition;
-  vec3 mountainNormal = normalize(vMountainWorldNormal);
-  float altitude = clamp((mountainPos.y + 18.0) / 185.0, 0.0, 1.0);
-  float ledgeSnow = smoothstep(0.18, 0.72, mountainNormal.y) * smoothstep(0.08, 0.78, altitude);
-  float fineGrain = mountainFbm(mountainPos * vec3(0.74, 0.46, 0.82) + vec3(3.0, 5.0, 13.0));
-  float sparkle = smoothstep(0.88, 0.97, fineGrain) * ledgeSnow;
-  float twinkle = 0.72 + sin(uMountainTime * 4.1 + mountainPos.x * 0.71 + mountainPos.y * 0.19) * 0.28;
-  totalEmissiveRadiance += vec3(0.26, 0.42, 0.62) * sparkle * twinkle * (1.0 - uMountainPhase * 0.55);
-  float lavaGate = smoothstep(0.62, 1.0, uMountainPhase);
-  float lavaCrack = mountainFracture(mountainPos + vec3(4.0, uMountainTime * 0.18, 0.0));
-  totalEmissiveRadiance += vec3(1.0, 0.27, 0.06) * lavaCrack * lavaGate * (0.16 + uMountainDanger * 0.28);
-}`
-        );
+  float bergMacro = bergFbm(vBergWorldPos * 0.07);
+  float bergMeso = bergFbm(vBergWorldPos * 0.6);
+  float facingUp = clamp(normal.y, 0.0, 1.0);
+  vec3 bergToneWarm = vec3(1.06, 1.00, 0.93);
+  vec3 bergToneCool = vec3(0.90, 0.96, 1.08);
+  vec3 bergToneDark = vec3(0.70, 0.76, 0.88);
+  float bergT1 = smoothstep(0.30, 0.72, bergMacro);
+  float bergT2 = smoothstep(0.55, 0.88, bergMeso);
+  vec3 bergTint = mix(bergToneWarm, bergToneCool, bergT1);
+  bergTint = mix(bergTint, bergToneDark, bergT2 * 0.65);
+  diffuseColor.rgb *= bergTint;
+
+  float bergSnow = smoothstep(0.40, 0.92, facingUp) * (0.7 + bergMacro * 0.4);
+  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.97, 0.99, 1.02), clamp(bergSnow, 0.0, 1.0) * 0.35);
+
+  float bergPixelTint = max(length(dFdx(vBergWorldPos)), length(dFdy(vBergWorldPos)));
+  float bergSparkleFade = 1.0 - smoothstep(0.045, 0.18, bergPixelTint);
+  float bergSparkle = bergValueNoise(vBergWorldPos * 4.0);
+  float bergSparkleMask = smoothstep(0.84, 0.96, bergSparkle) * clamp(bergSnow, 0.0, 1.0) * (1.0 - bergT2 * 0.7);
+  totalEmissiveRadiance += vec3(0.58, 0.66, 0.78) * bergSparkleMask * bergSparkleFade * 0.22;
+}`;
+
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', `#include <common>\n${noisePars}`)
+        .replace('#include <normal_fragment_maps>', bumpInjection)
+        .replace('#include <emissivemap_fragment>', tintInjection);
     };
-    material.customProgramCacheKey = () => 'bergstieg-mountain-surface-v1';
-  }
-
-  _updateMountainSurfaceUniforms(snapshot) {
-    if (!this.mountainSurfaceUniforms) {
-      return;
-    }
-    this.mountainSurfaceUniforms.time.value = this.elapsed;
-    if (!snapshot) {
-      return;
-    }
-    this.mountainSurfaceUniforms.phase.value = snapshot.phaseRatio || 0;
-    this.mountainSurfaceUniforms.danger.value = snapshot.dangerLevel || 0;
-    this.mountainSurfaceUniforms.serenity.value = Math.max(0, Math.min(1, snapshot.serenity || 0));
-  }
-
-  _updateRenderBudget(dt) {
-    const maxRatio = Math.min(window.devicePixelRatio || 1, 2);
-    this.maxPixelRatio = maxRatio;
-    if (maxRatio <= 1) {
-      return;
-    }
-    const frameMs = Math.max(1, Math.min(80, dt * 1000));
-    this.frameCostEma = this.frameCostEma * 0.94 + frameMs * 0.06;
-    this.pixelRatioCooldown = Math.max(0, this.pixelRatioCooldown - dt);
-    if (this.pixelRatioCooldown > 0) {
-      return;
-    }
-
-    const minRatio = Math.min(maxRatio, 1.15);
-    let nextRatio = this.currentPixelRatio;
-    if (this.frameCostEma > 23 && nextRatio > minRatio) {
-      nextRatio = Math.max(minRatio, nextRatio - 0.15);
-    } else if (this.frameCostEma < 15.6 && nextRatio < maxRatio) {
-      nextRatio = Math.min(maxRatio, nextRatio + 0.1);
-    }
-
-    if (Math.abs(nextRatio - this.currentPixelRatio) >= 0.05) {
-      this.currentPixelRatio = nextRatio;
-      this.renderer.setPixelRatio(this.currentPixelRatio);
-      this.pixelRatioCooldown = 1.1;
-    }
+    material.customProgramCacheKey = () => cacheKey;
+    material.extensions = Object.assign({}, material.extensions, { derivatives: true });
+    material.needsUpdate = true;
   }
 
   _buildLights() {
@@ -1526,6 +1460,16 @@ vec3 mountainPerturbNormal(vec3 eyePos, vec3 surfNormal, float height) {
     this.mountain.castShadow = true;
     this.environmentGroup.add(this.mountain);
 
+    this.moltenFace = new THREE.Mesh(mountainGeometry.clone(), this.materials.moltenFace);
+    this.moltenFace.position.copy(this.mountain.position);
+    this.moltenFace.position.z += 0.08;
+    this.environmentGroup.add(this.moltenFace);
+
+    this.glacierSheen = new THREE.Mesh(mountainGeometry.clone(), this.materials.glacier);
+    this.glacierSheen.position.copy(this.mountain.position);
+    this.glacierSheen.position.z += 0.05;
+    this.environmentGroup.add(this.glacierSheen);
+
     // Embedded boulders and flank crags. Every boulder snaps to the face via
     // _faceAnchor, then sinks into the slope so it reads as fractured rock
     // growing out of the mountain rather than beads floating in the air.
@@ -1579,38 +1523,69 @@ vec3 mountainPerturbNormal(vec3 eyePos, vec3 surfNormal, float height) {
       });
     }
 
-    // Route-adjacent outcrops: small rocks tucked between lanes for parallax.
-    const innerCount = 18;
-    for (let index = 0; index < innerCount; index += 1) {
-      const side = index % 2 === 0 ? -1 : 1;
-      const baseX = side * (LANE_X * 0.5 + (Math.random() - 0.5) * 0.6);
-      const worldY = 6 + Math.random() * 228;
-      const radius = 0.38 + Math.random() * 0.46;
-      placeBoulder({
-        baseX,
-        worldY,
-        radius,
-        matIndex: index + 2,
-        wide: 1,
-        tall: 0.42 + Math.random() * 0.22,
-        depth: 0.55 + Math.random() * 0.28
-      });
-    }
+    // Roadside rock spires: jagged outcrops sitting just outside the climb
+    // route so the lanes stay clear but the periphery reads as broken cliff
+    // rather than empty snow. ConeGeometry vertices get angular displacement
+    // to break the smooth silhouette into facets that look like fractured
+    // stone instead of bowling balls.
+    const placeRockSpire = ({ baseX, worldY, height, baseRadius, tilt, seed }) => {
+      const rand = (i) => this._seededUnit(seed + i * 13.7);
+      const spireGeom = new THREE.ConeGeometry(baseRadius, height, 9, 5, false);
+      const sp = spireGeom.attributes.position;
+      for (let i = 0; i < sp.count; i += 1) {
+        const px = sp.getX(i);
+        const py = sp.getY(i);
+        const pz = sp.getZ(i);
+        // 0 at base, 1 at tip - heavier displacement near base, finer toward tip.
+        const heightFrac = clamp01((py + height * 0.5) / Math.max(1e-4, height));
+        const ang = Math.atan2(pz, px);
+        const radial = Math.hypot(px, pz);
+        const jitter = (1 - heightFrac * 0.65) * baseRadius * 0.6;
+        const radialNoise =
+          (rand(i) - 0.5) * jitter +
+          Math.sin(ang * 5 + heightFrac * 3.4 + seed) * jitter * 0.45;
+        const newR = Math.max(0.04, radial + radialNoise);
+        sp.setX(i, Math.cos(ang) * newR);
+        sp.setZ(i, Math.sin(ang) * newR);
+        sp.setY(i, py + (rand(i + 999) - 0.5) * jitter * 0.35);
+      }
+      spireGeom.computeVertexNormals();
 
-    const dividerOutcropCount = 18;
-    for (let index = 0; index < dividerOutcropCount; index += 1) {
+      const anchor = this._faceAnchor(baseX, worldY, 0.35);
+      const tint = 0x2c3540 + Math.floor(rand(3) * 0x121212);
+      const spireMat = this.materials.cliffShadow.clone();
+      spireMat.color.setHex(tint);
+      spireMat.roughness = 1;
+      const spire = new THREE.Mesh(spireGeom, spireMat);
+      spire.position.set(anchor.x, anchor.y + height * 0.5 - 0.4, anchor.z + 0.25);
+      spire.rotation.set(
+        (rand(11) - 0.5) * 0.18,
+        rand(13) * Math.PI * 2,
+        tilt + (rand(17) - 0.5) * 0.14
+      );
+      spire.castShadow = true;
+      spire.receiveShadow = true;
+      this.environmentGroup.add(spire);
+    };
+
+    const spireCount = 36;
+    for (let index = 0; index < spireCount; index += 1) {
       const side = index % 2 === 0 ? -1 : 1;
-      const baseX = side * (LANE_X * (0.58 + Math.random() * 0.24) + (Math.random() - 0.5) * 0.35);
-      const worldY = 10 + Math.random() * 224;
-      const radius = 0.5 + Math.random() * 0.72;
-      placeBoulder({
+      // Sit just outside the climb corridor: never within ROUTE_HALF, never
+      // farther than ~3.5 units past it, otherwise they merge with the flank
+      // boulder scatter above.
+      const baseX = side * (ROUTE_HALF + 0.45 + Math.random() * 3.2);
+      const worldY = 4 + Math.random() * 232;
+      const height = 3.4 + Math.random() * 7.8;
+      const baseRadius = 0.65 + Math.random() * 0.95;
+      const tilt = -side * (0.06 + Math.random() * 0.16);
+      placeRockSpire({
         baseX,
         worldY,
-        radius,
-        matIndex: index + flankCount,
-        wide: 1 + Math.random() * 0.18,
-        tall: 0.44 + Math.random() * 0.22,
-        depth: 0.72 + Math.random() * 0.24
+        height,
+        baseRadius,
+        tilt,
+        seed: 1000 + index * 17
       });
     }
 
@@ -2635,8 +2610,6 @@ vec3 mountainPerturbNormal(vec3 eyePos, vec3 surfNormal, float height) {
     const renderSnapshot = this._buildRenderSnapshot(snapshot);
     this.elapsed += dt;
     this.lastSnapshot = renderSnapshot;
-    this._updateRenderBudget(dt);
-    this._updateMountainSurfaceUniforms(renderSnapshot);
     this._updateEnvironment(renderSnapshot, dt);
     this._updatePlayer(renderSnapshot, dt);
     this._updateRope(renderSnapshot, dt);
@@ -2812,6 +2785,10 @@ vec3 mountainPerturbNormal(vec3 eyePos, vec3 surfNormal, float height) {
       );
       this.materials.cliff.emissive = new THREE.Color(0x06131f);
       this.materials.cliff.emissiveIntensity = 0.05;
+      this.materials.moltenFace.opacity = 0;
+      this.materials.moltenFace.emissiveIntensity = 0;
+      this.materials.glacier.opacity = 0.18 + (1 - phase) * 0.12;
+
       this.crackNodes.forEach((node) => {
         node.tube.material.opacity = 0;
         node.tube.material.emissiveIntensity = 0;
@@ -2897,6 +2874,10 @@ vec3 mountainPerturbNormal(vec3 eyePos, vec3 surfNormal, float height) {
       Math.max(0, phase - 0.72) * 1.3
     );
     this.materials.cliff.emissive = new THREE.Color(0x000000);
+    this.materials.moltenFace.opacity = Math.max(0, phase - 0.62) * 1.4;
+    this.materials.moltenFace.emissiveIntensity = 0.3 + Math.max(0, phase - 0.62) * 2.0 + danger * 0.2;
+    this.materials.glacier.opacity = (1 - phase) * 0.22 + 0.04;
+
     this.crackNodes.forEach((node, index) => {
       node.tube.material.opacity = phase * (0.46 + Math.sin(this.elapsed * 2.2 + node.offset) * 0.16);
       node.tube.material.emissiveIntensity = 0.7 + phase * 1.3 + Math.sin(this.elapsed * 3.4 + index) * 0.18;
@@ -3513,7 +3494,17 @@ vec3 mountainPerturbNormal(vec3 eyePos, vec3 surfNormal, float height) {
         this.rockMeshes.set(rock.id, node);
       }
 
-      node.group.position.set(rock.x, rock.y, 1.46 + Math.sin(this.elapsed * 2.2 + index) * 0.03);
+      const rockSurface = this._faceAnchor(rock.x, rock.y, 0);
+      // Rolling rock geometry has a Z half-extent of roughly 0.71 * rock.size
+      // after scaling. Keep the back face above the displaced surface instead
+      // of using a fixed Z, which can shimmer when the camera angle changes.
+      const rockHalfDepth = 0.71 * rock.size;
+      const surfaceClearance = Math.max(1.18, rockHalfDepth + 0.42);
+      node.group.position.set(
+        rockSurface.x,
+        rock.y,
+        rockSurface.z + surfaceClearance + Math.sin(this.elapsed * 2.2 + index) * 0.03
+      );
       node.group.scale.setScalar(rock.size * 0.9);
       node.group.rotation.x += (node.spin.x + rock.speed * 0.00012) * dt * 60;
       node.group.rotation.y += (node.spin.y + rock.speed * 0.00016) * dt * 60;
@@ -4046,9 +4037,7 @@ vec3 mountainPerturbNormal(vec3 eyePos, vec3 surfNormal, float height) {
     this.camera.aspect = window.innerWidth / window.innerHeight;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(window.innerWidth, window.innerHeight);
-    this.maxPixelRatio = Math.min(window.devicePixelRatio || 1, 2);
-    this.currentPixelRatio = Math.min(this.currentPixelRatio || this.maxPixelRatio, this.maxPixelRatio);
-    this.renderer.setPixelRatio(this.currentPixelRatio);
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   }
 
   dispose() {
