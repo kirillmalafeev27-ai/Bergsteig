@@ -346,7 +346,7 @@ class BergRenderer {
         roughness: 0.95,
         metalness: 0.03,
         vertexColors: true,
-        flatShading: true
+        flatShading: false
       }),
       cliffShadow: new THREE.MeshStandardMaterial({
         map: rockMap,
@@ -668,6 +668,131 @@ class BergRenderer {
         opacity: 0.92
       })
     };
+
+    this._applyMountainSurfaceShader(this.materials.cliff);
+  }
+
+  // Augments the procedural mountain's MeshStandardMaterial with three
+  // fragment-shader effects driven by world-space fbm noise:
+  //   1. Bump perturbation of the surface normal (Mikkelsen surface-gradient)
+  //      so the smooth-shaded face gains rocky micro-relief without geometry.
+  //   2. Patchy tone variation that breaks up the monotone vertex-color tint
+  //      with subtle cool/warm/dim macro patches and a snow accumulation lift
+  //      on up-facing slopes.
+  //   3. Snow sparkle: high-frequency noise spikes added to emissive on the
+  //      brightest snow patches, giving crests a sun-glint shimmer.
+  // No textures, no UVs, no tangents — only world position and the surface
+  // normal. customProgramCacheKey isolates the patched program in three's
+  // cache so other materials don't accidentally inherit it.
+  _applyMountainSurfaceShader(material) {
+    const cacheKey = 'bergsteig-mountain-surface-v2';
+    const previous = material.onBeforeCompile;
+    material.onBeforeCompile = (shader) => {
+      if (typeof previous === 'function') {
+        previous(shader);
+      }
+
+      shader.vertexShader = shader.vertexShader
+        .replace(
+          '#include <common>',
+          '#include <common>\nvarying vec3 vBergWorldPos;'
+        )
+        .replace(
+          '#include <fog_vertex>',
+          '#include <fog_vertex>\nvBergWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;'
+        );
+
+      const noisePars = `
+varying vec3 vBergWorldPos;
+float bergHash(vec3 p) {
+  p = fract(p * 0.3183099 + vec3(0.71, 0.113, 0.419));
+  p *= 17.0;
+  return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+}
+float bergValueNoise(vec3 p) {
+  vec3 i = floor(p);
+  vec3 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(
+    mix(mix(bergHash(i + vec3(0.0,0.0,0.0)), bergHash(i + vec3(1.0,0.0,0.0)), f.x),
+        mix(bergHash(i + vec3(0.0,1.0,0.0)), bergHash(i + vec3(1.0,1.0,0.0)), f.x), f.y),
+    mix(mix(bergHash(i + vec3(0.0,0.0,1.0)), bergHash(i + vec3(1.0,0.0,1.0)), f.x),
+        mix(bergHash(i + vec3(0.0,1.0,1.0)), bergHash(i + vec3(1.0,1.0,1.0)), f.x), f.y),
+    f.z
+  );
+}
+float bergFbm(vec3 p) {
+  float v = 0.0;
+  float a = 0.5;
+  for (int i = 0; i < 4; i++) {
+    v += a * bergValueNoise(p);
+    p *= 2.13;
+    a *= 0.5;
+  }
+  return v;
+}`;
+
+      const bumpInjection = `
+#include <normal_fragment_maps>
+{
+  float h = bergFbm(vBergWorldPos * 0.55) + 0.45 * bergFbm(vBergWorldPos * 2.7);
+  float hx = dFdx(h);
+  float hy = dFdy(h);
+  vec3 dPdx = dFdx(vBergWorldPos);
+  vec3 dPdy = dFdy(vBergWorldPos);
+  vec3 R1 = cross(dPdy, normal);
+  vec3 R2 = cross(normal, dPdx);
+  float det = dot(dPdx, R1);
+  float bumpScale = 1.4;
+  vec3 grad = sign(det) * bumpScale * (hx * R1 + hy * R2);
+  normal = normalize(abs(det) * normal - grad);
+}`;
+
+      // Tint + sparkle injection runs after emissivemap_fragment, by which
+      // point diffuseColor has been set from color/map/vertex color and
+      // totalEmissiveRadiance has been seeded from the (absent) emissive map.
+      const tintInjection = `
+#include <emissivemap_fragment>
+{
+  float bergMacro = bergFbm(vBergWorldPos * 0.07);
+  float bergMeso  = bergFbm(vBergWorldPos * 0.6);
+  float facingUp  = clamp(normal.y, 0.0, 1.0);
+
+  // Three subtle tones blended by macro/meso noise: warm patch, cool patch,
+  // and a darker grey-blue rock patch. Each is a small modulation around 1.0
+  // so vertex-color baseline is preserved.
+  vec3 bergToneWarm = vec3(1.06, 1.00, 0.93);
+  vec3 bergToneCool = vec3(0.90, 0.96, 1.08);
+  vec3 bergToneDark = vec3(0.70, 0.76, 0.88);
+  float bergT1 = smoothstep(0.30, 0.72, bergMacro);
+  float bergT2 = smoothstep(0.55, 0.88, bergMeso);
+  vec3 bergTint = mix(bergToneWarm, bergToneCool, bergT1);
+  bergTint = mix(bergTint, bergToneDark, bergT2 * 0.65);
+  diffuseColor.rgb *= bergTint;
+
+  // Snow accumulation: lift toward bright snow-blue on horizontal-ish faces.
+  float bergSnow = smoothstep(0.40, 0.92, facingUp) * (0.7 + bergMacro * 0.4);
+  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.97, 0.99, 1.02), clamp(bergSnow, 0.0, 1.0) * 0.35);
+
+  // Sparkle: high-freq spikes in emissive, gated to bright snow patches and
+  // suppressed inside dark rock patches so it doesn't pop on cliff bands.
+  float bergSparkle = bergValueNoise(vBergWorldPos * 13.0);
+  float bergSparkleMask = smoothstep(0.86, 0.95, bergSparkle) * clamp(bergSnow, 0.0, 1.0) * (1.0 - bergT2 * 0.7);
+  totalEmissiveRadiance += vec3(0.85, 0.92, 1.05) * bergSparkleMask * 0.55;
+}`;
+
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', `#include <common>\n${noisePars}`)
+        .replace('#include <normal_fragment_maps>', bumpInjection)
+        .replace('#include <emissivemap_fragment>', tintInjection);
+    };
+    material.customProgramCacheKey = () => cacheKey;
+    // The injected code uses dFdx/dFdy. Three.js auto-enables the derivatives
+    // extension only when standard map slots (bumpMap/normalMap/...) are set,
+    // so when this material has none we have to opt in explicitly to avoid
+    // a silent shader compile failure on WebGL1.
+    material.extensions = Object.assign({}, material.extensions, { derivatives: true });
+    material.needsUpdate = true;
   }
 
   _buildLights() {
