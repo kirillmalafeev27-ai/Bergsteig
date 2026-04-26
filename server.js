@@ -9,7 +9,11 @@ const GHOST_ROUTE_FILE = path.join(DATA_DIR, 'ghost-routes.json');
 const AITUNNEL_BASE_URL = process.env.AITUNNEL_BASE_URL || 'https://api.aitunnel.ru/v1';
 const AITUNNEL_MODEL = process.env.AITUNNEL_MODEL || 'gpt-5.4';
 const MAX_JSON_BODY_BYTES = 1024 * 1024;
-const DEFAULT_QUESTION_COUNT = 30;
+const DEFAULT_QUESTION_COUNT = 4;
+const MAX_QUESTION_COUNT = 12;
+const QUESTION_COMPLETION_BASE_TOKENS = 700;
+const QUESTION_COMPLETION_TOKENS_PER_ITEM = 260;
+const QUESTION_COMPLETION_MAX_TOKENS = 3200;
 const MAX_GHOST_ROUTES = 24;
 const EXTERNAL_GHOST_ROUTE_LIMIT = 8;
 
@@ -318,7 +322,15 @@ async function readJsonBody(req) {
   });
 }
 
-async function requestAiText(messages, maxCompletionTokens = 8192) {
+function completionTokensForQuestionCount(count) {
+  const requested = Number(count) || 1;
+  return Math.min(
+    QUESTION_COMPLETION_MAX_TOKENS,
+    QUESTION_COMPLETION_BASE_TOKENS + Math.max(1, requested) * QUESTION_COMPLETION_TOKENS_PER_ITEM
+  );
+}
+
+async function requestAiText(messages, maxCompletionTokens = 512) {
   const response = await fetch(`${AITUNNEL_BASE_URL.replace(/\/$/, '')}/chat/completions`, {
     method: 'POST',
     headers: {
@@ -334,7 +346,10 @@ async function requestAiText(messages, maxCompletionTokens = 8192) {
 
   if (!response.ok) {
     const detail = await response.text().catch(() => '');
-    throw new Error(`AITunnel HTTP ${response.status}${detail ? `: ${detail.slice(0, 300)}` : ''}`);
+    const error = new Error(`AITunnel HTTP ${response.status}${detail ? `: ${detail.slice(0, 300)}` : ''}`);
+    error.status = response.status;
+    error.detail = detail;
+    throw error;
   }
 
   const payload = await response.json();
@@ -346,8 +361,11 @@ async function requestAiText(messages, maxCompletionTokens = 8192) {
   return text;
 }
 
-async function requestAiQuestions(prompt) {
-  const text = await requestAiText([{ role: 'user', content: prompt }], 8192);
+async function requestAiQuestions(prompt, questionsCount) {
+  const text = await requestAiText(
+    [{ role: 'user', content: prompt }],
+    completionTokensForQuestionCount(questionsCount)
+  );
 
   const jsonMatch = text.match(/\[[\s\S]*\]/);
   const jsonText = jsonMatch ? jsonMatch[0] : text;
@@ -389,7 +407,7 @@ async function handleGenerateQuestions(req, res) {
     return;
   }
 
-  const questionsCount = Math.max(1, Math.min(Number(count) || DEFAULT_QUESTION_COUNT, 40));
+  const questionsCount = Math.max(1, Math.min(Number(count) || DEFAULT_QUESTION_COUNT, MAX_QUESTION_COUNT));
   const wordOrderMode = Boolean(isWortstellung || (language === 'de' && isWortstellungTopic(grammarTopic)));
   const cacheKey = [
     language || 'de',
@@ -415,7 +433,7 @@ async function handleGenerateQuestions(req, res) {
   });
 
   try {
-    const parsed = await requestAiQuestions(prompt);
+    const parsed = await requestAiQuestions(prompt, questionsCount);
     const valid = parsed
       .map(sanitizeQuestion)
       .filter(isValidQuestion);
@@ -430,7 +448,8 @@ async function handleGenerateQuestions(req, res) {
     sendJson(res, 200, { questions: valid.slice(0, questionsCount) });
   } catch (error) {
     log(`AITunnel API error: ${error.message}`);
-    sendJson(res, 500, { error: 'Failed to generate questions', detail: error.message });
+    const statusCode = error.status && error.status >= 400 && error.status < 500 ? error.status : 502;
+    sendJson(res, statusCode, { error: 'Failed to generate questions', detail: error.message });
   }
 }
 
