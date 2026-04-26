@@ -3572,7 +3572,15 @@ float bergFbm(vec3 p) {
       }
 
       const rockSurface = this._faceAnchor(rock.x, rock.y, 0);
-      node.group.position.set(rockSurface.x, rock.y, rockSurface.z + 1.12 + Math.sin(this.elapsed * 2.2 + index) * 0.03);
+      // Rolling rock geometry has a Z half-extent of roughly 0.71 × rock.size
+      // (boulder radius 0.92 × coreScale.z ≈ 0.86, all multiplied by group
+      // scale rock.size × 0.9). With a fixed clearance the back face of any
+      // rock larger than ~1.6 dipped under the displaced surface relief, so
+      // the offset now scales with rock.size and keeps a small floor so even
+      // the smallest rocks read as resting on top of crags rather than buried.
+      const rockHalfDepth = 0.71 * rock.size;
+      const surfaceClearance = Math.max(1.18, rockHalfDepth + 0.42);
+      node.group.position.set(rockSurface.x, rock.y, rockSurface.z + surfaceClearance + Math.sin(this.elapsed * 2.2 + index) * 0.03);
       node.group.scale.setScalar(rock.size * 0.9);
       node.group.rotation.x += (node.spin.x + rock.speed * 0.00012) * dt * 60;
       node.group.rotation.y += (node.spin.y + rock.speed * 0.00016) * dt * 60;
