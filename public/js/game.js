@@ -364,6 +364,7 @@ class Game {
     this.atmospherePreset = settings.atmospherePreset || 'classic';
     this.slotConfigs = settings.slotConfigs;
     this.state = 'preparing';
+    this.poolRefillFreezeActive = false;
 
     if (!this.questionManager) {
       this.questionManager = new QuestionManager(settings.langLevel, settings.language);
@@ -375,7 +376,13 @@ class Game {
 
     this._showPrepOverlay('Готовим упражнения по выбранным темам...');
     try {
-      await this.questionManager.prefetchAll();
+      await this.questionManager.prefetchAll((progress) => {
+        const slotLabel = this._slotLabel(progress.slotId);
+        const message = progress.status === 'loading'
+          ? `Готовим тему ${progress.done + 1}/${progress.total}: ${slotLabel}...`
+          : `Готово ${progress.done}/${progress.total}.`;
+        this._updatePrepOverlay(message);
+      });
     } catch (error) {
       console.warn('Question prefetch failed:', error);
     }
@@ -526,6 +533,7 @@ class Game {
       this.ui.pauseOverlay.classList.add('hidden');
     }
     this._hidePrepOverlay();
+    this.poolRefillFreezeActive = false;
     document.body.classList.remove('paused');
 
     if (clearSettings) {
@@ -997,10 +1005,19 @@ class Game {
 
     this.questionLoading = true;
     this._renderTopicButtons();
-    this._showMessage('Загружаем вопрос...', 1100);
+
+    const poolEmpty = this.questionManager.isPoolEmpty(slotId);
+    if (poolEmpty) {
+      this._beginPoolRefillFreeze(slotId);
+    } else {
+      this._showMessage('Загружаем вопрос...', 1100);
+    }
 
     try {
       const question = await this.questionManager.getQuestion(slotId);
+      if (poolEmpty) {
+        this._endPoolRefillFreeze();
+      }
       if (this.state !== 'running' || this.player.falling || this.currentQuestion || this.pendingDirection) {
         this.questionManager.returnLastQuestion(slotId);
         return;
@@ -1014,11 +1031,39 @@ class Game {
       this.currentQuestion.direction = direction;
       this._renderQuestion();
     } catch (error) {
+      if (poolEmpty) {
+        this._endPoolRefillFreeze();
+      }
       console.warn('Question loading failed:', error);
       this._showMessage('Не удалось загрузить вопрос. Попробуйте другую тему.', 1500);
     } finally {
       this.questionLoading = false;
       this._renderTopicButtons();
+    }
+  }
+
+  _beginPoolRefillFreeze(slotId) {
+    if (this.poolRefillFreezeActive) {
+      return;
+    }
+    this.poolRefillFreezeActive = true;
+    this._showPrepOverlay(`Пул темы «${this._slotLabel(slotId)}» исчерпан. Готовим новые упражнения...`);
+    if (this.state === 'running') {
+      this.togglePause(true);
+      if (this.ui.pauseOverlay) {
+        this.ui.pauseOverlay.classList.add('hidden');
+      }
+    }
+  }
+
+  _endPoolRefillFreeze() {
+    if (!this.poolRefillFreezeActive) {
+      return;
+    }
+    this.poolRefillFreezeActive = false;
+    this._hidePrepOverlay();
+    if (this.state === 'paused') {
+      this.togglePause(false);
     }
   }
 
@@ -1404,6 +1449,22 @@ class Game {
       return;
     }
     this.ui.prepOverlay.classList.add('hidden');
+  }
+
+  _updatePrepOverlay(message) {
+    if (this.ui.prepStatus && message) {
+      this.ui.prepStatus.textContent = message;
+    }
+  }
+
+  _slotLabel(slotId) {
+    const slotConfig = (this.slotConfigs || []).find((slot) => slot.slotDef && slot.slotDef.id === slotId);
+    if (!slotConfig) {
+      return slotId || '';
+    }
+    return slotConfig.grammarTopic
+      || (slotConfig.slotDef && (slotConfig.slotDef.label || slotConfig.slotDef.title || slotConfig.slotDef.id))
+      || slotId;
   }
 
   _protectLane(lane, now) {

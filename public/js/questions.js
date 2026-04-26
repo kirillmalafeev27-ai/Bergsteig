@@ -1516,6 +1516,8 @@ function makeFrenchDefaultQuestion(grammarTopic, lexicalTopic) {
 const AI_QUESTION_BATCH_SIZE = 10;
 const AI_CLICK_WAIT_MS = 3500;
 const AI_FETCH_TIMEOUT_MS = 12000;
+const AI_FETCH_RETRY_LIMIT = 4;
+const AI_FETCH_RETRY_BASE_MS = 1500;
 
 function isValidRemoteQuestion(question) {
   return Boolean(
@@ -1606,12 +1608,22 @@ class QuestionManager {
     this.slots = nextSlots;
   }
 
-  async prefetchAll() {
-    for (const slot of this.slots) {
+  async prefetchAll(onProgress) {
+    const slots = this.slots.slice();
+    let done = 0;
+    for (const slot of slots) {
+      const slotId = slot.slotDef.id;
+      if (typeof onProgress === 'function') {
+        onProgress({ slotId, done, total: slots.length, status: 'loading' });
+      }
       try {
-        await this._ensurePool(slot.slotDef.id);
+        await this._ensurePool(slotId);
       } catch (error) {
-        console.warn(`Не удалось предзагрузить пул для слота ${slot.slotDef.id}:`, error);
+        console.warn(`Не удалось предзагрузить пул для слота ${slotId}:`, error);
+      }
+      done += 1;
+      if (typeof onProgress === 'function') {
+        onProgress({ slotId, done, total: slots.length, status: 'done' });
       }
     }
   }
@@ -1622,16 +1634,18 @@ class QuestionManager {
     });
   }
 
+  isPoolEmpty(slotId) {
+    const pool = this.questionPool[slotId];
+    return !pool || pool.length === 0;
+  }
+
   async getQuestion(slotId) {
     const slotConfig = this.slots.find((slot) => slot.slotDef.id === slotId);
     if (!slotConfig) {
       return null;
     }
 
-    await Promise.race([
-      this._ensurePool(slotId),
-      wait(AI_CLICK_WAIT_MS)
-    ]);
+    await this._ensurePool(slotId);
     const pool = this.questionPool[slotId];
     if (!pool || pool.length === 0) {
       return this._fallbackQuestion(slotConfig);
@@ -1704,6 +1718,32 @@ class QuestionManager {
 
   async _fetchQuestions(slotConfig) {
     const slotId = slotConfig.slotDef.id;
+    let lastError = null;
+
+    for (let attempt = 1; attempt <= AI_FETCH_RETRY_LIMIT; attempt += 1) {
+      try {
+        const valid = await this._requestQuestionBatch(slotConfig);
+        if (valid.length) {
+          const pool = [...(this.questionPool[slotId] || []), ...shuffleArray(valid)];
+          this.questionPool[slotId] = pool;
+          return pool;
+        }
+        lastError = new Error('Empty batch');
+      } catch (error) {
+        lastError = error;
+        console.warn(`Попытка ${attempt}/${AI_FETCH_RETRY_LIMIT} загрузки слота ${slotId} провалилась:`, error);
+      }
+
+      if (attempt < AI_FETCH_RETRY_LIMIT) {
+        await wait(AI_FETCH_RETRY_BASE_MS * attempt);
+      }
+    }
+
+    throw lastError || new Error('Не удалось получить пул вопросов');
+  }
+
+  async _requestQuestionBatch(slotConfig) {
+    const slotId = slotConfig.slotDef.id;
     const seen = Array.from(this.usedDisplays[slotId] || []).slice(-12);
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), AI_FETCH_TIMEOUT_MS);
@@ -1733,14 +1773,7 @@ class QuestionManager {
     }
 
     const data = await response.json();
-    const valid = (data.questions || []).filter((question) => isValidRemoteQuestion(question));
-    if (!valid.length) {
-      return this.questionPool[slotId] || [];
-    }
-
-    const pool = [...(this.questionPool[slotId] || []), ...shuffleArray(valid)];
-    this.questionPool[slotId] = pool;
-    return pool;
+    return (data.questions || []).filter((question) => isValidRemoteQuestion(question));
   }
 
   _formatQuestion(rawQuestion, slotConfig) {
