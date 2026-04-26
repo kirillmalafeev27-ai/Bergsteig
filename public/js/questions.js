@@ -1513,8 +1513,7 @@ function makeFrenchDefaultQuestion(grammarTopic, lexicalTopic) {
   };
 }
 
-const AI_QUESTION_BATCH_SIZE = 30;
-const AI_PREFETCH_LOW_WATERMARK = 4;
+const AI_QUESTION_BATCH_SIZE = 10;
 const AI_CLICK_WAIT_MS = 3500;
 const AI_FETCH_TIMEOUT_MS = 12000;
 
@@ -1608,8 +1607,13 @@ class QuestionManager {
   }
 
   async prefetchAll() {
-    const tasks = this.slots.map((slot) => this._ensurePool(slot.slotDef.id));
-    await Promise.allSettled(tasks);
+    for (const slot of this.slots) {
+      try {
+        await this._ensurePool(slot.slotDef.id);
+      } catch (error) {
+        console.warn(`Не удалось предзагрузить пул для слота ${slot.slotDef.id}:`, error);
+      }
+    }
   }
 
   shuffleAllPools() {
@@ -1636,10 +1640,6 @@ class QuestionManager {
     const rawQuestion = pool.shift();
     this.lastQuestion = { slotId, question: rawQuestion };
 
-    if (pool.length <= AI_PREFETCH_LOW_WATERMARK) {
-      this._ensurePool(slotId);
-    }
-
     return this._formatQuestion(rawQuestion, slotConfig);
   }
 
@@ -1649,10 +1649,6 @@ class QuestionManager {
       set.add(this.lastQuestion.question.display);
       this.usedDisplays[slotId] = set;
       this.lastQuestion = null;
-    }
-
-    if (!this.questionPool[slotId] || this.questionPool[slotId].length <= AI_PREFETCH_LOW_WATERMARK) {
-      this._ensurePool(slotId);
     }
   }
 

@@ -198,6 +198,8 @@ class Game {
       pauseOverlay: document.getElementById('pause-overlay'),
       resumeBtn: document.getElementById('resume-btn'),
       pauseExitBtn: document.getElementById('pause-exit-btn'),
+      prepOverlay: document.getElementById('prep-overlay'),
+      prepStatus: document.getElementById('prep-status'),
       touchZones: Array.from(document.querySelectorAll('.touch-zone'))
     };
   }
@@ -361,10 +363,7 @@ class Game {
     this.lastSettings = JSON.parse(JSON.stringify(settings));
     this.atmospherePreset = settings.atmospherePreset || 'classic';
     this.slotConfigs = settings.slotConfigs;
-    this.state = 'running';
-    this.startedAt = performance.now();
-    this.currentTime = this.startedAt;
-    this.lastFrameAt = 0;
+    this.state = 'preparing';
 
     if (!this.questionManager) {
       this.questionManager = new QuestionManager(settings.langLevel, settings.language);
@@ -373,9 +372,19 @@ class Game {
     this.questionManager.setLevel(settings.langLevel);
     this.questionManager.setLexicalTopic(settings.lexicalTopic);
     this.questionManager.configureSlots(settings.slotConfigs);
-    this.questionManager.prefetchAll().catch((error) => {
+
+    this._showPrepOverlay('Готовим упражнения по выбранным темам...');
+    try {
+      await this.questionManager.prefetchAll();
+    } catch (error) {
       console.warn('Question prefetch failed:', error);
-    });
+    }
+    this._hidePrepOverlay();
+
+    this.state = 'running';
+    this.startedAt = performance.now();
+    this.currentTime = this.startedAt;
+    this.lastFrameAt = 0;
 
     this.renderer = new BergRenderer(this.ui.canvas, {
       atmospherePreset: this.atmospherePreset
@@ -516,6 +525,7 @@ class Game {
     if (this.ui.pauseOverlay) {
       this.ui.pauseOverlay.classList.add('hidden');
     }
+    this._hidePrepOverlay();
     document.body.classList.remove('paused');
 
     if (clearSettings) {
@@ -1377,6 +1387,23 @@ class Game {
 
   _availableSpawnLanes(now) {
     return [-1, 0, 1].filter((lane) => now >= (this.laneSafeUntil[lane] || 0));
+  }
+
+  _showPrepOverlay(message) {
+    if (!this.ui.prepOverlay) {
+      return;
+    }
+    if (this.ui.prepStatus && message) {
+      this.ui.prepStatus.textContent = message;
+    }
+    this.ui.prepOverlay.classList.remove('hidden');
+  }
+
+  _hidePrepOverlay() {
+    if (!this.ui.prepOverlay) {
+      return;
+    }
+    this.ui.prepOverlay.classList.add('hidden');
   }
 
   _protectLane(lane, now) {
