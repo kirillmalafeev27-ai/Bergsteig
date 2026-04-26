@@ -18,6 +18,7 @@ const SUMMIT_ROCK_STOP_DISTANCE = 10;
 const ROCK_SPAWN_MIN_AHEAD = 62;
 const ROCK_SPAWN_MAX_AHEAD = 82;
 const ROCK_HIT_GRACE_MS = 1400;
+const LANE_SWITCH_PROTECTION_MS = 10000;
 const ROCK_POST_AVALANCHE_LOCK_MS = 5200;
 const AVALANCHE_POST_ROCK_LOCK_MS = 2600;
 const AVALANCHE_ROCK_CLEARANCE = 28;
@@ -318,6 +319,7 @@ class Game {
     this.player.vx += dir * 15.2;
     this.cameraShake = Math.max(this.cameraShake, 0.18);
     this._leaveFootprints(this.player.progress + 0.4, 0.74);
+    this._protectLane(nextLane, this.currentTime);
     if (this.audio) {
       this.audio.playSidestep();
     }
@@ -421,6 +423,7 @@ class Game {
     this.couloirFissure = null;
     this.rockImpactGraceUntil = 0;
     this.rockSpawnBlockedUntil = 0;
+    this.laneSafeUntil = { '-1': 0, '0': 0, '1': 0 };
     this.avalancheSpawnBlockedUntil = 0;
 
     this.stats = {
@@ -557,6 +560,13 @@ class Game {
       this.nextRockSpawnAt += pausedDelta;
       this.nextAvalancheSpawnAt += pausedDelta;
       this.rockImpactGraceUntil += pausedDelta;
+      if (this.laneSafeUntil) {
+        Object.keys(this.laneSafeUntil).forEach((key) => {
+          if (this.laneSafeUntil[key]) {
+            this.laneSafeUntil[key] += pausedDelta;
+          }
+        });
+      }
       if (this.player.burst) {
         this.player.burst.until += pausedDelta;
       }
@@ -888,7 +898,11 @@ class Game {
   _spawnRockWave(now) {
     const phaseRatio = this._phaseRatio();
     const rampUp = clamp((now - this.startedAt) / 30000, 0, 1);
-    const lanes = shuffleArray([-1, 0, 1]);
+    const lanes = shuffleArray(this._availableSpawnLanes(now));
+    if (lanes.length === 0) {
+      this.nextRockSpawnAt = now + 500;
+      return;
+    }
     let count = 1;
     if (rampUp > 0.22 && Math.random() < 0.26 + rampUp * 0.2 + phaseRatio * 0.14) {
       count = 2;
@@ -896,6 +910,7 @@ class Game {
     if (rampUp > 0.56 && Math.random() < 0.12 + rampUp * 0.18 + phaseRatio * 0.16) {
       count = 3;
     }
+    count = Math.min(count, lanes.length);
     const baseSpeed = 5.6 + rampUp * 2 + phaseRatio * 2.2;
 
     for (let index = 0; index < count; index += 1) {
@@ -1178,6 +1193,10 @@ class Game {
       this.cameraShake = Math.max(this.cameraShake, 0.18);
       this._leaveFootprints(this.player.progress + 0.5, 0.8);
 
+      if (nextLane !== previousLane) {
+        this._protectLane(nextLane, this.currentTime);
+      }
+
       if (this.audio) {
         this.audio.playSidestep();
       }
@@ -1350,7 +1369,37 @@ class Game {
     if (this._hasActiveAvalanche()) {
       return false;
     }
-    return now >= this.rockSpawnBlockedUntil;
+    if (now < this.rockSpawnBlockedUntil) {
+      return false;
+    }
+    return this._availableSpawnLanes(now).length > 0;
+  }
+
+  _availableSpawnLanes(now) {
+    return [-1, 0, 1].filter((lane) => now >= (this.laneSafeUntil[lane] || 0));
+  }
+
+  _protectLane(lane, now) {
+    if (lane !== -1 && lane !== 0 && lane !== 1) {
+      return;
+    }
+    const safeUntil = now + LANE_SWITCH_PROTECTION_MS;
+    this.laneSafeUntil[lane] = Math.max(this.laneSafeUntil[lane] || 0, safeUntil);
+
+    const minTravelSec = LANE_SWITCH_PROTECTION_MS / 1000;
+    this.hazards.rocks.forEach((rock) => {
+      if (rock.processed || rock.lane !== lane) {
+        return;
+      }
+      const distance = rock.y - this.player.progress;
+      if (distance <= 0) {
+        return;
+      }
+      const safeSpeed = distance / minTravelSec;
+      if (rock.speed > safeSpeed) {
+        rock.speed = safeSpeed;
+      }
+    });
   }
 
   _canSpawnAvalanche(now) {
