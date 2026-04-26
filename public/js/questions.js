@@ -1,4 +1,22 @@
 const DEFAULT_CEFR_LEVEL = 'A2';
+const DEFAULT_LANGUAGE = 'de';
+
+const LANGUAGE_OPTIONS = [
+  {
+    id: 'de',
+    nativeLabel: 'Deutsch',
+    uiLabel: 'Немецкий',
+    teaser: 'Artikel, Prateritum, Nebensatze',
+    copy: 'Полный немецкий маршрут: свои темы, свои карточки и свои вопросы.'
+  },
+  {
+    id: 'fr',
+    nativeLabel: 'Francais',
+    uiLabel: 'Французский',
+    teaser: 'Accords, pronoms, subjonctif',
+    copy: 'Отдельный французский маршрут без смешивания с немецким набором.'
+  }
+];
 
 const CEFR_LEVELS = ['A1', 'A2', 'B1', 'B2', 'C1'];
 
@@ -109,6 +127,159 @@ const GRAMMAR_TOPICS = [
   'Genitivpräpositionen'
 ];
 
+const FRENCH_LEXICAL_TOPICS = [
+  'Famille',
+  'Amitie',
+  'Logement',
+  'Taches menageres',
+  'Ecole',
+  'Universite',
+  'Travail',
+  'Candidature',
+  'Voyages',
+  'Hotel',
+  'Ville',
+  'Vie a la campagne',
+  'Cuisine et boissons',
+  'Restaurant',
+  'Courses',
+  'Vetements',
+  'Sante',
+  'Corps',
+  'Sport',
+  'Loisirs',
+  'Musique',
+  'Films et series',
+  'Nature',
+  'Environnement',
+  'Transport',
+  'Technologie',
+  'Internet',
+  'Livres',
+  'Meteo',
+  'Fetes',
+  'Urgences',
+  'Montagne',
+  'Camping',
+  'Animaux',
+  'Art',
+  'Medias',
+  'Politique',
+  'Vie quotidienne',
+  'Gestion du temps',
+  'Travail de bureau',
+  'Service client',
+  'Etudes a letranger',
+  'Migration',
+  'Recherche de logement',
+  'Finances',
+  'Rendez-vous',
+  'Communication',
+  'Emotions',
+  'Vacances a la mer',
+  'Vacances dhiver'
+];
+
+const FRENCH_GRAMMAR_TOPICS = [
+  'Present',
+  'Passe compose',
+  'Imparfait',
+  'Futur proche',
+  'Futur simple',
+  'Imperatif',
+  'Pouvoir, vouloir, devoir',
+  'Verbes pronominaux',
+  'Verbes avec etre',
+  'Verbes avec a / de',
+  'Infinitif',
+  'Faire + infinitif',
+  'Etre vs. avoir',
+  'Articles definis',
+  'Articles indefinis',
+  'Articles partitifs',
+  'Noms au pluriel',
+  'Articles contractes',
+  'Possessifs',
+  'Pronoms',
+  'Pronoms sujets',
+  'Pronoms toniques',
+  'Pronoms COD',
+  'Pronoms COI',
+  'Adjectifs',
+  'Accord des adjectifs',
+  'Comparatif',
+  'Superlatif',
+  'Nombres et date',
+  'Prepositions de temps',
+  'Prepositions de lieu',
+  'A / en / au / aux',
+  'Depuis / pendant / pour',
+  'Il y a / depuis',
+  'Negation',
+  'Questions',
+  'Est-ce que',
+  'Inversion',
+  'Cest / il est',
+  'Pronoms relatifs qui / que',
+  'Pronoms relatifs ou / dont',
+  'Connecteurs logiques',
+  'Parce que / puisque / comme',
+  'Quand / lorsque / pendant que',
+  'Avant de / apres avoir',
+  'Conditionnel present',
+  'Subjonctif present',
+  'Si + imparfait',
+  'Passif',
+  'Gerondif',
+  'Plus-que-parfait'
+];
+
+const LANGUAGE_CONFIGS = {
+  de: {
+    id: 'de',
+    uiLabel: 'Немецкий',
+    playerPlaceholder: 'Например, Лея',
+    defaultPlayerName: 'Spieler',
+    levelLabel: 'Уровень немецкого (CEFR)',
+    step1Text: 'Выберите язык сессии, уровень и имя альпиниста. Для немецкого откроются только немецкие темы и немецкие вопросы.',
+    step2Text: 'Одна тема на всю сессию. Она задаёт рамку для упражнений по немецкому и настроение карточек во время подъёма.',
+    grammarLabel: 'Доступные грамматические темы по немецкому',
+    lexicalTopics: LEXICAL_TOPICS,
+    grammarTopics: GRAMMAR_TOPICS
+  },
+  fr: {
+    id: 'fr',
+    uiLabel: 'Французский',
+    playerPlaceholder: 'Например, Lea',
+    defaultPlayerName: 'Joueur',
+    levelLabel: 'Уровень французского (CEFR)',
+    step1Text: 'Выберите язык сессии, уровень и имя альпиниста. Для французского откроются только французские темы и французские вопросы.',
+    step2Text: 'Одна тема на всю сессию. Она задаёт рамку для упражнений по французскому и настроение карточек во время подъёма.',
+    grammarLabel: 'Доступные грамматические темы по французскому',
+    lexicalTopics: FRENCH_LEXICAL_TOPICS,
+    grammarTopics: FRENCH_GRAMMAR_TOPICS
+  }
+};
+
+function getLanguageConfig(language = DEFAULT_LANGUAGE) {
+  return LANGUAGE_CONFIGS[language] || LANGUAGE_CONFIGS[DEFAULT_LANGUAGE];
+}
+
+function getLanguageLexicalTopics(language = DEFAULT_LANGUAGE) {
+  return getLanguageConfig(language).lexicalTopics;
+}
+
+function getLanguageGrammarTopics(language = DEFAULT_LANGUAGE) {
+  return getLanguageConfig(language).grammarTopics;
+}
+
+function normalizeTopicKey(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+
 const BONUS_SLOTS = [
   {
     id: 'climb',
@@ -119,14 +290,16 @@ const BONUS_SLOTS = [
   {
     id: 'sidestep',
     bonusLabel: 'Рывок на 1 линию',
-    help: 'Смещает рабочую линию влево или вправо и даёт мягкую раскачку.',
-    cooldownMs: 0
+    help: 'На кнопке есть две отдельные половины: влево и вправо. Верный ответ сразу смещает на соседнюю линию в выбранную сторону.',
+    cooldownMs: 0,
+    splitDirections: true
   },
   {
     id: 'powerSwing',
     bonusLabel: 'Сильный рывок',
-    help: 'Выбрасывает в сторону сильнее и дольше раскачивает при возврате.',
-    cooldownMs: 0
+    help: 'Тоже разделён на две половины: влево и вправо. Верный ответ сразу запускает сильный рывок в выбранную сторону.',
+    cooldownMs: 0,
+    splitDirections: true
   },
   {
     id: 'snowShield',
@@ -172,6 +345,18 @@ const CASE_NOUNS = [
   { base: 'Hotel', nom: 'das', acc: 'das', dat: 'dem', gen: 'des' }
 ];
 
+const FRENCH_NAMES = ['Lea', 'Noah', 'Camille', 'Jules', 'Ines', 'Louis', 'Manon', 'Hugo'];
+const FRENCH_TIMES = ["aujourd'hui", 'demain', 'ce soir', 'apres le cours', 'en hiver', 'avant la sortie'];
+const FRENCH_PLACES = ['au camp', 'a la gare', 'au refuge', 'au bureau', 'au village', 'en classe'];
+const FRENCH_ADJECTIVES = ['calme', 'utile', 'chaud', 'long', 'raide', 'clair', 'petit', 'sur'];
+const FRENCH_VERB_BANK = [
+  { inf: 'preparer', present: 'prepare', passeCompose: 'a prepare', imparfait: 'preparait', futurSimple: 'preparera', plusQueParfait: 'avait prepare' },
+  { inf: 'verifier', present: 'verifie', passeCompose: 'a verifie', imparfait: 'verifiait', futurSimple: 'verifiera', plusQueParfait: 'avait verifie' },
+  { inf: 'porter', present: 'porte', passeCompose: 'a porte', imparfait: 'portait', futurSimple: 'portera', plusQueParfait: 'avait porte' },
+  { inf: 'trouver', present: 'trouve', passeCompose: 'a trouve', imparfait: 'trouvait', futurSimple: 'trouvera', plusQueParfait: 'avait trouve' },
+  { inf: 'organiser', present: 'organise', passeCompose: 'a organise', imparfait: 'organisait', futurSimple: 'organisera', plusQueParfait: 'avait organise' }
+];
+
 function shuffleArray(items) {
   const copy = [...items];
   for (let index = copy.length - 1; index > 0; index -= 1) {
@@ -193,7 +378,14 @@ function lexicalLead(topic) {
   return `Контекст сессии: ${topic}.`;
 }
 
-function buildQuestion(grammarTopic, lexicalTopic) {
+function buildQuestion(grammarTopic, lexicalTopic, level = DEFAULT_CEFR_LEVEL, language = DEFAULT_LANGUAGE) {
+  if (language === 'fr') {
+    return buildFrenchQuestion(grammarTopic, lexicalTopic, level);
+  }
+  return buildGermanQuestion(grammarTopic, lexicalTopic, level);
+}
+
+function buildGermanQuestion(grammarTopic, lexicalTopic) {
   if (/Perfekt|Präteritum|Präsens|Futur I|Plusquamperfekt|Sein vs\. haben|Werden|Lassen/.test(grammarTopic)) {
     return makeVerbQuestion(grammarTopic, lexicalTopic);
   }
@@ -788,62 +980,804 @@ function makeDefaultQuestion(grammarTopic, lexicalTopic) {
   };
 }
 
+function buildFrenchQuestion(grammarTopic, lexicalTopic) {
+  const topicKey = normalizeTopicKey(grammarTopic);
+
+  if (/passe compose|imparfait|present|futur proche|futur simple|plus-que-parfait|conditionnel present|subjonctif present|etre vs\. avoir/.test(topicKey)) {
+    return makeFrenchVerbQuestion(topicKey, grammarTopic, lexicalTopic);
+  }
+  if (/imperatif/.test(topicKey)) {
+    return makeFrenchImperativeQuestion(grammarTopic, lexicalTopic);
+  }
+  if (/pouvoir, vouloir, devoir/.test(topicKey)) {
+    return makeFrenchModalQuestion(grammarTopic, lexicalTopic);
+  }
+  if (/verbes pronominaux|verbes avec etre/.test(topicKey)) {
+    return makeFrenchSpecialVerbQuestion(topicKey, grammarTopic, lexicalTopic);
+  }
+  if (/verbes avec a \/ de|infinitif|faire \+ infinitif|gerondif/.test(topicKey)) {
+    return makeFrenchInfinitiveQuestion(topicKey, grammarTopic, lexicalTopic);
+  }
+  if (/articles definis|articles indefinis|articles partitifs|noms au pluriel|articles contractes/.test(topicKey)) {
+    return makeFrenchArticleQuestion(topicKey, grammarTopic, lexicalTopic);
+  }
+  if (/possessifs/.test(topicKey) || /demonstratifs/.test(topicKey)) {
+    return makeFrenchDeterminerQuestion(topicKey, grammarTopic, lexicalTopic);
+  }
+  if (/pronoms/.test(topicKey)) {
+    return makeFrenchPronounQuestion(topicKey, grammarTopic, lexicalTopic);
+  }
+  if (/adjectifs/.test(topicKey)) {
+    return makeFrenchAdjectiveQuestion(topicKey, grammarTopic, lexicalTopic);
+  }
+  if (/comparatif|superlatif/.test(topicKey)) {
+    return makeFrenchComparisonQuestion(topicKey, grammarTopic, lexicalTopic);
+  }
+  if (/nombres et date|prepositions de temps|prepositions de lieu|a \/ en \/ au \/ aux|depuis \/ pendant \/ pour|il y a \/ depuis/.test(topicKey)) {
+    return makeFrenchPrepositionQuestion(topicKey, grammarTopic, lexicalTopic);
+  }
+  if (/negation|questions|est-ce que|inversion|cest \/ il est|connecteurs logiques|parce que \/ puisque \/ comme|quand \/ lorsque \/ pendant que|avant de \/ apres avoir|si \+ imparfait|passif/.test(topicKey)) {
+    return makeFrenchSyntaxQuestion(topicKey, grammarTopic, lexicalTopic);
+  }
+  return makeFrenchDefaultQuestion(grammarTopic, lexicalTopic);
+}
+
+function makeFrenchVerbQuestion(topicKey, grammarTopic, lexicalTopic) {
+  const name = pick(FRENCH_NAMES);
+  const verb = pick(FRENCH_VERB_BANK);
+  const time = pick(FRENCH_TIMES);
+  const place = pick(FRENCH_PLACES);
+
+  if (topicKey.includes('passe compose')) {
+    return {
+      text: `${lexicalLead(lexicalTopic)} Выбери форму passe compose по теме "${grammarTopic}".`,
+      display: `${name} ___ ${time} son sac ${place}.`,
+      options: [verb.passeCompose, verb.imparfait, verb.futurSimple, verb.present],
+      correct: 0
+    };
+  }
+
+  if (topicKey.includes('imparfait')) {
+    return {
+      text: `${lexicalLead(lexicalTopic)} Нужна форма imparfait.`,
+      display: `Quand il neigeait, ${name} ___ lentement ${place}.`,
+      options: [verb.imparfait, verb.passeCompose, verb.futurSimple, verb.present],
+      correct: 0
+    };
+  }
+
+  if (topicKey.includes('futur proche')) {
+    return {
+      text: `${lexicalLead(lexicalTopic)} Выбери конструкцию futur proche.`,
+      display: `Demain, ${name} ___ ${verb.inf} la route ${place}.`,
+      options: ['va', 'a', 'avait', 'est'],
+      correct: 0
+    };
+  }
+
+  if (topicKey.includes('futur simple')) {
+    return {
+      text: `${lexicalLead(lexicalTopic)} Нужен futur simple.`,
+      display: `Demain, ${name} ___ ${place}.`,
+      options: [verb.futurSimple, verb.present, verb.passeCompose, `va ${verb.inf}`],
+      correct: 0
+    };
+  }
+
+  if (topicKey.includes('plus-que-parfait')) {
+    return {
+      text: `${lexicalLead(lexicalTopic)} Выбери форму plus-que-parfait.`,
+      display: `Avant la tempete, ${name} ___ la corde ${place}.`,
+      options: [verb.plusQueParfait, verb.passeCompose, verb.imparfait, verb.futurSimple],
+      correct: 0
+    };
+  }
+
+  if (topicKey.includes('conditionnel present')) {
+    return {
+      text: `${lexicalLead(lexicalTopic)} Нужен conditionnel present.`,
+      display: `Avec plus de temps, ${name} ___ plus longtemps ${place}.`,
+      options: ['resterait', 'restera', 'reste', 'est reste'],
+      correct: 0
+    };
+  }
+
+  if (topicKey.includes('subjonctif present')) {
+    return {
+      text: `${lexicalLead(lexicalTopic)} Выбери форму subjonctif present.`,
+      display: `Il faut que tu ___ prudent ${place}.`,
+      options: ['sois', 'es', 'seras', 'etais'],
+      correct: 0
+    };
+  }
+
+  if (topicKey.includes('etre vs. avoir')) {
+    return {
+      text: `${lexicalLead(lexicalTopic)} Выбери правильный вспомогательный глагол.`,
+      display: `${name} ___ monte au refuge ${time}.`,
+      options: ['est', 'a', 'avait', 'sera'],
+      correct: 0
+    };
+  }
+
+  return {
+    text: `${lexicalLead(lexicalTopic)} Выбери форму present.`,
+    display: `${name} ___ ${time} ${place}.`,
+    options: [verb.present, verb.passeCompose, verb.futurSimple, verb.imparfait],
+    correct: 0
+  };
+}
+
+function makeFrenchImperativeQuestion(grammarTopic, lexicalTopic) {
+  return {
+    text: `${lexicalLead(lexicalTopic)} Выбери форму imperatif.`,
+    display: `___ vite au refuge !`,
+    options: ['Monte', 'Monter', 'Montes', 'Montait'],
+    correct: 0
+  };
+}
+
+function makeFrenchModalQuestion(grammarTopic, lexicalTopic) {
+  return {
+    text: `${lexicalLead(lexicalTopic)} Нужен вариант с pouvoir / vouloir / devoir.`,
+    display: `Tu ___ prendre une lampe pour la nuit.`,
+    options: ['dois', 'es', 'as', 'vas'],
+    correct: 0
+  };
+}
+
+function makeFrenchSpecialVerbQuestion(topicKey, grammarTopic, lexicalTopic) {
+  const name = pick(FRENCH_NAMES);
+
+  if (topicKey.includes('verbes avec etre')) {
+    return {
+      text: `${lexicalLead(lexicalTopic)} Выбери корректную форму с etre.`,
+      display: `Hier, ${name} ___ au village avant la montee.`,
+      options: ['est alle', 'a alle', 'va alle', 'allait'],
+      correct: 0
+    };
+  }
+
+  return {
+    text: `${lexicalLead(lexicalTopic)} Выбери корректный verbe pronominal.`,
+    display: `${name} ___ tot avant le depart.`,
+    options: ['se leve', 'leve', 'sest leve', 'se lever'],
+    correct: 0
+  };
+}
+
+function makeFrenchInfinitiveQuestion(topicKey, grammarTopic, lexicalTopic) {
+  if (topicKey.includes('verbes avec a / de')) {
+    return {
+      text: `${lexicalLead(lexicalTopic)} Выбери правильный предлог перед infinitif.`,
+      display: `Nous essayons ___ partir tot demain.`,
+      options: ['de', 'a', 'pour', 'en'],
+      correct: 0
+    };
+  }
+
+  if (topicKey.includes('faire + infinitif')) {
+    return {
+      text: `${lexicalLead(lexicalTopic)} Нужна конструкция faire + infinitif.`,
+      display: `Le guide fait ___ tout le groupe a laube.`,
+      options: ['avancer', 'avance', 'avancee', 'avances'],
+      correct: 0
+    };
+  }
+
+  if (topicKey.includes('gerondif')) {
+    return {
+      text: `${lexicalLead(lexicalTopic)} Выбери gerondif.`,
+      display: `Il monte ___ regardant la corde.`,
+      options: ['en', 'a', 'de', 'par'],
+      correct: 0
+    };
+  }
+
+  return {
+    text: `${lexicalLead(lexicalTopic)} Выбери конструкцию с infinitif.`,
+    display: `Nous aimons ___ pres du refuge.`,
+    options: ['marcher', 'marchons', 'marche', 'a marche'],
+    correct: 0
+  };
+}
+
+function makeFrenchArticleQuestion(topicKey, grammarTopic, lexicalTopic) {
+  if (topicKey.includes('articles definis')) {
+    return {
+      text: `${lexicalLead(lexicalTopic)} Выбери article defini.`,
+      display: `___ montagne est haute aujourd'hui.`,
+      options: ['La', 'Une', 'Du', 'Aux'],
+      correct: 0
+    };
+  }
+
+  if (topicKey.includes('articles indefinis')) {
+    return {
+      text: `${lexicalLead(lexicalTopic)} Выбери article indefini.`,
+      display: `Nous cherchons ___ refuge pour la nuit.`,
+      options: ['un', 'le', 'du', 'au'],
+      correct: 0
+    };
+  }
+
+  if (topicKey.includes('articles partitifs')) {
+    return {
+      text: `${lexicalLead(lexicalTopic)} Выбери article partitif.`,
+      display: `Elle boit ___ eau apres la montee.`,
+      options: ["de l'", 'la', 'les', 'au'],
+      correct: 0
+    };
+  }
+
+  if (topicKey.includes('noms au pluriel')) {
+    return {
+      text: `${lexicalLead(lexicalTopic)} Выбери форму pluriel.`,
+      display: `Deux ___ arrivent au camp ce soir.`,
+      options: ['amis', 'ami', 'amiss', 'amiz'],
+      correct: 0
+    };
+  }
+
+  return {
+    text: `${lexicalLead(lexicalTopic)} Выбери article contracte.`,
+    display: `Nous allons ___ village apres la lecon.`,
+    options: ['au', 'a le', 'du', 'aux'],
+    correct: 0
+  };
+}
+
+function makeFrenchDeterminerQuestion(topicKey, grammarTopic, lexicalTopic) {
+  if (topicKey.includes('possessifs')) {
+    return {
+      text: `${lexicalLead(lexicalTopic)} Выбери possessif.`,
+      display: `Cest ___ corde, pas la mienne.`,
+      options: ['sa', 'son', 'ses', 'leur'],
+      correct: 0
+    };
+  }
+
+  return {
+    text: `${lexicalLead(lexicalTopic)} Выбери demonstratif.`,
+    display: `Je prends ___ veste-ci pour la neige.`,
+    options: ['cette', 'ce', 'cet', 'ces'],
+    correct: 0
+  };
+}
+
+function makeFrenchPronounQuestion(topicKey, grammarTopic, lexicalTopic) {
+  if (topicKey.includes('relatifs qui / que')) {
+    return {
+      text: `${lexicalLead(lexicalTopic)} Выбери pronom relatif.`,
+      display: `Le sac ___ est rouge est sur la table.`,
+      options: ['qui', 'que', 'ou', 'dont'],
+      correct: 0
+    };
+  }
+
+  if (topicKey.includes('relatifs ou / dont')) {
+    return {
+      text: `${lexicalLead(lexicalTopic)} Выбери pronom relatif.`,
+      display: `Le guide ___ je parle vient demain.`,
+      options: ['dont', 'ou', 'que', 'qui'],
+      correct: 0
+    };
+  }
+
+  if (topicKey.includes('pronoms sujets')) {
+    return {
+      text: `${lexicalLead(lexicalTopic)} Выбери pronom sujet.`,
+      display: `___ arrive tot au refuge.`,
+      options: ['Il', 'Le', 'Lui', 'Y'],
+      correct: 0
+    };
+  }
+
+  if (topicKey.includes('pronoms toniques')) {
+    return {
+      text: `${lexicalLead(lexicalTopic)} Выбери pronom tonique.`,
+      display: `Le guide vient avec ___.`,
+      options: ['elle', 'la', 'le', 'lui'],
+      correct: 0
+    };
+  }
+
+  if (topicKey.includes('pronoms cod')) {
+    return {
+      text: `${lexicalLead(lexicalTopic)} Выбери pronom COD.`,
+      display: `Je vois Lea. Je ___ vois.`,
+      options: ['la', 'lui', 'leur', 'y'],
+      correct: 0
+    };
+  }
+
+  if (topicKey.includes('pronoms coi')) {
+    return {
+      text: `${lexicalLead(lexicalTopic)} Выбери pronom COI.`,
+      display: `Je telephone a Jules. Je ___ telephone.`,
+      options: ['lui', 'le', 'la', 'les'],
+      correct: 0
+    };
+  }
+
+  return {
+    text: `${lexicalLead(lexicalTopic)} Выбери корректный pronom.`,
+    display: `Tu connais ces cartes ? Oui, je ___ connais.`,
+    options: ['les', 'leur', 'y', 'en'],
+    correct: 0
+  };
+}
+
+function makeFrenchAdjectiveQuestion(topicKey, grammarTopic, lexicalTopic) {
+  if (topicKey.includes('accord des adjectifs')) {
+    return {
+      text: `${lexicalLead(lexicalTopic)} Нужен правильный accord des adjectifs.`,
+      display: `Les chaussures sont ___ pour la neige.`,
+      options: ['utiles', 'utile', 'util', 'utilese'],
+      correct: 0
+    };
+  }
+
+  return {
+    text: `${lexicalLead(lexicalTopic)} Выбери корректную форму adjectif.`,
+    display: `Cest une veste ___ pour la pluie.`,
+    options: ['chaude', 'chaud', 'chaudes', 'chade'],
+    correct: 0
+  };
+}
+
+function makeFrenchComparisonQuestion(topicKey, grammarTopic, lexicalTopic) {
+  if (topicKey.includes('superlatif')) {
+    return {
+      text: `${lexicalLead(lexicalTopic)} Выбери superlatif.`,
+      display: `Cest ___ refuge du secteur.`,
+      options: ['le plus calme', 'plus calme', 'le plus calmes', 'tres calme'],
+      correct: 0
+    };
+  }
+
+  return {
+    text: `${lexicalLead(lexicalTopic)} Выбери comparatif.`,
+    display: `Cette voie est ___ que lautre.`,
+    options: ['plus raide', 'le plus raide', 'aussi la raide', 'plus de raide'],
+    correct: 0
+  };
+}
+
+function makeFrenchPrepositionQuestion(topicKey, grammarTopic, lexicalTopic) {
+  if (topicKey.includes('nombres et date')) {
+    return {
+      text: `${lexicalLead(lexicalTopic)} Выбери естественный вариант даты.`,
+      display: `Le cours commence ___ 3 mai.`,
+      options: ['le', 'au', 'en', 'a'],
+      correct: 0
+    };
+  }
+
+  if (topicKey.includes('prepositions de temps')) {
+    return {
+      text: `${lexicalLead(lexicalTopic)} Выбери preposition de temps.`,
+      display: `Nous partons ___ matin.`,
+      options: ['le', 'a', 'en', 'au'],
+      correct: 0
+    };
+  }
+
+  if (topicKey.includes('prepositions de lieu')) {
+    return {
+      text: `${lexicalLead(lexicalTopic)} Выбери preposition de lieu.`,
+      display: `Le guide attend ___ refuge.`,
+      options: ['au', 'en', 'de', 'pour'],
+      correct: 0
+    };
+  }
+
+  if (topicKey.includes('a / en / au / aux')) {
+    return {
+      text: `${lexicalLead(lexicalTopic)} Выбери форму с pays ou ville.`,
+      display: `Elle habite ___ France depuis deux ans.`,
+      options: ['en', 'a', 'au', 'aux'],
+      correct: 0
+    };
+  }
+
+  if (topicKey.includes('il y a / depuis')) {
+    return {
+      text: `${lexicalLead(lexicalTopic)} Выбери корректный маркер времени.`,
+      display: `Nous sommes ici ___ deux jours.`,
+      options: ['depuis', 'pendant', 'pour', 'dans'],
+      correct: 0
+    };
+  }
+
+  return {
+    text: `${lexicalLead(lexicalTopic)} Выбери правильный предлог.`,
+    display: `Il travaille ici ___ trois ans.`,
+    options: ['depuis', 'pendant', 'pour', 'a'],
+    correct: 0
+  };
+}
+
+function makeFrenchSyntaxQuestion(topicKey, grammarTopic, lexicalTopic) {
+  if (topicKey.includes('negation')) {
+    return {
+      text: `${lexicalLead(lexicalTopic)} Выбери корректную negation.`,
+      display: `Je ___ vois pas la corde.`,
+      options: ['ne', 'pas', 'jamais', 'plus'],
+      correct: 0
+    };
+  }
+
+  if (topicKey.includes('est-ce que')) {
+    return {
+      text: `${lexicalLead(lexicalTopic)} Выбери вопрос с est-ce que.`,
+      display: `___ tu es pret pour le depart ?`,
+      options: ['Est-ce que', 'Parce que', 'Si', 'Comme'],
+      correct: 0
+    };
+  }
+
+  if (topicKey.includes('inversion')) {
+    return {
+      text: `${lexicalLead(lexicalTopic)} Выбери форму с inversion.`,
+      display: `___-vous une question ?`,
+      options: ['Avez', 'Avoir', 'Aviez', 'A'],
+      correct: 0
+    };
+  }
+
+  if (topicKey.includes('cest / il est')) {
+    return {
+      text: `${lexicalLead(lexicalTopic)} Выбери правильный вариант.`,
+      display: `___ tard, on redescend.`,
+      options: ['Il est', 'Cest', 'Ils sont', 'Ce sont'],
+      correct: 0
+    };
+  }
+
+  if (topicKey.includes('parce que / puisque / comme')) {
+    return {
+      text: `${lexicalLead(lexicalTopic)} Выбери правильный connecteur.`,
+      display: `Nous restons ici ___ il fait nuit.`,
+      options: ['parce que', 'quand', 'si', 'avant de'],
+      correct: 0
+    };
+  }
+
+  if (topicKey.includes('quand / lorsque / pendant que')) {
+    return {
+      text: `${lexicalLead(lexicalTopic)} Выбери корректный временной союз.`,
+      display: `___ tu montes, regarde la corde.`,
+      options: ['Quand', 'Parce que', 'Avant de', 'Si bien que'],
+      correct: 0
+    };
+  }
+
+  if (topicKey.includes('avant de / apres avoir')) {
+    return {
+      text: `${lexicalLead(lexicalTopic)} Выбери правильную конструкцию.`,
+      display: `___ verifier la carte, nous sommes partis.`,
+      options: ['Apres avoir', 'Avant de', 'Quand', 'Puisque'],
+      correct: 0
+    };
+  }
+
+  if (topicKey.includes('si + imparfait')) {
+    return {
+      text: `${lexicalLead(lexicalTopic)} Выбери корректное условное продолжение.`,
+      display: `Si javais du temps, je ___ plus.`,
+      options: ['marcherais', 'marchais', 'marcherai', 'ai marche'],
+      correct: 0
+    };
+  }
+
+  if (topicKey.includes('passif')) {
+    return {
+      text: `${lexicalLead(lexicalTopic)} Выбери корректное passif.`,
+      display: `La corde ___ par le guide chaque matin.`,
+      options: ['est verifiee', 'verifie', 'a verifier', 'sera verifier'],
+      correct: 0
+    };
+  }
+
+  if (topicKey.includes('connecteurs logiques')) {
+    return {
+      text: `${lexicalLead(lexicalTopic)} Выбери логическую связку.`,
+      display: `Il neige, ___ nous continuons lentement.`,
+      options: ['mais', 'que', 'si', 'avant'],
+      correct: 0
+    };
+  }
+
+  return {
+    text: `${lexicalLead(lexicalTopic)} Выбери естественный вопрос.`,
+    display: `___ tu comprends la consigne ?`,
+    options: ['Est-ce que', 'Comme', 'Puisque', 'Pendant que'],
+    correct: 0
+  };
+}
+
+function makeFrenchDefaultQuestion(grammarTopic, lexicalTopic) {
+  const name = pick(FRENCH_NAMES);
+  const adjective = pick(FRENCH_ADJECTIVES);
+  return {
+    text: `${lexicalLead(lexicalTopic)} Быстро выбери грамматически правильный вариант по теме "${grammarTopic}".`,
+    display: `${name} cherche un endroit ${adjective} au camp.`,
+    options: [
+      `${name} cherche un endroit ${adjective} au camp.`,
+      `${name} cherchent un endroit ${adjective} au camp.`,
+      `${name} cherche un endroit ${adjective}es au camp.`,
+      `${name} a cherche un endroit ${adjective} au camp maintenant.`
+    ],
+    correct: 0
+  };
+}
+
+const AI_QUESTION_BATCH_SIZE = 30;
+const AI_PREFETCH_LOW_WATERMARK = 4;
+const AI_CLICK_WAIT_MS = 3500;
+const AI_FETCH_TIMEOUT_MS = 12000;
+
+function isValidRemoteQuestion(question) {
+  return Boolean(
+    question &&
+      typeof question.text === 'string' &&
+      typeof question.display === 'string' &&
+      Array.isArray(question.options) &&
+      question.options.length === 4 &&
+      typeof question.correct === 'number' &&
+      question.correct >= 0 &&
+      question.correct <= 3
+  );
+}
+
+function isWordOrderTopic(topic) {
+  return /wortstellung/i.test(normalizeTopicKey(topic));
+}
+
+function slotConfigSignature(slotConfigs) {
+  return slotConfigs
+    .filter(Boolean)
+    .map((slot) => `${slot.slotDef && slot.slotDef.id}:${slot.grammarTopic}`)
+    .join('|');
+}
+
+function wait(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
 class QuestionManager {
-  constructor(level = DEFAULT_CEFR_LEVEL) {
-    this.level = level;
-    this.lexicalTopic = LEXICAL_TOPICS[0];
+  constructor(level = DEFAULT_CEFR_LEVEL, language = DEFAULT_LANGUAGE) {
+    this.level = level || DEFAULT_CEFR_LEVEL;
+    this.language = language || DEFAULT_LANGUAGE;
+    this.lexicalTopic = getLanguageLexicalTopics(this.language)[0];
     this.slots = [];
-    this.history = Object.create(null);
+    this.questionPool = Object.create(null);
+    this.fetching = Object.create(null);
+    this.usedDisplays = Object.create(null);
+    this.lastQuestion = null;
+    this.slotsSignature = '';
   }
 
   setLevel(level) {
-    this.level = level || DEFAULT_CEFR_LEVEL;
+    const nextLevel = level || DEFAULT_CEFR_LEVEL;
+    if (this.level !== nextLevel) {
+      this.level = nextLevel;
+      this._resetPools();
+    }
+  }
+
+  setLanguage(language) {
+    const nextLanguage = language || DEFAULT_LANGUAGE;
+    if (this.language !== nextLanguage) {
+      this.language = nextLanguage;
+      this.lexicalTopic = getLanguageLexicalTopics(this.language)[0];
+      this._resetPools();
+      return;
+    }
+
+    const lexicalTopics = getLanguageLexicalTopics(this.language);
+    if (!lexicalTopics.includes(this.lexicalTopic)) {
+      this.lexicalTopic = lexicalTopics[0];
+      this._resetPools();
+    }
   }
 
   setLexicalTopic(topic) {
-    this.lexicalTopic = topic || LEXICAL_TOPICS[0];
+    const lexicalTopics = getLanguageLexicalTopics(this.language);
+    const nextTopic = lexicalTopics.includes(topic) ? topic : lexicalTopics[0];
+    if (this.lexicalTopic !== nextTopic) {
+      this.lexicalTopic = nextTopic;
+      this._resetPools();
+    }
   }
 
   configureSlots(slotConfigs) {
-    this.slots = slotConfigs.filter(Boolean);
-    this.history = Object.create(null);
+    const nextSlots = slotConfigs.filter(Boolean);
+    const nextSignature = slotConfigSignature(nextSlots);
+    if (this.slotsSignature !== nextSignature) {
+      this.slots = nextSlots;
+      this.slotsSignature = nextSignature;
+      this._resetPools();
+      return;
+    }
+
+    this.slots = nextSlots;
   }
 
-  getQuestion(slotId) {
+  async prefetchAll() {
+    const tasks = this.slots.map((slot) => this._ensurePool(slot.slotDef.id));
+    await Promise.allSettled(tasks);
+  }
+
+  shuffleAllPools() {
+    Object.keys(this.questionPool).forEach((slotId) => {
+      this.questionPool[slotId] = shuffleArray(this.questionPool[slotId]);
+    });
+  }
+
+  async getQuestion(slotId) {
     const slotConfig = this.slots.find((slot) => slot.slotDef.id === slotId);
     if (!slotConfig) {
       return null;
     }
 
-    let question = null;
-    let attempts = 0;
-    const memory = this.history[slotId] || new Set();
+    await Promise.race([
+      this._ensurePool(slotId),
+      wait(AI_CLICK_WAIT_MS)
+    ]);
+    const pool = this.questionPool[slotId];
+    if (!pool || pool.length === 0) {
+      return this._fallbackQuestion(slotConfig);
+    }
 
-    do {
-      question = buildQuestion(slotConfig.grammarTopic, this.lexicalTopic, this.level);
-      attempts += 1;
-    } while (memory.has(question.display) && attempts < 8);
+    const rawQuestion = pool.shift();
+    this.lastQuestion = { slotId, question: rawQuestion };
 
-    memory.add(question.display);
-    this.history[slotId] = memory;
+    if (pool.length <= AI_PREFETCH_LOW_WATERMARK) {
+      this._ensurePool(slotId);
+    }
 
-    const shuffled = shuffleArray(
-      question.options.map((option, index) => ({
-        option,
-        correct: index === question.correct
-      }))
-    );
+    return this._formatQuestion(rawQuestion, slotConfig);
+  }
+
+  onCorrectAnswer(slotId) {
+    if (this.lastQuestion && this.lastQuestion.slotId === slotId) {
+      const set = this.usedDisplays[slotId] || new Set();
+      set.add(this.lastQuestion.question.display);
+      this.usedDisplays[slotId] = set;
+      this.lastQuestion = null;
+    }
+
+    if (!this.questionPool[slotId] || this.questionPool[slotId].length <= AI_PREFETCH_LOW_WATERMARK) {
+      this._ensurePool(slotId);
+    }
+  }
+
+  onWrongAnswer(slotId) {
+    this.returnLastQuestion(slotId);
+  }
+
+  returnLastQuestion(slotId) {
+    if (!this.lastQuestion || this.lastQuestion.slotId !== slotId) {
+      return;
+    }
+
+    const pool = this.questionPool[slotId] || [];
+    const position = Math.floor(Math.random() * (pool.length + 1));
+    pool.splice(position, 0, this.lastQuestion.question);
+    this.questionPool[slotId] = pool;
+    this.lastQuestion = null;
+  }
+
+  _resetPools() {
+    this.questionPool = Object.create(null);
+    this.fetching = Object.create(null);
+    this.usedDisplays = Object.create(null);
+    this.lastQuestion = null;
+  }
+
+  async _ensurePool(slotId) {
+    if (this.fetching[slotId]) {
+      return this.fetching[slotId];
+    }
+
+    const pool = this.questionPool[slotId];
+    if (pool && pool.length > 0) {
+      return pool;
+    }
+
+    const slotConfig = this.slots.find((slot) => slot.slotDef.id === slotId);
+    if (!slotConfig) {
+      return [];
+    }
+
+    this.fetching[slotId] = this._fetchQuestions(slotConfig)
+      .catch((error) => {
+        console.warn(`Не удалось загрузить вопросы для слота ${slotId}:`, error);
+        return [];
+      })
+      .finally(() => {
+        delete this.fetching[slotId];
+      });
+
+    return this.fetching[slotId];
+  }
+
+  async _fetchQuestions(slotConfig) {
+    const slotId = slotConfig.slotDef.id;
+    const seen = Array.from(this.usedDisplays[slotId] || []).slice(-12);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), AI_FETCH_TIMEOUT_MS);
+    let response;
+
+    try {
+      response = await fetch('/api/generate-questions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
+        body: JSON.stringify({
+          level: this.level,
+          language: this.language,
+          lexicalTopic: this.lexicalTopic,
+          grammarTopic: slotConfig.grammarTopic,
+          isWortstellung: Boolean(slotConfig.slotDef.isWortstellung || isWordOrderTopic(slotConfig.grammarTopic)),
+          count: AI_QUESTION_BATCH_SIZE,
+          exclude: seen
+        })
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const data = await response.json();
+    const valid = (data.questions || []).filter((question) => isValidRemoteQuestion(question));
+    if (!valid.length) {
+      return this.questionPool[slotId] || [];
+    }
+
+    const pool = [...(this.questionPool[slotId] || []), ...shuffleArray(valid)];
+    this.questionPool[slotId] = pool;
+    return pool;
+  }
+
+  _formatQuestion(rawQuestion, slotConfig) {
+    const correctAnswer = rawQuestion.options[rawQuestion.correct];
+    const shuffledOptions = shuffleArray(rawQuestion.options);
 
     return {
-      slotId,
+      slotId: slotConfig.slotDef.id,
       slotDef: slotConfig.slotDef,
       grammarTopic: slotConfig.grammarTopic,
       level: this.level,
-      text: question.text,
-      display: question.display,
+      language: this.language,
+      text: rawQuestion.text,
+      display: rawQuestion.display,
       options: {
-        options: shuffled.map((item) => item.option),
-        correctIndex: shuffled.findIndex((item) => item.correct)
+        options: shuffledOptions,
+        correctIndex: shuffledOptions.indexOf(correctAnswer)
+      }
+    };
+  }
+
+  _fallbackQuestion(slotConfig) {
+    return {
+      slotId: slotConfig.slotDef.id,
+      slotDef: slotConfig.slotDef,
+      grammarTopic: slotConfig.grammarTopic,
+      level: this.level,
+      language: this.language,
+      text: 'Резервное упражнение',
+      display: 'Сервер вопросов временно недоступен. Нажмите OK, чтобы получить бонус и не останавливать игру.',
+      options: {
+        options: ['OK', 'Пауза', 'Ошибка', 'Назад'],
+        correctIndex: 0
       }
     };
   }

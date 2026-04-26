@@ -7,9 +7,13 @@ function clamp01(value) {
   return Math.max(0, Math.min(1, value));
 }
 
+window.BERG_ROUTE_LANE_SPACING = window.BERG_ROUTE_LANE_SPACING || 6.35;
+
 class BergRenderer {
-  constructor(canvas) {
+  constructor(canvas, options = {}) {
     this.canvas = canvas;
+    this.atmospherePreset = options.atmospherePreset || 'classic';
+    this.isNewYearPreset = this.atmospherePreset === 'newyear';
     this.scene = new THREE.Scene();
     // Tighter, denser atmospheric haze — the far silhouettes now fade into
     // the sky instead of sitting hard against a cool-black backdrop.
@@ -18,7 +22,7 @@ class BergRenderer {
     this.routeHeight = 228;
     this.routeScale = this.routeHeight / 100;
     this.verticalCompression = 0.52;
-    this.summitFocusLocal = new THREE.Vector3(0, 239.5, -0.6);
+    this.summitFocusLocal = new THREE.Vector3(0, 246.5, -8.2);
 
     this.camera = new THREE.PerspectiveCamera(74, window.innerWidth / window.innerHeight, 0.1, 520);
     this.camera.position.set(0, 2, 4.2);
@@ -49,11 +53,23 @@ class BergRenderer {
     this.tempVecA = new THREE.Vector3();
     this.tempVecB = new THREE.Vector3();
     this.tempVecC = new THREE.Vector3();
+    this.tempVecD = new THREE.Vector3();
+    this.tempVecE = new THREE.Vector3();
+    this.tempVecF = new THREE.Vector3();
+    this.tempVecG = new THREE.Vector3();
+    this.tempMatA = new THREE.Matrix4();
+
+    this.assetMountain = null;
+    this.assetSurfaceSampler = null;
+    this.assetSurfaceReady = false;
+    this.playerSurfaceClearance = 0.68;
+    this.ropeSurfaceClearance = 0.13;
 
     this.rockMeshes = new Map();
-    this.perchedBoulderMeshes = new Map();
+    this.fissureMeshes = new Map();
     this.avalancheMeshes = new Map();
     this.footprints = new Map();
+    this.routeLanterns = [];
     this.cloudCards = [];
     this.crackNodes = [];
     this.icePanels = [];
@@ -141,6 +157,62 @@ class BergRenderer {
         }
         ctx.strokeStyle = `rgba(0,0,0,${0.14 + Math.random() * 0.1})`;
         ctx.lineWidth = 1 + Math.random() * 2;
+        ctx.stroke();
+      }
+    });
+
+    const boulderMap = this._makeTexture(512, (ctx, size) => {
+      const gradient = ctx.createLinearGradient(0, 0, size, size);
+      gradient.addColorStop(0, '#9ea6ab');
+      gradient.addColorStop(0.28, '#767d82');
+      gradient.addColorStop(0.64, '#575d62');
+      gradient.addColorStop(1, '#353b40');
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, size, size);
+
+      for (let patch = 0; patch < 260; patch += 1) {
+        const x = Math.random() * size;
+        const y = Math.random() * size;
+        const radius = 18 + Math.random() * 54;
+        const glow = ctx.createRadialGradient(x, y, 0, x, y, radius);
+        const tint = Math.random();
+        const lightTone = tint > 0.55 ? '170,176,180' : '132,138,142';
+        const darkTone = tint > 0.55 ? '76,81,86' : '54,58,62';
+        glow.addColorStop(0, `rgba(${lightTone},${0.06 + Math.random() * 0.08})`);
+        glow.addColorStop(0.6, `rgba(${darkTone},${0.04 + Math.random() * 0.08})`);
+        glow.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = glow;
+        ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2);
+      }
+
+      for (let speck = 0; speck < 2100; speck += 1) {
+        const x = Math.random() * size;
+        const y = Math.random() * size;
+        const width = 2 + Math.random() * 10;
+        const height = 1.5 + Math.random() * 7;
+        ctx.fillStyle = Math.random() > 0.48
+          ? `rgba(255,255,255,${0.015 + Math.random() * 0.04})`
+          : `rgba(0,0,0,${0.03 + Math.random() * 0.06})`;
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate((Math.random() - 0.5) * 1.2);
+        ctx.fillRect(-width * 0.5, -height * 0.5, width, height);
+        ctx.restore();
+      }
+
+      for (let seam = 0; seam < 90; seam += 1) {
+        const startX = Math.random() * size;
+        const startY = Math.random() * size;
+        ctx.beginPath();
+        ctx.moveTo(startX, startY);
+        for (let step = 1; step < 5; step += 1) {
+          ctx.lineTo(
+            startX + step * (10 + Math.random() * 18),
+            startY + (Math.random() * 20 - 10)
+          );
+        }
+        ctx.strokeStyle = `rgba(28,31,34,${0.08 + Math.random() * 0.08})`;
+        ctx.lineWidth = 0.8 + Math.random() * 1.6;
         ctx.stroke();
       }
     });
@@ -324,14 +396,14 @@ class BergRenderer {
         roughness: 1
       }),
       rope: new THREE.MeshStandardMaterial({
-        color: 0xc8d7df,
+        color: 0xbfced7,
         roughness: 0.76,
         metalness: 0.08
       }),
       ropeLine: new THREE.LineBasicMaterial({
-        color: 0xeff8ff,
+        color: 0xdbe4ea,
         transparent: true,
-        opacity: 0.6
+        opacity: 0.18
       }),
       tether: new THREE.LineBasicMaterial({
         color: 0xfdf5e7,
@@ -344,10 +416,11 @@ class BergRenderer {
         metalness: 0.86
       }),
       rock: new THREE.MeshStandardMaterial({
-        map: rockMap,
-        color: 0x435661,
-        roughness: 1,
-        metalness: 0.04
+        map: boulderMap,
+        color: 0xc8cdd1,
+        roughness: 0.97,
+        metalness: 0.03,
+        vertexColors: true
       }),
       trail: new THREE.SpriteMaterial({
         map: spriteMap,
@@ -582,6 +655,20 @@ class BergRenderer {
         transparent: true,
         opacity: 0.8,
         depthWrite: false
+      }),
+      lanternFrame: new THREE.MeshStandardMaterial({
+        color: 0x4e3a23,
+        roughness: 0.58,
+        metalness: 0.62
+      }),
+      lanternGlass: new THREE.MeshStandardMaterial({
+        color: 0xffdc9f,
+        emissive: 0xe0a348,
+        emissiveIntensity: 1.3,
+        roughness: 0.18,
+        metalness: 0.02,
+        transparent: true,
+        opacity: 0.92
       })
     };
   }
@@ -635,8 +722,9 @@ class BergRenderer {
     this.moonDisk.scale.set(3.4, 3.4, 1);
     this.scene.add(this.moonDisk);
 
-    const starPositions = new Float32Array(850 * 3);
-    for (let index = 0; index < 850; index += 1) {
+    const starCount = this.isNewYearPreset ? 1280 : 850;
+    const starPositions = new Float32Array(starCount * 3);
+    for (let index = 0; index < starCount; index += 1) {
       const radius = 160 + Math.random() * 20;
       const theta = Math.random() * Math.PI * 2;
       const phi = Math.random() * Math.PI * 0.46;
@@ -647,6 +735,10 @@ class BergRenderer {
     const starGeometry = new THREE.BufferGeometry();
     starGeometry.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
     this.starField = new THREE.Points(starGeometry, this.materials.star);
+    if (this.isNewYearPreset) {
+      this.starField.material.color.setHex(0xf5d26b);
+      this.starField.material.size = 1.34;
+    }
     this.scene.add(this.starField);
 
     // Distant ridge silhouettes: extrude a jagged polyline per band so the
@@ -752,10 +844,10 @@ class BergRenderer {
   // Named mountain constants shared by the mesh builder and anything that
   // needs to sit on the generated slope.
   _mountainMeta() {
-    const LANE_X = 2.85;
-    const ROUTE_HALF = LANE_X * 1.5 + 0.35;
-    const MOUNT_WIDTH = 240;
-    const MOUNT_HEIGHT = 320;
+    const LANE_X = window.BERG_ROUTE_LANE_SPACING || 6.35;
+    const ROUTE_HALF = LANE_X * 1.58 + 1.1;
+    const MOUNT_WIDTH = 264;
+    const MOUNT_HEIGHT = 336;
     return {
       LANE_X,
       ROUTE_HALF,
@@ -792,6 +884,8 @@ class BergRenderer {
     const outsideCorridor = absX > m.ROUTE_HALF;
     const insideRoute = !outsideCorridor;
     const flankFrac = outsideCorridor ? clamp01((absX - m.ROUTE_HALF) / m.FLANK_SPAN) : 0;
+    const routeCenter = insideRoute ? clamp01(1 - absX / (m.ROUTE_HALF * 0.94)) : 0;
+    const routeSmoothMask = insideRoute ? Math.pow(routeCenter, 1.35) : 0;
     // Soft falloff mask for the far flanks so noise and crags ease off before
     // the plane edge — prevents sharp "holes" when the silhouette recedes.
     const edgeFalloff = 1 - smoothStep(0.72, 1, flankFrac);
@@ -799,39 +893,109 @@ class BergRenderer {
     const noise = (nx, ny, fx, fy) =>
       Math.sin(nx * fx + ny * fy * 1.3) * Math.cos(ny * fx * 1.1 - nx * fy * 0.7);
 
-    const spineBank = Math.pow(Math.max(0, 1 - absX / 22), 1.3) * 3.1;
-    const terrace = (Math.sin(meshY * 0.085) * 1.35 + Math.sin(meshY * 0.04 - x * 0.18) * 0.9) * edgeFalloff;
+    const laneCenters = [-m.LANE_X, 0, m.LANE_X];
+    let laneGullies = 0;
+    let laneRibs = 0;
+    let laneShoulders = 0;
+    laneCenters.forEach((center, laneIndex) => {
+      const laneDist = Math.abs(baseX - center);
+      const trenchWidth = 1.24 + slopeRatio * 0.18 + laneIndex * 0.02;
+      const trench = Math.max(0, 1 - laneDist / trenchWidth);
+      laneGullies += Math.pow(trench, 2.8) * (1.08 + Math.sin(meshY * 0.095 + laneIndex * 1.6) * 0.14);
+    });
+    [-m.LANE_X * 0.5, m.LANE_X * 0.5].forEach((center, ribIndex) => {
+      const ribDist = Math.abs(baseX - center);
+      const rib = Math.max(0, 1 - ribDist / 1.05);
+      laneRibs += Math.pow(rib, 2.2) * (0.92 + Math.cos(meshY * 0.082 + ribIndex * 1.4) * 0.12);
+    });
+    [-m.LANE_X * 1.16, m.LANE_X * 1.16].forEach((center, shoulderIndex) => {
+      const shoulderDist = Math.abs(baseX - center);
+      const shoulder = Math.max(0, 1 - shoulderDist / 1.7);
+      laneShoulders += Math.pow(shoulder, 1.8) * (0.66 + Math.sin(meshY * 0.07 + shoulderIndex * 1.7) * 0.09);
+    });
+
+    const spineBank = Math.pow(Math.max(0, 1 - absX / 25.5), 1.22) * 4.8;
+    const terrace =
+      (Math.sin(meshY * 0.076 - x * 0.11) * 1.9 + Math.sin(meshY * 0.038 - x * 0.22) * 1.28) * edgeFalloff;
     const crags =
-      noise(x, meshY, 0.32, 0.22) * 1.4 +
-      noise(x, meshY, 0.78, 0.61) * 0.85 +
-      noise(x, meshY, 1.6, 1.1) * 0.38 +
-      noise(x, meshY, 3.1, 2.3) * 0.22;
-    const sideMass = smoothStep(m.ROUTE_HALF + 2, m.ROUTE_HALF + 14, absX) * (3.2 + Math.sin(meshY * 0.14) * 0.6) * edgeFalloff;
-    const shoulderRise = Math.sin(slopeRatio * Math.PI) * smoothStep(m.ROUTE_HALF, m.ROUTE_HALF + 14, absX) * 1.6 * edgeFalloff;
-    const crownLift = smoothStep(0.7, 1, slopeRatio) * Math.max(0, 6.2 - absX * 0.32);
+      noise(x, meshY, 0.28, 0.21) * 1.65 +
+      noise(x, meshY, 0.74, 0.58) * 1.05 +
+      noise(x, meshY, 1.52, 1.02) * 0.54 +
+      noise(x, meshY, 3.4, 2.2) * 0.28;
+    const fractureNoise =
+      Math.abs(noise(x, meshY, 1.72, 1.28)) * 1.06 +
+      Math.abs(Math.sin(meshY * 0.17 + x * 0.58)) * 0.56;
+    const shearBands =
+      Math.pow(Math.abs(Math.sin(meshY * 0.132 + x * 0.28)), 5.5) * (1.15 + flankFrac * 0.9) * edgeFalloff;
+    const faultScarps =
+      smoothStep(0.68, 0.98, Math.abs(Math.sin(meshY * 0.094 - x * 0.19))) *
+      (0.95 + Math.abs(Math.sin(meshY * 0.041 + x * 0.33)) * 0.75) *
+      edgeFalloff;
+    const brokenFaces =
+      smoothStep(0.2, 0.96, slopeRatio) *
+      edgeFalloff *
+      (Math.abs(Math.sin(meshY * 0.123 + x * 0.41)) * 1.2 + Math.abs(Math.sin(meshY * 0.29 - x * 0.17)) * 0.45);
+    const chimneyCuts =
+      smoothStep(0.18, 0.88, slopeRatio) *
+      Math.max(0, 1 - Math.abs(Math.sin(x * 0.34 + meshY * 0.068)) / 0.72) *
+      0.92 *
+      edgeFalloff;
+    const sideMass = smoothStep(m.ROUTE_HALF + 1.5, m.ROUTE_HALF + 22, absX) * (5.1 + Math.sin(meshY * 0.118) * 0.92) * edgeFalloff;
+    const shoulderRise = Math.sin(slopeRatio * Math.PI) * smoothStep(m.ROUTE_HALF, m.ROUTE_HALF + 18, absX) * 2.6 * edgeFalloff;
+    const crownLift = smoothStep(0.68, 1, slopeRatio) * Math.max(0, 8.2 - absX * 0.32);
+    const brokenShelves =
+      (Math.sin(meshY * 0.16 + x * 0.38) * 0.92 + Math.sin(meshY * 0.36 - x * 0.21) * 0.42) *
+      smoothStep(0.1, 0.92, slopeRatio) *
+      edgeFalloff;
+    const buttress =
+      smoothStep(m.ROUTE_HALF + 0.8, m.ROUTE_HALF + 22, absX) * (2.4 + Math.sin(meshY * 0.064 + absX * 0.18) * 0.84) * edgeFalloff;
     // Smooth, deep recession into the distance with a cubic taper so the far
     // silhouette fades into the horizon instead of ending in a cliff edge.
-    const flankRecession = -(Math.pow(flankFrac, 1.25) * 26 + Math.pow(flankFrac, 3) * 14);
+    const flankRecession = -(Math.pow(flankFrac, 1.16) * 29 + Math.pow(flankFrac, 3.2) * 18);
     const couloirDepth = insideRoute
-      ? smoothStep(0, m.ROUTE_HALF, m.ROUTE_HALF - absX) * (0.78 + Math.sin(meshY * 0.22) * 0.1)
+      ? smoothStep(0, m.ROUTE_HALF, m.ROUTE_HALF - absX) * (0.74 + Math.sin(meshY * 0.19) * 0.11)
       : 0;
-    const ledges = insideRoute ? Math.sin(meshY * 0.55 + x * 0.2) * 0.22 : 0;
-    const apexPush = smoothStep(0.85, 1, slopeRatio) * Math.max(0, 3.4 - absX * 0.42);
+    const ledges = insideRoute ? Math.sin(meshY * 0.47 + x * 0.24) * 0.28 : 0;
+    const routeChatter = insideRoute ? noise(x, meshY, 2.1, 1.46) * 0.22 : 0;
+    const apexPush = smoothStep(0.84, 1, slopeRatio) * Math.max(0, 4.6 - absX * 0.34);
+    const summitRecess = insideRoute
+      ? smoothStep(0.84, 0.985, slopeRatio) *
+        (0.9 + routeSmoothMask * 2.4 + Math.max(0, 1 - absX / (m.ROUTE_HALF + 0.6)) * 0.35)
+      : 0;
+    const fractureMask = clamp01((faultScarps * 0.45 + brokenFaces * 0.18 + shearBands * 0.16) / 1.55);
+    const routeMacroScale = insideRoute ? 0.52 + (1 - routeSmoothMask) * 0.12 : 1;
+    const routeCragScale = insideRoute ? 0.34 + (1 - routeSmoothMask) * 0.16 : 1;
+    const routeBandScale = insideRoute ? 0.18 + (1 - routeSmoothMask) * 0.2 : 1;
+    const routeMicroScale = insideRoute ? 0.28 + (1 - routeSmoothMask) * 0.16 : 1;
+    const routeLaneScale = insideRoute ? 0.72 + (1 - routeSmoothMask) * 0.14 : 1;
 
     const z =
-      -2.8 +
+      -4.2 +
       spineBank +
-      terrace +
-      crags * (insideRoute ? 0.48 : 0.7 * edgeFalloff) +
-      sideMass +
+      terrace * (insideRoute ? 0.88 * routeMacroScale : 0.88) +
+      crags * (insideRoute ? 0.62 * routeCragScale : 0.88 * edgeFalloff) +
+      fractureNoise * (insideRoute ? 0.32 * routeMicroScale : 0.62) * edgeFalloff +
+      shearBands * (insideRoute ? 1.18 * routeBandScale : 1.18) +
+      faultScarps * (insideRoute ? 1.22 * routeBandScale : 1.22) +
+      brokenFaces * (insideRoute ? 0.56 * routeBandScale : 0.56) -
+      chimneyCuts * (insideRoute ? 0.92 * routeBandScale : 0.92) +
+      sideMass * 1.08 +
       shoulderRise +
+      buttress * 1.16 +
       crownLift +
-      ledges +
+      brokenShelves * (insideRoute ? 1.18 * routeMacroScale : 1.18) +
+      ledges * (insideRoute ? routeMicroScale : 1) +
+      routeChatter * (insideRoute ? routeMicroScale : 1) +
+      laneRibs * (insideRoute ? 1.04 * routeLaneScale : 1.04) +
+      laneShoulders * (insideRoute ? 0.84 * routeLaneScale : 0.84) +
       apexPush +
+      brokenShelves * smoothStep(0.88, 1, slopeRatio) * 0.06 -
+      summitRecess +
       flankRecession -
-      couloirDepth;
+      couloirDepth * (insideRoute ? 1.58 + routeSmoothMask * 0.22 : 1.44) -
+      laneGullies * ((insideRoute ? 1.2 - routeSmoothMask * 0.08 : 1.34) + slopeRatio * (insideRoute ? 0.24 : 0.38));
 
-    return { x, z, insideRoute, slopeRatio, crags, terrace, flankFrac };
+    return { x, z, insideRoute, slopeRatio, crags, terrace, flankFrac, fractureMask, routeSmoothMask };
   }
 
   // Given a prop baseX plus its environmentGroup-local y, return the
@@ -840,6 +1004,20 @@ class BergRenderer {
   // it reads as attached instead of floating above it.
   _faceAnchor(baseX, worldY, embedDepth = 0) {
     const m = this._mountainMeta();
+    const assetSurface = this._sampleMountainAssetSurface(baseX, worldY);
+    if (assetSurface) {
+      const absX = Math.abs(baseX);
+      return {
+        x: assetSurface.x,
+        y: worldY,
+        z: assetSurface.z - embedDepth,
+        insideRoute: absX <= m.ROUTE_HALF,
+        slopeRatio: clamp01((worldY - (m.BASE_Y - m.MOUNT_HALF_H)) / m.MOUNT_HEIGHT),
+        crags: 0,
+        flankFrac: absX > m.ROUTE_HALF ? clamp01((absX - m.ROUTE_HALF) / m.FLANK_SPAN) : 0
+      };
+    }
+
     const meshY = worldY - m.BASE_Y;
     const profile = this._mountainProfile(baseX, meshY);
     return {
@@ -853,34 +1031,389 @@ class BergRenderer {
     };
   }
 
-  // Craggy boulder: start from a smooth subdivided icosahedron, then push each
-  // vertex in/out along its own normal. Two octaves of noise give big facet
-  // breaks plus fine surface grain; normals recompute so lighting stays honest.
-  _buildBoulderGeometry(radius, detail = 2, jitterAmount = 0.22) {
+  _surfaceFrame(baseX, worldY) {
+    const acrossA = this._faceAnchor(baseX - 0.4, worldY, 0);
+    const acrossB = this._faceAnchor(baseX + 0.4, worldY, 0);
+    const alongA = this._faceAnchor(baseX, worldY - 0.7, 0);
+    const alongB = this._faceAnchor(baseX, worldY + 0.7, 0);
+
+    this.tempVecD.set(acrossB.x - acrossA.x, acrossB.y - acrossA.y, acrossB.z - acrossA.z);
+    if (this.tempVecD.lengthSq() < 1e-5) {
+      this.tempVecD.set(1, 0, 0);
+    } else {
+      this.tempVecD.normalize();
+    }
+
+    this.tempVecE.set(alongB.x - alongA.x, alongB.y - alongA.y, alongB.z - alongA.z);
+    if (this.tempVecE.lengthSq() < 1e-5) {
+      this.tempVecE.set(0, 1, 0);
+    } else {
+      this.tempVecE.normalize();
+    }
+
+    this.tempVecF.crossVectors(this.tempVecD, this.tempVecE);
+    if (this.tempVecF.lengthSq() < 1e-5) {
+      this.tempVecF.set(0, 0, 1);
+    } else {
+      this.tempVecF.normalize();
+    }
+    if (this.tempVecF.z < 0) {
+      this.tempVecF.multiplyScalar(-1);
+    }
+
+    this.tempVecG.crossVectors(this.tempVecF, this.tempVecD);
+    if (this.tempVecG.lengthSq() < 1e-5) {
+      this.tempVecG.set(0, 1, 0);
+    } else {
+      this.tempVecG.normalize();
+    }
+
+    return {
+      position: this._faceAnchor(baseX, worldY, 0),
+      tangentX: this.tempVecD,
+      tangentY: this.tempVecG,
+      normal: this.tempVecF
+    };
+  }
+
+  _loadMountainAsset(meta) {
+    if (!THREE.GLTFLoader) {
+      console.warn('GLTFLoader is unavailable; falling back to procedural mountain surface.');
+      return;
+    }
+
+    const loader = new THREE.GLTFLoader();
+    loader.load(
+      'models/snowy_mountain_v1.glb',
+      (gltf) => {
+        const mountain = gltf.scene;
+        mountain.name = 'SnowyMountainAsset';
+        mountain.position.set(0, meta.BASE_Y, -7.8);
+        mountain.scale.set(meta.MOUNT_HALF_W, meta.MOUNT_HALF_H, 16.5);
+
+        mountain.traverse((child) => {
+          if (!child.isMesh) {
+            return;
+          }
+          child.castShadow = true;
+          child.receiveShadow = true;
+          const materials = Array.isArray(child.material) ? child.material : [child.material];
+          materials.forEach((material) => {
+            if (!material) {
+              return;
+            }
+            material.side = THREE.DoubleSide;
+            material.roughness = Math.max(material.roughness || 0.78, 0.86);
+            if (material.map) {
+              material.map.encoding = THREE.sRGBEncoding;
+            }
+          });
+        });
+
+        this.environmentGroup.add(mountain);
+        this.assetMountain = mountain;
+        this.root.updateMatrixWorld(true);
+        mountain.updateMatrixWorld(true);
+        this._installMountainAssetSurfaceSampler(mountain);
+
+        // The imported GLB becomes the visible climb face. The procedural
+        // meshes stay alive as fallback collision data until the sampler is ready.
+        if (this.assetSurfaceReady) {
+          if (this.mountain) {
+            this.mountain.visible = false;
+          }
+          if (this.glacierSheen) {
+            this.glacierSheen.visible = false;
+          }
+          if (this.moltenFace) {
+            this.moltenFace.visible = false;
+          }
+        }
+      },
+      undefined,
+      (error) => {
+        console.warn('Mountain asset failed to load:', error);
+      }
+    );
+  }
+
+  _installMountainAssetSurfaceSampler(mountain) {
+    const triangles = [];
+    const bounds = {
+      minX: Infinity,
+      maxX: -Infinity,
+      minY: Infinity,
+      maxY: -Infinity
+    };
+    mountain.updateMatrixWorld(true);
+    this.environmentGroup.updateMatrixWorld(true);
+    const envInverse = new THREE.Matrix4().copy(this.environmentGroup.matrixWorld).invert();
+    const meshToEnv = new THREE.Matrix4();
+    const a = new THREE.Vector3();
+    const b = new THREE.Vector3();
+    const c = new THREE.Vector3();
+
+    const pushTriangle = (va, vb, vc) => {
+      const denom = ((vb.y - vc.y) * (va.x - vc.x)) + ((vc.x - vb.x) * (va.y - vc.y));
+      if (Math.abs(denom) < 1e-7) {
+        return;
+      }
+
+      const tri = {
+        ax: va.x,
+        ay: va.y,
+        az: va.z,
+        bx: vb.x,
+        by: vb.y,
+        bz: vb.z,
+        cx: vc.x,
+        cy: vc.y,
+        cz: vc.z,
+        denom,
+        minX: Math.min(va.x, vb.x, vc.x),
+        maxX: Math.max(va.x, vb.x, vc.x),
+        minY: Math.min(va.y, vb.y, vc.y),
+        maxY: Math.max(va.y, vb.y, vc.y)
+      };
+      triangles.push(tri);
+      bounds.minX = Math.min(bounds.minX, tri.minX);
+      bounds.maxX = Math.max(bounds.maxX, tri.maxX);
+      bounds.minY = Math.min(bounds.minY, tri.minY);
+      bounds.maxY = Math.max(bounds.maxY, tri.maxY);
+    };
+
+    mountain.traverse((mesh) => {
+      if (!mesh.isMesh || !mesh.geometry || !mesh.geometry.attributes.position) {
+        return;
+      }
+
+      meshToEnv.multiplyMatrices(envInverse, mesh.matrixWorld);
+      const geometry = mesh.geometry;
+      const positions = geometry.attributes.position;
+      const indices = geometry.index;
+      const readVertex = (vertexIndex, out) => out.fromBufferAttribute(positions, vertexIndex).applyMatrix4(meshToEnv);
+
+      if (indices) {
+        for (let i = 0; i < indices.count; i += 3) {
+          readVertex(indices.getX(i), a);
+          readVertex(indices.getX(i + 1), b);
+          readVertex(indices.getX(i + 2), c);
+          pushTriangle(a, b, c);
+        }
+      } else {
+        for (let i = 0; i < positions.count; i += 3) {
+          readVertex(i, a);
+          readVertex(i + 1, b);
+          readVertex(i + 2, c);
+          pushTriangle(a, b, c);
+        }
+      }
+    });
+
+    if (!triangles.length || !Number.isFinite(bounds.minX) || !Number.isFinite(bounds.minY)) {
+      this.assetSurfaceReady = false;
+      return;
+    }
+
+    const gridX = 72;
+    const gridY = 128;
+    const cells = Array.from({ length: gridX * gridY }, () => []);
+    const width = Math.max(1e-5, bounds.maxX - bounds.minX);
+    const height = Math.max(1e-5, bounds.maxY - bounds.minY);
+    const cellX = (value) => clamp(Math.floor(((value - bounds.minX) / width) * gridX), 0, gridX - 1);
+    const cellY = (value) => clamp(Math.floor(((value - bounds.minY) / height) * gridY), 0, gridY - 1);
+
+    triangles.forEach((triangle, triangleIndex) => {
+      const minCellX = cellX(triangle.minX);
+      const maxCellX = cellX(triangle.maxX);
+      const minCellY = cellY(triangle.minY);
+      const maxCellY = cellY(triangle.maxY);
+      for (let y = minCellY; y <= maxCellY; y += 1) {
+        for (let x = minCellX; x <= maxCellX; x += 1) {
+          cells[y * gridX + x].push(triangleIndex);
+        }
+      }
+    });
+
+    this.assetSurfaceSampler = { bounds, triangles, cells, gridX, gridY, width, height };
+    this.assetSurfaceReady = true;
+  }
+
+  _sampleMountainAssetSurface(baseX, worldY) {
+    const sampler = this.assetSurfaceSampler;
+    if (!sampler || !this.assetSurfaceReady) {
+      return null;
+    }
+
+    const { bounds, triangles, cells, gridX, gridY, width, height } = sampler;
+    if (baseX < bounds.minX || baseX > bounds.maxX || worldY < bounds.minY || worldY > bounds.maxY) {
+      return null;
+    }
+
+    const centerX = clamp(Math.floor(((baseX - bounds.minX) / width) * gridX), 0, gridX - 1);
+    const centerY = clamp(Math.floor(((worldY - bounds.minY) / height) * gridY), 0, gridY - 1);
+    let bestZ = -Infinity;
+    let found = false;
+    const tolerance = -0.0018;
+
+    const scanCell = (cellX, cellY) => {
+      const candidates = cells[cellY * gridX + cellX];
+      for (let i = 0; i < candidates.length; i += 1) {
+        const triangle = triangles[candidates[i]];
+        if (
+          baseX < triangle.minX - 0.001 ||
+          baseX > triangle.maxX + 0.001 ||
+          worldY < triangle.minY - 0.001 ||
+          worldY > triangle.maxY + 0.001
+        ) {
+          continue;
+        }
+
+        const wA = (((triangle.by - triangle.cy) * (baseX - triangle.cx)) + ((triangle.cx - triangle.bx) * (worldY - triangle.cy))) / triangle.denom;
+        const wB = (((triangle.cy - triangle.ay) * (baseX - triangle.cx)) + ((triangle.ax - triangle.cx) * (worldY - triangle.cy))) / triangle.denom;
+        const wC = 1 - wA - wB;
+        if (wA >= tolerance && wB >= tolerance && wC >= tolerance) {
+          const z = wA * triangle.az + wB * triangle.bz + wC * triangle.cz;
+          if (z > bestZ) {
+            bestZ = z;
+            found = true;
+          }
+        }
+      }
+    };
+
+    for (let radius = 0; radius <= 2 && !found; radius += 1) {
+      for (let y = Math.max(0, centerY - radius); y <= Math.min(gridY - 1, centerY + radius); y += 1) {
+        for (let x = Math.max(0, centerX - radius); x <= Math.min(gridX - 1, centerX + radius); x += 1) {
+          scanCell(x, y);
+        }
+      }
+    }
+
+    return found ? { x: baseX, y: worldY, z: bestZ } : null;
+  }
+
+  _constrainPointToMountainSurface(point, clearance = 0.08, stickiness = 0.45) {
+    const surface = this._faceAnchor(point.x, point.y, 0);
+    const targetZ = surface.z + clearance;
+    if (point.z < targetZ) {
+      point.z = targetZ;
+      return true;
+    }
+
+    point.z += (targetZ - point.z) * stickiness;
+    return false;
+  }
+
+  _seededUnit(seed) {
+    const raw = Math.sin(seed * 127.1 + 311.7) * 43758.5453123;
+    return raw - Math.floor(raw);
+  }
+
+  _directionFromSeed(seed) {
+    const vector = new THREE.Vector3(
+      this._seededUnit(seed) * 2 - 1,
+      this._seededUnit(seed + 9.17) * 2 - 1,
+      this._seededUnit(seed + 17.41) * 2 - 1
+    );
+    if (vector.lengthSq() < 1e-5) {
+      vector.set(0.4, 0.8, 0.2);
+    }
+    return vector.normalize();
+  }
+
+  _makeRockMaterial(seed = Math.random() * 1000, family = 'env') {
+    const familyTuning = {
+      env: { light: 0.42, sat: 0.055, roughness: 0.93 },
+      perched: { light: 0.36, sat: 0.05, roughness: 0.97 },
+      falling: { light: 0.39, sat: 0.045, roughness: 0.98 }
+    };
+    const tuning = familyTuning[family] || familyTuning.env;
+    const hue = 0.58 + (this._seededUnit(seed + 1) - 0.5) * 0.035;
+    const saturation = tuning.sat + this._seededUnit(seed + 2) * 0.035;
+    const lightness = tuning.light + (this._seededUnit(seed + 3) - 0.5) * 0.14;
+    const color = new THREE.Color().setHSL(hue, saturation, lightness);
+
+    return new THREE.MeshStandardMaterial({
+      map: this.materials.rock.map,
+      color,
+      roughness: Math.min(1, tuning.roughness + this._seededUnit(seed + 4) * 0.08),
+      metalness: 0.02 + this._seededUnit(seed + 5) * 0.04,
+      vertexColors: true
+    });
+  }
+
+  // Boulder sculpt: stretch the primitive into an uneven mass, then carve
+  // flatter faces and chipped ridges so the silhouette reads like fractured
+  // alpine stone instead of a noisy sphere.
+  _buildBoulderGeometry(radius, detail = 2, jitterAmount = 0.22, options = {}) {
     const geometry = new THREE.IcosahedronGeometry(radius, detail);
     const positions = geometry.attributes.position;
+    const colors = new Float32Array(positions.count * 3);
     const temp = new THREE.Vector3();
+    const base = new THREE.Vector3();
+    const dir = new THREE.Vector3();
+    const seed = options.seed ?? Math.random() * 1000;
+    const stretchX = options.stretchX ?? (0.82 + this._seededUnit(seed + 7) * 0.42);
+    const stretchY = options.stretchY ?? (0.74 + this._seededUnit(seed + 11) * 0.34);
+    const stretchZ = options.stretchZ ?? (0.78 + this._seededUnit(seed + 13) * 0.46);
+    const lobeA = this._directionFromSeed(seed + 17);
+    const lobeB = this._directionFromSeed(seed + 29);
+    const lobeC = this._directionFromSeed(seed + 43);
+    const ridgeAxis = this._directionFromSeed(seed + 59);
+    const colorBias = (this._seededUnit(seed + 67) - 0.5) * 0.05;
 
     for (let v = 0; v < positions.count; v += 1) {
       temp.set(positions.getX(v), positions.getY(v), positions.getZ(v));
       const length = temp.length() || 1;
       temp.multiplyScalar(1 / length);
 
-      // two octaves: a broad facet variation plus a finer chip-level grain
-      const coarse =
-        Math.sin(temp.x * 2.4 + temp.y * 3.1) * 0.6 +
-        Math.cos(temp.y * 2.7 + temp.z * 2.2) * 0.4 +
-        (Math.random() - 0.5) * 0.4;
-      const fine =
-        Math.sin(temp.x * 9.3 + temp.z * 7.1) * 0.5 +
-        Math.cos(temp.y * 8.6) * 0.3 +
-        (Math.random() - 0.5) * 0.5;
-      const offset = coarse * jitterAmount + fine * jitterAmount * 0.4;
-      const scale = length * (1 + offset);
+      base.set(temp.x * stretchX, temp.y * stretchY, temp.z * stretchZ);
+      const baseLength = base.length() || 1;
+      dir.copy(base).multiplyScalar(1 / baseLength);
 
-      positions.setXYZ(v, temp.x * scale, temp.y * scale, temp.z * scale);
+      // Broad faceting, a second medium octave, and directional cuts combine
+      // into chunky silhouettes with obvious broken planes.
+      const coarse =
+        Math.sin(dir.x * (2.3 + this._seededUnit(seed + 71) * 1.4) + dir.y * 3.6 + seed * 0.12) * 0.44 +
+        Math.cos(dir.y * 2.8 - dir.z * 3.1 + seed * 0.21) * 0.3;
+      const medium =
+        Math.sin(dir.dot(lobeA) * 7.8 + seed * 0.16) * 0.2 +
+        Math.cos(dir.dot(lobeB) * 11.7 - seed * 0.19) * 0.15;
+      const chip =
+        Math.sin(dir.x * 14.2 + dir.y * 10.8 + dir.z * 8.9 + seed * 0.61) * 0.08;
+      const facetA = Math.pow(Math.max(0, Math.abs(dir.dot(lobeA)) - 0.12), 1.7) * (0.52 + this._seededUnit(seed + 79) * 0.28);
+      const facetB = Math.pow(Math.max(0, dir.dot(lobeB) - 0.02), 2.4) * (0.28 + this._seededUnit(seed + 83) * 0.18);
+      const ridge = Math.pow(1 - Math.abs(dir.dot(ridgeAxis)), 3) * (0.12 + this._seededUnit(seed + 89) * 0.1);
+      const flatten = Math.pow(Math.max(0, dir.dot(lobeC)), 2.6) * (0.24 + this._seededUnit(seed + 97) * 0.14);
+      const offset =
+        coarse * jitterAmount +
+        medium * jitterAmount * 0.8 +
+        chip * jitterAmount * 0.85 +
+        facetA * jitterAmount * 0.95 +
+        facetB * jitterAmount * 0.7 +
+        ridge -
+        flatten * jitterAmount * 0.9;
+      const scale = radius * baseLength * (1 + offset);
+
+      positions.setXYZ(v, dir.x * scale, dir.y * scale, dir.z * scale);
+
+      const shade = clamp01(
+        0.7 +
+        coarse * 0.11 +
+        medium * 0.09 +
+        chip * 0.24 -
+        facetA * 0.12 -
+        flatten * 0.09 +
+        ridge * 0.18 +
+        dir.y * 0.04
+      );
+      colors[v * 3] = shade * (0.94 - colorBias * 0.25);
+      colors[v * 3 + 1] = shade * 0.98;
+      colors[v * 3 + 2] = shade * (1.03 + colorBias);
     }
 
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     geometry.computeVertexNormals();
     return geometry;
   }
@@ -909,6 +1442,109 @@ class BergRenderer {
     return geometry;
   }
 
+  // Jagged slit outline. Flattens the X axis and compresses the Y axis so
+  // the shape reads as an elongated crack, then breaks the edge with a
+  // seeded triple-octave wobble.
+  _buildFissureOutline(halfWidth, halfLength, seed = 0, jagScale = 0.14, pointsCount = 32) {
+    const points = [];
+    for (let index = 0; index < pointsCount; index += 1) {
+      const angle = (index / pointsCount) * Math.PI * 2;
+      const cos = Math.cos(angle);
+      const sin = Math.sin(angle);
+      const shapedX = Math.sign(cos) * Math.pow(Math.abs(cos), 0.55);
+      const shapedY = Math.sign(sin) * Math.pow(Math.abs(sin), 1.4);
+      const noise =
+        Math.sin(angle * 3.1 + seed * 0.07) * 0.08 +
+        Math.cos(angle * 7.3 - seed * 0.05) * 0.05 +
+        Math.sin(angle * 13.1 + seed * 0.17) * 0.03;
+      const x = shapedX * halfWidth * (1 + noise * jagScale * 2);
+      const y = shapedY * halfLength * (1 + noise * jagScale);
+      points.push(new THREE.Vector2(x, y));
+    }
+    return points;
+  }
+
+  // Flat irregular slit used for soft surface stains and the inner void.
+  _buildFissureShapeGeometry(width = 5.4, length = 1.5, seed = 0, jagScale = 0.14, pointsCount = 32) {
+    const outline = this._buildFissureOutline(width * 0.5, length * 0.5, seed, jagScale, pointsCount);
+    const geometry = new THREE.ShapeGeometry(new THREE.Shape(outline), 24);
+    geometry.computeVertexNormals();
+    return geometry;
+  }
+
+  // Extruded ring forming the crevasse's snow-crust rim and the ice walls
+  // descending to `depth`. Inner hole is a smaller, narrower slit so every
+  // rim edge keeps visible crust thickness. Vertex colors paint the snow
+  // crown, the pale ice, and the cold depth as the walls fall away.
+  _buildFissureLipGeometry(width = 5.4, length = 1.5, depth = 1.55, seed = 0) {
+    const outerHalfW = width * 0.5;
+    const outerHalfL = length * 0.5;
+    const innerHalfW = outerHalfW * 0.72;
+    const innerHalfL = outerHalfL * 0.34;
+
+    const outer = this._buildFissureOutline(outerHalfW, outerHalfL, seed, 0.18, 36);
+    const inner = this._buildFissureOutline(innerHalfW, innerHalfL, seed + 23.3, 0.24, 36).reverse();
+    const shape = new THREE.Shape(outer);
+    const hole = new THREE.Path();
+    hole.setFromPoints(inner);
+    shape.holes.push(hole);
+
+    const geometry = new THREE.ExtrudeGeometry(shape, {
+      depth,
+      steps: 1,
+      bevelEnabled: true,
+      bevelSize: 0.09,
+      bevelThickness: 0.22,
+      bevelSegments: 3,
+      curveSegments: 32
+    });
+    // Surface crust at z=0, walls go down to z=-depth.
+    geometry.translate(0, 0, -depth);
+
+    const positions = geometry.attributes.position;
+    const colors = new Float32Array(positions.count * 3);
+    const snowColor = new THREE.Color(0xeaf4fb);
+    const iceColor = new THREE.Color(0x7a95ad);
+    const deepColor = new THREE.Color(0x1f3042);
+    const scratch = new THREE.Color();
+
+    for (let index = 0; index < positions.count; index += 1) {
+      const x = positions.getX(index);
+      const y = positions.getY(index);
+      const z = positions.getZ(index);
+      const depthMix = clamp01(-z / depth);
+      const nx = x / outerHalfW;
+      const ny = y / outerHalfL;
+      const breakNoise =
+        Math.sin(nx * 9.7 + ny * 3.1 + seed * 0.13) * 0.04 +
+        Math.cos(ny * 12.6 - seed * 0.08) * 0.025;
+
+      scratch.copy(snowColor)
+        .lerp(iceColor, Math.pow(depthMix, 0.8))
+        .lerp(deepColor, Math.pow(depthMix, 1.7) * 0.7);
+      scratch.offsetHSL(0, 0, breakNoise);
+
+      colors[index * 3] = scratch.r;
+      colors[index * 3 + 1] = scratch.g;
+      colors[index * 3 + 2] = scratch.b;
+    }
+
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geometry.computeVertexNormals();
+    return geometry;
+  }
+
+  // Stable hash from a fissure id so a single crevasse reads consistent
+  // across frames (same shard layout, same noise seed) without re-rolling.
+  _fissureSeed(id) {
+    const source = String(id);
+    let hash = 0;
+    for (let i = 0; i < source.length; i += 1) {
+      hash = (hash * 131 + source.charCodeAt(i)) >>> 0;
+    }
+    return (hash % 100000) * 0.01;
+  }
+
   _buildEnvironment() {
     this.environmentGroup = new THREE.Group();
     this.root.add(this.environmentGroup);
@@ -919,7 +1555,7 @@ class BergRenderer {
     // Wider, taller plane so the mountain reads as a real peak, not a strip.
     // Vertex displacement runs through _mountainProfile so boulders and
     // markers placed via _faceAnchor share the exact same surface math.
-    const mountainGeometry = new THREE.PlaneGeometry(MOUNT_WIDTH, MOUNT_HEIGHT, 260, 420);
+    const mountainGeometry = new THREE.PlaneGeometry(MOUNT_WIDTH, MOUNT_HEIGHT, 320, 540);
     const positions = mountainGeometry.attributes.position;
     const colors = new Float32Array(positions.count * 3);
     const snowTone = new THREE.Color(0xe5f0f7);
@@ -936,19 +1572,25 @@ class BergRenderer {
       positions.setZ(index, profile.z);
 
       const absX = Math.abs(profile.x);
+      const routeSmoothMask = profile.routeSmoothMask || 0;
       const snowMix = clamp01(
-        1 - absX / 14 +
-        smoothStep(0.72, 1, profile.slopeRatio) * 0.25 -
-        Math.max(0, -profile.crags * 0.28)
+        1 - absX / 16.5 +
+        smoothStep(0.72, 1, profile.slopeRatio) * 0.22 -
+        Math.max(0, -profile.crags * 0.28) -
+        (profile.fractureMask || 0) * 0.12 +
+        routeSmoothMask * 0.12
       );
       const darkMix = clamp01(
-        Math.max(0, -profile.terrace * 0.35 - profile.crags * 0.18) +
-        smoothStep(90, 10, y) * 0.15 +
-        smoothStep(ROUTE_HALF + 4, ROUTE_HALF + 22, absX) * 0.22 +
-        profile.flankFrac * 0.18
+        Math.max(0, -profile.terrace * 0.32 - profile.crags * 0.22) +
+        smoothStep(90, 10, y) * 0.14 +
+        smoothStep(ROUTE_HALF + 3, ROUTE_HALF + 24, absX) * 0.25 +
+        profile.flankFrac * 0.2 +
+        (profile.fractureMask || 0) * 0.24 -
+        routeSmoothMask * 0.16
       );
       scratch.copy(stoneTone).lerp(snowTone, snowMix);
-      scratch.lerp(darkTone, darkMix * 0.75);
+      scratch.lerp(snowTone, routeSmoothMask * 0.06);
+      scratch.lerp(darkTone, Math.max(0, darkMix * (0.75 - routeSmoothMask * 0.16)));
       colors[index * 3] = scratch.r;
       colors[index * 3 + 1] = scratch.g;
       colors[index * 3 + 2] = scratch.b;
@@ -972,26 +1614,29 @@ class BergRenderer {
     this.glacierSheen.position.z += 0.05;
     this.environmentGroup.add(this.glacierSheen);
 
+    this._loadMountainAsset(m);
+
     // Embedded boulders and flank crags. Every boulder snaps to the face via
     // _faceAnchor, then sinks into the slope so it reads as fractured rock
     // growing out of the mountain rather than beads floating in the air.
-    this._boulderMats = [
-      new THREE.MeshStandardMaterial({ map: this.materials.cliffShadow.map, color: 0x556673, roughness: 0.92, metalness: 0.06 }),
-      new THREE.MeshStandardMaterial({ map: this.materials.cliffShadow.map, color: 0x3d4954, roughness: 0.98, metalness: 0.04 }),
-      new THREE.MeshStandardMaterial({ color: 0x788c98, roughness: 0.82, metalness: 0.05 })
-    ];
+    this._boulderMats = Array.from({ length: 7 }, (_, index) =>
+      this._makeRockMaterial(180 + index * 23, 'env')
+    );
 
     const placeBoulder = ({ baseX, worldY, radius, matIndex, wide = 1.05, tall = 0.58, depth = 0.75 }) => {
       // Bury ~60% of the boulder's vertical extent in the slope so the crown
       // reads as an outcrop, not a pebble glued onto the face.
       const embed = radius * tall * 0.62 + 0.35;
       const anchor = this._faceAnchor(baseX, worldY, embed);
+      const rockSeed = Math.random() * 1000;
       // Smaller boulders don't need the full subdivision budget; bigger ones
       // earn detail 3 so the silhouette stays craggy when camera passes close.
       const detail = radius > 1.25 ? 3 : 2;
-      const geometry = this._buildBoulderGeometry(1, detail, 0.2 + Math.random() * 0.08);
+      const geometry = this._buildBoulderGeometry(1, detail, 0.2 + Math.random() * 0.08, { seed: rockSeed });
 
-      const boulder = new THREE.Mesh(geometry, this._boulderMats[matIndex % this._boulderMats.length]);
+      const materialIndex =
+        (matIndex + Math.floor(this._seededUnit(rockSeed + 8) * this._boulderMats.length)) % this._boulderMats.length;
+      const boulder = new THREE.Mesh(geometry, this._boulderMats[materialIndex]);
       boulder.position.set(anchor.x, anchor.y, anchor.z);
       boulder.scale.set(radius * wide, radius * tall, radius * depth);
       boulder.rotation.set(
@@ -1005,7 +1650,7 @@ class BergRenderer {
     };
 
     // Flanking scatter: tapers with slope ratio so the summit stays clean.
-    const flankCount = 78;
+    const flankCount = 96;
     for (let index = 0; index < flankCount; index += 1) {
       const side = index % 2 === 0 ? -1 : 1;
       const slopeFrac = Math.pow(Math.random(), 0.85);  // bias toward lower/mid slopes
@@ -1025,7 +1670,7 @@ class BergRenderer {
     }
 
     // Route-adjacent outcrops: small rocks tucked between lanes for parallax.
-    const innerCount = 12;
+    const innerCount = 18;
     for (let index = 0; index < innerCount; index += 1) {
       const side = index % 2 === 0 ? -1 : 1;
       const baseX = side * (LANE_X * 0.5 + (Math.random() - 0.5) * 0.6);
@@ -1039,6 +1684,23 @@ class BergRenderer {
         wide: 1,
         tall: 0.42 + Math.random() * 0.22,
         depth: 0.55 + Math.random() * 0.28
+      });
+    }
+
+    const dividerOutcropCount = 18;
+    for (let index = 0; index < dividerOutcropCount; index += 1) {
+      const side = index % 2 === 0 ? -1 : 1;
+      const baseX = side * (LANE_X * (0.58 + Math.random() * 0.24) + (Math.random() - 0.5) * 0.35);
+      const worldY = 10 + Math.random() * 224;
+      const radius = 0.5 + Math.random() * 0.72;
+      placeBoulder({
+        baseX,
+        worldY,
+        radius,
+        matIndex: index + flankCount,
+        wide: 1 + Math.random() * 0.18,
+        tall: 0.44 + Math.random() * 0.22,
+        depth: 0.72 + Math.random() * 0.24
       });
     }
 
@@ -1203,61 +1865,65 @@ class BergRenderer {
     this.environmentGroup.add(horizonHaze);
 
     this.summitGroup = new THREE.Group();
+    this.summitGroup.position.z = -9.5;
     this.environmentGroup.add(this.summitGroup);
 
     const crownShadow = new THREE.Mesh(new THREE.ConeGeometry(13.5, 24, 20, 4), this.materials.peakShadow.clone());
-    crownShadow.position.set(0, 228, -7.4);
+    crownShadow.position.set(0, 236, -8.8);
     crownShadow.scale.set(1.3, 1, 1.05);
     crownShadow.castShadow = true;
     this.summitGroup.add(crownShadow);
 
     const peak = new THREE.Mesh(new THREE.ConeGeometry(8.5, 20, 20, 4), this.materials.summit);
-    peak.position.set(0, 230, -2.8);
+    peak.position.set(0, 240, -4.8);
     peak.castShadow = true;
     this.summitGroup.add(peak);
 
     [-1, 1].forEach((side) => {
       const shoulder = new THREE.Mesh(new THREE.ConeGeometry(4.6, 10.5, 18, 3), this.materials.summit.clone());
-      shoulder.position.set(side * 5.1, 226.4, -4.2);
+      shoulder.position.set(side * 6.1, 236.4, -6.4);
       shoulder.rotation.z = side * 0.12;
       shoulder.castShadow = true;
       this.summitGroup.add(shoulder);
     });
 
     const tower = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.28, 8.5, 20, 4), this.materials.anchorMetal);
-    tower.position.set(0, 240, -1.2);
+    tower.position.set(3.2, 247, -3.4);
     this.summitGroup.add(tower);
 
     this.flagMesh = new THREE.Mesh(new THREE.PlaneGeometry(5.2, 3.2), this.materials.flag);
-    this.flagMesh.position.set(2.8, 242.6, -0.8);
-    this.flagMesh.rotation.y = -0.16;
+    this.flagMesh.position.set(7.4, 249.8, -2.8);
+    this.flagMesh.rotation.y = -0.34;
     this.summitGroup.add(this.flagMesh);
 
     // The warm summit halo was the single loudest "this is a game" tell.
     // Replaced by a near-invisible sprite that only exists so the rest of
     // the update code doesn't have to branch on its presence.
     this.summitAura = new THREE.Sprite(this.materials.halo.clone());
-    this.summitAura.position.set(0, 237.5, 0.2);
+    this.summitAura.position.set(1.8, 245.5, -2.6);
     this.summitAura.scale.set(0.01, 0.01, 1);
     this.summitAura.material.opacity = 0;
     this.summitAura.visible = false;
     this.summitGroup.add(this.summitAura);
 
-    for (let index = 0; index < 10; index += 1) {
-      const panel = new THREE.Mesh(
-        new THREE.PlaneGeometry(3.5 + Math.random() * 4.5, 9 + Math.random() * 16),
-        this.materials.glacier.clone()
-      );
-      panel.position.set(
-        -5.2 + Math.random() * 10.4,
-        14 + index * 18 + Math.random() * 8,
-        1.4 + Math.random() * 0.5
-      );
-      panel.rotation.z = -0.25 + Math.random() * 0.5;
-      panel.rotation.y = -0.08 + Math.random() * 0.16;
-      panel.material.opacity = 0.12 + Math.random() * 0.14;
-      this.icePanels.push(panel);
-      this.environmentGroup.add(panel);
+    const showIcePanels = false;
+    if (showIcePanels) {
+      for (let index = 0; index < 10; index += 1) {
+        const panel = new THREE.Mesh(
+          new THREE.PlaneGeometry(3.5 + Math.random() * 4.5, 9 + Math.random() * 16),
+          this.materials.glacier.clone()
+        );
+        panel.position.set(
+          -5.2 + Math.random() * 10.4,
+          14 + index * 18 + Math.random() * 8,
+          1.4 + Math.random() * 0.5
+        );
+        panel.rotation.z = -0.25 + Math.random() * 0.5;
+        panel.rotation.y = -0.08 + Math.random() * 0.16;
+        panel.material.opacity = 0.12 + Math.random() * 0.14;
+        this.icePanels.push(panel);
+        this.environmentGroup.add(panel);
+      }
     }
 
     const crackCurves = [
@@ -1289,10 +1955,12 @@ class BergRenderer {
       metalness: 0.02,
       flatShading: true
     });
+    const showAltitudeMarkers = false;
 
-    // 1) Wide ice ledge at ~30m — wedge carved out of the face so the top
-    // reads as a walkable shelf and the underside as an overhang.
-    {
+    if (showAltitudeMarkers) {
+      // 1) Wide ice ledge at ~30m — wedge carved out of the face so the top
+      // reads as a walkable shelf and the underside as an overhang.
+      {
       const anchor = this._faceAnchor(-3.2, 70, 0.35);
       const shape = new THREE.Shape();
       shape.moveTo(-4.4, 0);
@@ -1312,10 +1980,10 @@ class BergRenderer {
       ledge.receiveShadow = true;
       this.environmentGroup.add(ledge);
       this.altitudeMarkers.push(ledge);
-    }
+      }
 
-    // 2) Serac (leaning ice tower) at ~55m — sunk into the face, leaning out.
-    {
+      // 2) Serac (leaning ice tower) at ~55m — sunk into the face, leaning out.
+      {
       const anchor = this._faceAnchor(2.6, 120, 0.8);
       const serac = new THREE.Mesh(
         new THREE.ConeGeometry(1.6, 5, 14, 4, false),
@@ -1327,12 +1995,12 @@ class BergRenderer {
       serac.castShadow = true;
       this.environmentGroup.add(serac);
       this.altitudeMarkers.push(serac);
-    }
+      }
 
-    // 3) Old rope stub with frayed cloth at ~70m. The rope is a real cylinder
-    // driven slightly into the face; the cloth is a three-segment strip with
-    // a twist so it reads as a torn flag, not a 2D sticker.
-    {
+      // 3) Old rope stub with frayed cloth at ~70m. The rope is a real cylinder
+      // driven slightly into the face; the cloth is a three-segment strip with
+      // a twist so it reads as a torn flag, not a 2D sticker.
+      {
       const anchor = this._faceAnchor(-2.2, 158, 0.15);
       const oldRope = new THREE.Mesh(
         new THREE.CylinderGeometry(0.08, 0.08, 2.6, 14),
@@ -1366,11 +2034,11 @@ class BergRenderer {
       oldRopeFlag.rotation.z = 0.12;
       this.environmentGroup.add(oldRopeFlag);
       this.altitudeMarkers.push(oldRopeFlag);
-    }
+      }
 
-    // 4) Overhanging ice curtain at ~85m — a trio of icicles clipped to the
-    // wall rather than one floating cone.
-    {
+      // 4) Overhanging ice curtain at ~85m — a trio of icicles clipped to the
+      // wall rather than one floating cone.
+      {
       const curtainGroup = new THREE.Group();
       const anchor = this._faceAnchor(3.4, 190, 0.2);
       const curtainMat = ledgeMat.clone();
@@ -1388,12 +2056,12 @@ class BergRenderer {
       curtainGroup.position.set(anchor.x, anchor.y, anchor.z);
       this.environmentGroup.add(curtainGroup);
       this.altitudeMarkers.push(curtainGroup);
-    }
+      }
 
-    // 5) Bergschrund — a real crack carved into the face, built from a
-    // curved tube that hugs the slope. Reads as volumetric shadow, not a
-    // dark rectangle pasted on top.
-    {
+      // 5) Bergschrund — a real crack carved into the face, built from a
+      // curved tube that hugs the slope. Reads as volumetric shadow, not a
+      // dark rectangle pasted on top.
+      {
       const crackPoints = [];
       const segments = 12;
       for (let i = 0; i <= segments; i += 1) {
@@ -1419,15 +2087,97 @@ class BergRenderer {
       bergschrund.receiveShadow = true;
       this.environmentGroup.add(bergschrund);
       this.altitudeMarkers.push(bergschrund);
+      }
+    }
+
+    if (this.isNewYearPreset) {
+      this._buildHolidayLanterns();
     }
   }
 
+  _buildHolidayLanterns() {
+    const lanternHeights = [24, 46, 72, 102, 134, 166, 198, 226];
+    lanternHeights.forEach((worldY, index) => {
+      const sideSign = index % 2 === 0 ? -1 : 1;
+      const baseX = sideSign * (1.95 + (index % 3) * 0.12);
+      const anchor = this._faceAnchor(baseX, worldY, 0.12);
+      const group = new THREE.Group();
+      group.position.set(anchor.x, anchor.y, anchor.z + 0.16);
+      group.rotation.z = sideSign * (0.06 + (index % 2) * 0.015);
+
+      const pole = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.06, 0.08, 2.2, 12),
+        this.materials.lanternFrame
+      );
+      pole.position.set(0, 0.78, -0.08);
+      pole.castShadow = true;
+      group.add(pole);
+
+      const arm = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.035, 0.045, 1.02, 10),
+        this.materials.lanternFrame
+      );
+      arm.position.set(sideSign * 0.42, 1.72, 0);
+      arm.rotation.z = Math.PI / 2;
+      group.add(arm);
+
+      const lanternBody = new THREE.Mesh(
+        new THREE.BoxGeometry(0.42, 0.56, 0.34),
+        this.materials.lanternFrame
+      );
+      lanternBody.position.set(sideSign * 0.74, 1.38, 0.12);
+      lanternBody.castShadow = true;
+      group.add(lanternBody);
+
+      const lanternGlass = new THREE.Mesh(
+        new THREE.BoxGeometry(0.26, 0.36, 0.2),
+        this.materials.lanternGlass.clone()
+      );
+      lanternGlass.position.copy(lanternBody.position);
+      group.add(lanternGlass);
+
+      const lanternCap = new THREE.Mesh(
+        new THREE.ConeGeometry(0.18, 0.16, 6),
+        this.materials.lanternFrame
+      );
+      lanternCap.position.set(sideSign * 0.74, 1.73, 0.12);
+      group.add(lanternCap);
+
+      const glow = new THREE.Sprite(this.materials.halo.clone());
+      glow.material.color.setHex(0xffd06a);
+      glow.material.opacity = 0.5;
+      glow.position.set(sideSign * 0.74, 1.38, 0.28);
+      glow.scale.set(2.2, 2.2, 1);
+      group.add(glow);
+
+      const light = new THREE.PointLight(0xffcb68, 2.6, 20, 2);
+      light.position.copy(glow.position);
+      group.add(light);
+
+      this.environmentGroup.add(group);
+      this.routeLanterns.push({
+        group,
+        glow,
+        light,
+        lanternGlass,
+        baseIntensity: 2.1 + Math.random() * 0.45,
+        phaseOffset: Math.random() * Math.PI * 2
+      });
+    });
+  }
+
   _buildRope() {
-    this.ropePointCount = 28;
+    this.routeRopeMinY = -12;
+    this.routeRopeMaxY = 252;
+    this.ropePointCount = 34;
     this.ropePoints = Array.from({ length: this.ropePointCount }, (_, index) => {
       const t = index / (this.ropePointCount - 1);
-      return new THREE.Vector3(0, -10 + t * 254, 1.28);
+      const y = this.routeRopeMinY + t * (this.routeRopeMaxY - this.routeRopeMinY);
+      const anchor = this._faceAnchor(0, y, 0);
+      return new THREE.Vector3(anchor.x, y, anchor.z + this.ropeSurfaceClearance);
     });
+    this.routeRopeVelocities = Array.from({ length: this.ropePointCount }, () => new THREE.Vector2(0, 0));
+    this.routeRopeInitialized = false;
 
     this.ropeGeometry = new THREE.BufferGeometry().setFromPoints(this.ropePoints);
     this.ropeLine = new THREE.Line(this.ropeGeometry, this.materials.ropeLine);
@@ -1452,8 +2202,10 @@ class BergRenderer {
     // Denser anchor ladder so the climber measures progress against it.
     [14, 32, 52, 72, 92, 112, 132, 152, 172, 192, 212, 228].forEach((y, index) => {
       const sideSign = index % 2 === 0 ? -1 : 1;
+      const baseX = sideSign * 0.8;
+      const anchor = this._faceAnchor(baseX, y, 0);
       const screw = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.14, 1.4, 18), this.materials.anchorMetal);
-      screw.position.set(sideSign * 0.8, y, 0.34);
+      screw.position.set(anchor.x, y, anchor.z + 0.09);
       screw.rotation.z = Math.PI / 2;
       this.environmentGroup.add(screw);
 
@@ -1465,20 +2217,130 @@ class BergRenderer {
           anchorRibbonMat.clone()
         );
         ribbon.material.color.setHSL(0.05 + (index / 12) * 0.12, 0.68, 0.56);
-        ribbon.position.set(sideSign * 0.9, y + 0.05, 1.12);
+        ribbon.position.set(anchor.x + sideSign * 0.1, y + 0.05, anchor.z + 0.76);
         ribbon.rotation.z = sideSign * -0.14;
         this.environmentGroup.add(ribbon);
       }
 
       // Pulse glow sprite — fires as the climber passes.
       const pulse = new THREE.Sprite(this.materials.halo.clone());
-      pulse.position.set(sideSign * 0.1, y, 1.2);
+      pulse.position.set(anchor.x, y, anchor.z + 0.84);
       pulse.scale.set(0.1, 0.1, 1);
       pulse.material.opacity = 0;
       this.environmentGroup.add(pulse);
 
-      this.anchorNodes.push({ screw, ribbon, pulse, baseY: y, triggeredAt: -1e9 });
+      this.anchorNodes.push({ screw, ribbon, pulse, baseX, sideSign, baseY: y, triggeredAt: -1e9 });
     });
+  }
+
+  _sampleRouteRopeAtY(targetY, out = new THREE.Vector3()) {
+    const minY = this.routeRopeMinY;
+    const maxY = this.routeRopeMaxY;
+    const clampedY = Math.max(minY, Math.min(maxY, targetY));
+    const scaledIndex = ((clampedY - minY) / (maxY - minY)) * (this.ropePointCount - 1);
+    const lowerIndex = Math.floor(scaledIndex);
+    const upperIndex = Math.min(this.ropePointCount - 1, lowerIndex + 1);
+    const blend = scaledIndex - lowerIndex;
+    return out.copy(this.ropePoints[lowerIndex]).lerp(this.ropePoints[upperIndex], blend);
+  }
+
+  _updateTether(playerVx, dt, anchorPosition) {
+    this.harnessAnchor.updateMatrixWorld(true);
+    const harnessPosition = this.harnessAnchor.getWorldPosition(this.tempVecA);
+    this.root.worldToLocal(harnessPosition);
+
+    const count = this.tetherSegmentCount;
+    const dtClamped = Math.min(dt, 0.05);
+    const directDistance = harnessPosition.distanceTo(anchorPosition);
+    const segmentLength = (directDistance * 1.1 + 0.32) / Math.max(1, count - 1);
+
+    if (!this.tetherInitialized) {
+      for (let i = 0; i < count; i += 1) {
+        const t = i / (count - 1);
+        const sag = Math.sin(Math.PI * t) * 0.36;
+        this.tetherPoints[i].lerpVectors(harnessPosition, anchorPosition, t);
+        this.tetherPoints[i].y -= sag;
+        this._constrainPointToMountainSurface(this.tetherPoints[i], this.ropeSurfaceClearance + 0.18, 0);
+        this.tetherVelocities[i].set(0, 0, 0);
+      }
+      this.tetherInitialized = true;
+    }
+
+    for (let i = 1; i < count - 1; i += 1) {
+      const t = i / (count - 1);
+      const point = this.tetherPoints[i];
+      const vel = this.tetherVelocities[i];
+
+      const lineX = harnessPosition.x * (1 - t) + anchorPosition.x * t;
+      const lineY = harnessPosition.y * (1 - t) + anchorPosition.y * t;
+      const lineZ = harnessPosition.z * (1 - t) + anchorPosition.z * t;
+      const sag = Math.sin(Math.PI * t) * (0.34 + directDistance * 0.018);
+      const guidePull = 11 + Math.sin(Math.PI * t) * 9;
+      const whip = Math.sin(Math.PI * t) * playerVx * 0.0052;
+      const dragToRoute = (anchorPosition.x - harnessPosition.x) * Math.pow(t, 1.2) * 0.08;
+      const wind = Math.sin(this.elapsed * 0.72 + t * 2.4) * 0.018;
+      const depthPulse = Math.cos(this.elapsed * 0.68 + t * 2.1) * 0.018;
+
+      vel.x += (lineX + whip + dragToRoute + wind - point.x) * guidePull * dtClamped;
+      vel.y += ((lineY - sag) - point.y) * (guidePull * 0.94) * dtClamped;
+      vel.z += (lineZ + depthPulse - point.z) * (guidePull * 0.88) * dtClamped;
+      vel.y -= (1.1 + Math.sin(Math.PI * t) * 0.28) * dtClamped;
+      vel.multiplyScalar(Math.exp(-dtClamped * 6.1));
+
+      point.x += vel.x * dtClamped;
+      point.y += vel.y * dtClamped;
+      point.z += vel.z * dtClamped;
+      if (this._constrainPointToMountainSurface(point, this.ropeSurfaceClearance + 0.18, 0.35)) {
+        vel.z = Math.max(0, vel.z);
+      }
+    }
+
+    for (let iteration = 0; iteration < 7; iteration += 1) {
+      this.tetherPoints[0].copy(harnessPosition);
+      this.tetherPoints[count - 1].copy(anchorPosition);
+
+      for (let i = 0; i < count - 1; i += 1) {
+        const left = this.tetherPoints[i];
+        const right = this.tetherPoints[i + 1];
+        const delta = this.tempVecC.copy(right).sub(left);
+        const distance = Math.max(0.0001, delta.length());
+        const stretch = (distance - segmentLength) / distance;
+
+        if (i === 0) {
+          right.addScaledVector(delta, -stretch);
+        } else if (i === count - 2) {
+          left.addScaledVector(delta, stretch);
+        } else {
+          left.addScaledVector(delta, stretch * 0.5);
+          right.addScaledVector(delta, -stretch * 0.5);
+        }
+      }
+
+      for (let i = 1; i < count - 1; i += 1) {
+        const t = i / (count - 1);
+        const guideX = harnessPosition.x * (1 - t) + anchorPosition.x * t;
+        const guideY = harnessPosition.y * (1 - t) + anchorPosition.y * t - Math.sin(Math.PI * t) * 0.44;
+        const guideZ = harnessPosition.z * (1 - t) + anchorPosition.z * t;
+        const point = this.tetherPoints[i];
+        point.x += (guideX - point.x) * 0.026;
+        point.y += (guideY - point.y) * 0.042;
+        point.z += (guideZ - point.z) * 0.03;
+        this._constrainPointToMountainSurface(point, this.ropeSurfaceClearance + 0.18, 0.65);
+      }
+    }
+
+    this.tetherPoints[0].copy(harnessPosition);
+    this.tetherPoints[count - 1].copy(anchorPosition);
+    this._constrainPointToMountainSurface(this.tetherPoints[count - 1], this.ropeSurfaceClearance + 0.08, 0);
+    this.tetherVelocities[0].set(0, 0, 0);
+    this.tetherVelocities[count - 1].set(0, 0, 0);
+
+    const tetherAttr = this.tetherGeometry.attributes.position;
+    for (let i = 0; i < count; i += 1) {
+      const p = this.tetherPoints[i];
+      tetherAttr.setXYZ(i, p.x, p.y, p.z);
+    }
+    tetherAttr.needsUpdate = true;
   }
 
   _buildPlayer() {
@@ -1554,45 +2416,49 @@ class BergRenderer {
     neck.position.set(0, 1.56, 0);
     this.playerGroup.add(neck);
 
+    this.headGroup = new THREE.Group();
+    this.headGroup.position.set(0, 1.78, 0.02);
+    this.playerGroup.add(this.headGroup);
+
     const head = new THREE.Mesh(new THREE.SphereGeometry(0.22, 24, 18), this.materials.skin);
-    head.position.set(0, 1.82, 0.02);
+    head.position.set(0, 0.04, 0);
     head.castShadow = true;
-    this.playerGroup.add(head);
+    this.headGroup.add(head);
 
     const helmet = new THREE.Mesh(
       new THREE.SphereGeometry(0.26, 28, 20, 0, Math.PI * 2, 0, Math.PI * 0.58),
       this.materials.helmet
     );
-    helmet.position.set(0, 1.92, 0.0);
+    helmet.position.set(0, 0.14, -0.02);
     helmet.rotation.x = 0.12;
     helmet.castShadow = true;
-    this.playerGroup.add(helmet);
+    this.headGroup.add(helmet);
 
     // Helmet brim: the dark visor band gives the shape its silhouette.
     const brim = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.05, 0.34), this.materials.strap);
-    brim.position.set(0, 1.82, 0.08);
-    this.playerGroup.add(brim);
+    brim.position.set(0, 0.04, 0.06);
+    this.headGroup.add(brim);
 
     // Chin strap — two thin verticals from helmet to neck.
     const chinStrapL = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.16, 0.02), this.materials.strap);
-    chinStrapL.position.set(-0.18, 1.75, 0.14);
-    this.playerGroup.add(chinStrapL);
+    chinStrapL.position.set(-0.18, -0.03, 0.12);
+    this.headGroup.add(chinStrapL);
     const chinStrapR = chinStrapL.clone();
     chinStrapR.position.x = 0.18;
-    this.playerGroup.add(chinStrapR);
+    this.headGroup.add(chinStrapR);
 
     // Darker visor glass for eyes — avoids the doll-face pale sphere.
     const visor = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.08, 0.08), this.materials.visor);
-    visor.position.set(0, 1.82, 0.22);
-    this.playerGroup.add(visor);
+    visor.position.set(0, 0.04, 0.2);
+    this.headGroup.add(visor);
 
     this.headlamp = new THREE.PointLight(0xbfe4f2, 1.2, 14, 2);
-    this.headlamp.position.set(0, 1.92, 0.26);
-    this.playerGroup.add(this.headlamp);
+    this.headlamp.position.set(0, 0.14, 0.24);
+    this.headGroup.add(this.headlamp);
 
     const headlampBody = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.08, 0.08), this.materials.metal);
     headlampBody.position.copy(this.headlamp.position);
-    this.playerGroup.add(headlampBody);
+    this.headGroup.add(headlampBody);
 
     const belt = new THREE.Mesh(new THREE.BoxGeometry(0.92, 0.12, 0.58), this.materials.strap);
     belt.position.set(0, 0.34, 0);
@@ -1834,7 +2700,8 @@ class BergRenderer {
         ...snapshot.player,
         progressY: snapshot.player.y,
         y: this._sceneYFromGameY(snapshot.player.y),
-        fallOffset: this._sceneYFromGameY(snapshot.player.fallOffset || 0)
+        fallOffset: this._sceneYFromGameY(snapshot.player.fallOffset || 0),
+        fallRatio: clamp01((snapshot.player.fallOffset || 0) / 28)
       },
       rocks: snapshot.rocks.map((rock) => ({
         ...rock,
@@ -1847,10 +2714,10 @@ class BergRenderer {
         progressY: avalanche.y,
         y: this._sceneYFromGameY(avalanche.y)
       })),
-      perchedBoulders: (snapshot.perchedBoulders || []).map((boulder) => ({
-        ...boulder,
-        progressY: boulder.y,
-        y: this._sceneYFromGameY(boulder.y)
+      couloirFissures: (snapshot.couloirFissures || []).map((fissure) => ({
+        ...fissure,
+        progressY: fissure.y,
+        y: this._sceneYFromGameY(fissure.y)
       })),
       footprints: snapshot.footprints.map((mark) => ({
         ...mark,
@@ -1870,8 +2737,8 @@ class BergRenderer {
     this.lastSnapshot = renderSnapshot;
     this._updateEnvironment(renderSnapshot, dt);
     this._updatePlayer(renderSnapshot, dt);
-    this._updateRope(renderSnapshot);
-    this._updatePerchedBoulders(renderSnapshot, dt);
+    this._updateRope(renderSnapshot, dt);
+    this._updateCouloirFissures(renderSnapshot, dt);
     this._updateHazards(renderSnapshot, dt);
     this._updateFootprints(renderSnapshot);
     this._updateParticles(renderSnapshot, dt);
@@ -1884,14 +2751,23 @@ class BergRenderer {
     const phase = snapshot.phaseRatio;
     const progressRatio = Math.min(1, snapshot.player.progressY / 100);
 
-    this.moonHalo.material.opacity = 0.06 + (1 - phase) * 0.04;
-    this.moonDisk.material.opacity = 0.32 + (1 - phase) * 0.18;
-    this.starField.material.opacity = (1 - phase) * 0.28;
+    if (this.isNewYearPreset) {
+      this.moonHalo.material.opacity = 0.018 + (1 - phase) * 0.016;
+      this.moonDisk.material.opacity = 0.08 + (1 - phase) * 0.06;
+      this.starField.material.opacity = 0.54 + (1 - phase) * 0.16;
+      this.starField.rotation.y = this.elapsed * 0.01;
+    } else {
+      this.moonHalo.material.opacity = 0.06 + (1 - phase) * 0.04;
+      this.moonDisk.material.opacity = 0.32 + (1 - phase) * 0.18;
+      this.starField.material.opacity = (1 - phase) * 0.28;
+    }
 
     this.cloudCards.forEach((cloud, index) => {
       cloud.mesh.position.x = cloud.anchorX + Math.sin(this.elapsed * cloud.speed + index) * cloud.drift;
       cloud.mesh.position.y += Math.sin(this.elapsed * 0.2 + index) * dt * 0.5;
-      cloud.mesh.material.opacity = 0.08 + (1 - phase) * 0.09 + Math.sin(this.elapsed * cloud.speed) * 0.015;
+      cloud.mesh.material.opacity = this.isNewYearPreset
+        ? 0.02 + (1 - phase) * 0.028 + Math.sin(this.elapsed * cloud.speed) * 0.01
+        : 0.08 + (1 - phase) * 0.09 + Math.sin(this.elapsed * cloud.speed) * 0.015;
     });
 
     // "Sea of clouds" shelf: rises into view past progressRatio 0.35 and sits
@@ -1906,13 +2782,25 @@ class BergRenderer {
       card.mesh.position.x = Math.cos(card.angle) * card.radius;
       card.mesh.position.z = -6 - Math.sin(card.angle) * (card.radius * 0.55) - 4;
       card.mesh.position.y = card.yOffset + Math.sin(this.elapsed * 0.22 + index) * 0.6;
-      const targetOpacity = shelfFade * (0.32 + Math.sin(this.elapsed * 0.4 + index) * 0.05);
-      card.mesh.material.opacity = targetOpacity;
-      card.mesh.material.color.setRGB(
-        0.82 - warmth * 0.08,
-        0.9 - phase * 0.18,
-        1 - phase * 0.28
+      const targetOpacity = shelfFade * (
+        this.isNewYearPreset
+          ? 0.16 + Math.sin(this.elapsed * 0.4 + index) * 0.03
+          : 0.32 + Math.sin(this.elapsed * 0.4 + index) * 0.05
       );
+      card.mesh.material.opacity = targetOpacity;
+      if (this.isNewYearPreset) {
+        card.mesh.material.color.setRGB(
+          0.56 - phase * 0.04,
+          0.7 - phase * 0.06,
+          0.88 - phase * 0.08
+        );
+      } else {
+        card.mesh.material.color.setRGB(
+          0.82 - warmth * 0.08,
+          0.9 - phase * 0.18,
+          1 - phase * 0.28
+        );
+      }
     });
     this.undercloudGroup.visible = shelfFade > 0.001;
 
@@ -1922,26 +2810,53 @@ class BergRenderer {
     // depth reads clearly. Mix amount rises with distance via each mesh's
     // stored hazeMix; closer bands stay saturated, farther ones fade out.
     const horizonColor = this.tempColorA || (this.tempColorA = new THREE.Color());
-    horizonColor.setRGB(
-      0.56 + phase * 0.14,
-      0.64 - phase * 0.16,
-      0.74 - phase * 0.26
-    );
+    if (this.isNewYearPreset) {
+      horizonColor.setRGB(
+        0.12 + phase * 0.04,
+        0.16 + phase * 0.05,
+        0.22 + phase * 0.06
+      );
+    } else {
+      horizonColor.setRGB(
+        0.56 + phase * 0.14,
+        0.64 - phase * 0.16,
+        0.74 - phase * 0.26
+      );
+    }
     const rockColor = this.tempColorB || (this.tempColorB = new THREE.Color());
     this.distantPeaks.children.forEach((peak) => {
-      rockColor.setHex(0x3a4751);
+      if (this.isNewYearPreset) {
+        rockColor.setRGB(0.44 - phase * 0.03, 0.56 - phase * 0.02, 0.72 - phase * 0.02);
+      } else {
+        rockColor.setHex(0x3a4751);
+      }
       const baseMix = peak.userData.hazeMix != null ? peak.userData.hazeMix : 0.5;
-      peak.material.color.copy(rockColor).lerp(horizonColor, baseMix + phase * 0.05);
+      peak.material.color.copy(rockColor).lerp(
+        horizonColor,
+        this.isNewYearPreset
+          ? Math.max(0.06, baseMix - 0.16 + phase * 0.03)
+          : baseMix + phase * 0.05
+      );
     });
 
     if (this.backMassMesh) {
-      rockColor.setRGB(0.2 + phase * 0.16, 0.24 + phase * 0.05, 0.28 - phase * 0.02);
-      this.backMassMesh.material.color.copy(rockColor).lerp(horizonColor, 0.34 - phase * 0.1);
+      if (this.isNewYearPreset) {
+        rockColor.setRGB(0.32, 0.42, 0.56);
+        this.backMassMesh.material.color.copy(rockColor).lerp(horizonColor, 0.12);
+      } else {
+        rockColor.setRGB(0.2 + phase * 0.16, 0.24 + phase * 0.05, 0.28 - phase * 0.02);
+        this.backMassMesh.material.color.copy(rockColor).lerp(horizonColor, 0.34 - phase * 0.1);
+      }
     }
     if (this.backFlankMeshes) {
       this.backFlankMeshes.forEach((flank) => {
-        rockColor.setRGB(0.22 + phase * 0.18, 0.26 + phase * 0.05, 0.3 - phase * 0.02);
-        flank.material.color.copy(rockColor).lerp(horizonColor, 0.24 - phase * 0.08);
+        if (this.isNewYearPreset) {
+          rockColor.setRGB(0.34, 0.45, 0.6);
+          flank.material.color.copy(rockColor).lerp(horizonColor, 0.1);
+        } else {
+          rockColor.setRGB(0.22 + phase * 0.18, 0.26 + phase * 0.05, 0.3 - phase * 0.02);
+          flank.material.color.copy(rockColor).lerp(horizonColor, 0.24 - phase * 0.08);
+        }
       });
     }
   }
@@ -1950,6 +2865,96 @@ class BergRenderer {
     const phase = snapshot.phaseRatio;
     const progressRatio = Math.min(1, snapshot.player.progressY / 100);
     const danger = snapshot.dangerLevel || 0;
+    // Streak-driven serenity: clean haze pushes back, distant peaks sharpen.
+    // Effect is subtle on purpose — the overlay and audio already carry
+    // the "storm stepping back" read; this just makes depth open up too.
+    const serenity = Math.max(0, Math.min(1, snapshot.serenity || 0));
+
+    if (this.isNewYearPreset) {
+      this.skyUniforms.topColor.value.setRGB(
+        0.03 + phase * 0.02,
+        0.05 + phase * 0.02,
+        0.09 + phase * 0.03
+      );
+      this.skyUniforms.horizonColor.value.setRGB(
+        0.09 + phase * 0.03,
+        0.14 + phase * 0.04,
+        0.22 + phase * 0.05
+      );
+      this.skyUniforms.bottomColor.value.setRGB(
+        0.008,
+        0.012 + phase * 0.01,
+        0.03 + phase * 0.01
+      );
+
+      this.scene.fog.color.setRGB(
+        0.04 + phase * 0.02,
+        0.06 + phase * 0.02,
+        0.10 + phase * 0.03
+      );
+      this.scene.fog.near = 58 - danger * 4 + serenity * 10;
+      this.scene.fog.far = 220 - phase * 16 - danger * 10 + serenity * 60;
+
+      this.renderer.setClearColor(
+        new THREE.Color().setRGB(
+          0.018,
+          0.024 + phase * 0.01,
+          0.04 + phase * 0.01
+        )
+      );
+
+      this.materials.cliff.color.lerpColors(
+        new THREE.Color(0xeaf6ff),
+        new THREE.Color(0xa5c9ea),
+        Math.min(1, phase * 0.72 + danger * 0.1)
+      );
+      this.materials.cliff.emissive = new THREE.Color(0x06131f);
+      this.materials.cliff.emissiveIntensity = 0.05;
+      this.materials.moltenFace.opacity = 0;
+      this.materials.moltenFace.emissiveIntensity = 0;
+      this.materials.glacier.opacity = 0.18 + (1 - phase) * 0.12;
+
+      this.crackNodes.forEach((node) => {
+        node.tube.material.opacity = 0;
+        node.tube.material.emissiveIntensity = 0;
+        node.glow.material.opacity = 0;
+      });
+
+      this.icePanels.forEach((panel, index) => {
+        panel.visible = true;
+        panel.material.opacity = 0.12 + (1 - phase) * 0.08 + (index % 3) * 0.015;
+        panel.rotation.z += Math.sin(this.elapsed * 0.15 + index) * 0.0008;
+      });
+
+      this.flagMesh.rotation.z = Math.sin(this.elapsed * 3.1) * 0.11 - 0.04;
+      this.summitGroup.position.y = Math.sin(this.elapsed * 0.28) * 0.26;
+
+      this.ambientLight.intensity = 0.82;
+      this.ambientLight.groundColor.setRGB(0.05, 0.07, 0.1);
+      this.keyLight.color.setRGB(0.78, 0.86, 0.98);
+      this.keyLight.intensity = 1.1 + danger * 0.06;
+      this.fillLight.color.setRGB(0.98, 0.86, 0.62);
+      this.fillLight.intensity = 0.32;
+      this.lavaLight.intensity = 0;
+      this.summitLight.color.setRGB(1, 0.84, 0.56);
+      this.summitLight.intensity = 1.8 + Math.sin(this.elapsed * 1.8) * 0.12;
+
+      this.moonHalo.position.y = 154 + progressRatio * 4;
+      this.moonDisk.position.y = this.moonHalo.position.y;
+
+      this.routeLanterns.forEach((lantern, index) => {
+        const flicker =
+          0.88 +
+          Math.sin(this.elapsed * 6.2 + lantern.phaseOffset) * 0.08 +
+          Math.sin(this.elapsed * 11.4 + index) * 0.05;
+        lantern.group.rotation.y = Math.sin(this.elapsed * 0.8 + lantern.phaseOffset) * 0.08;
+        lantern.glow.material.opacity = 0.34 + flicker * 0.18;
+        lantern.glow.scale.setScalar(2 + flicker * 0.48);
+        lantern.light.intensity = lantern.baseIntensity * flicker + danger * 0.14;
+        lantern.lanternGlass.material.emissiveIntensity = 1.1 + flicker * 0.7;
+      });
+      return;
+    }
 
     // Cold-leaning sky palette. Top stays a deep slate blue, horizon a pale
     // washed grey — the look you get on an overcast north-face morning.
@@ -1975,8 +2980,8 @@ class BergRenderer {
       0.16 + phase * 0.02,
       0.20 - phase * 0.03
     );
-    this.scene.fog.near = 48 - phase * 8;
-    this.scene.fog.far = 190 - phase * 28 - danger * 8;
+    this.scene.fog.near = 48 - phase * 8 + serenity * 10;
+    this.scene.fog.far = 190 - phase * 28 - danger * 8 + serenity * 65;
 
     this.renderer.setClearColor(
       new THREE.Color().setRGB(
@@ -2034,11 +3039,23 @@ class BergRenderer {
   }
 
   _updatePlayer(snapshot, dt) {
-    const targetPosition = new THREE.Vector3(snapshot.player.x, snapshot.player.y, 1.5);
+    const playerSurface = this._surfaceFrame(snapshot.player.x, snapshot.player.y);
+    const targetPosition = this.tempVecA
+      .copy(playerSurface.position)
+      .addScaledVector(playerSurface.normal, this.playerSurfaceClearance);
     this.playerRender.lerp(targetPosition, 1 - Math.exp(-dt * 7));
+    const currentSurface = this._surfaceFrame(this.playerRender.x, this.playerRender.y);
+    const minimumPosition = this.tempVecB
+      .copy(currentSurface.position)
+      .addScaledVector(currentSurface.normal, this.playerSurfaceClearance * 0.92);
+    if (this.playerRender.z < minimumPosition.z) {
+      this.playerRender.z = minimumPosition.z;
+    }
     this.playerGroup.position.copy(this.playerRender);
 
     const lateralSwing = snapshot.player.vx || 0;
+    const falling = Boolean(snapshot.player.falling);
+    const fallRatio = snapshot.player.fallRatio || 0;
     // Pulse amplitude scales with active climbing. When the climber is
     // just hanging on the rope, limbs drift gently; when pulling up,
     // the cadence is visible and deliberate.
@@ -2058,7 +3075,17 @@ class BergRenderer {
     const heatMix = clamp01((phase - 0.78) / 0.22);
     const torsoLean = iceMix * 0.12 - heatMix * 0.08;
     const shieldRaise = heatMix * 1.15;
+    const summitView = snapshot.summitView && snapshot.summitView.active ? snapshot.summitView : null;
+    const summitRatio = summitView
+      ? smoothStep(0, 1, (summitView.elapsedMs || 0) / Math.max(1, summitView.durationMs || 1))
+      : 0;
 
+    if (this.headGroup) {
+      this.headGroup.rotation.set(0, 0, 0);
+    }
+
+    const surfaceYaw = Math.atan2(playerSurface.normal.x, Math.max(0.001, playerSurface.normal.z)) * 0.34;
+    this.playerGroup.rotation.y = surfaceYaw;
     this.playerGroup.rotation.z = -sway * 0.7;
     this.playerGroup.rotation.x = -0.16 + climbPulse * 0.08 - torsoLean;
 
@@ -2078,7 +3105,32 @@ class BergRenderer {
 
     this.headlamp.intensity = 1.8 + Math.sin(this.elapsed * 8) * 0.18;
 
-    if (snapshot.player.shieldActive) {
+    if (summitRatio > 0 && !falling) {
+      const settle = summitRatio;
+      this.playerGroup.rotation.x = (-0.16 + climbPulse * 0.04) * (1 - settle) - 0.03 * settle;
+      this.playerGroup.rotation.y = surfaceYaw + 0.42 * settle;
+      this.playerGroup.rotation.z = (-sway * 0.28) * (1 - settle);
+
+      this.leftArmPivot.rotation.x = 1.36 + climbPulse * 0.08 * (1 - settle);
+      this.leftArmPivot.rotation.z = -0.22 - sway * 0.06;
+      this.leftForearmPivot.rotation.x = -0.34;
+      this.rightArmPivot.rotation.x = 1.18 - climbPulse * 0.06 * (1 - settle);
+      this.rightArmPivot.rotation.z = 0.22 - sway * 0.05;
+      this.rightForearmPivot.rotation.x = -0.38;
+      this.leftLegPivot.rotation.x = 0.16 - climbPulse * 0.08 * (1 - settle);
+      this.leftShinPivot.rotation.x = -0.22;
+      this.rightLegPivot.rotation.x = 0.16 + climbPulse * 0.08 * (1 - settle);
+      this.rightShinPivot.rotation.x = -0.22;
+
+      if (this.headGroup) {
+        this.headGroup.rotation.y = -1.2 * settle;
+        this.headGroup.rotation.x = -0.08 * settle;
+        this.headGroup.rotation.z = Math.sin(this.elapsed * 0.6) * 0.015 * settle;
+      }
+      this.headlamp.intensity = 0.65 + Math.sin(this.elapsed * 2.2) * 0.05;
+    }
+
+    if (snapshot.player.shieldActive && summitRatio <= 0) {
       this.shieldBillboard.visible = true;
       this.shieldBillboard.material.opacity = 0.18 + Math.sin(this.elapsed * 6) * 0.08;
       this.shieldBillboard.scale.set(4.6 + Math.sin(this.elapsed * 4.2) * 0.2, 6.2 + Math.sin(this.elapsed * 3.3) * 0.25, 1);
@@ -2089,138 +3141,141 @@ class BergRenderer {
       this.shieldRing.material.opacity = 0;
     }
 
-    if (snapshot.player.falling) {
-      this.playerGroup.rotation.z = -0.92;
-      this.playerGroup.rotation.x = -0.64;
+    if (falling) {
+      const flail = Math.sin(this.elapsed * 8.7 + snapshot.player.y * 0.26) * (0.08 + fallRatio * 0.12);
+      const twist = Math.sin(this.elapsed * 5.4 + snapshot.player.x * 0.18) * (0.06 + fallRatio * 0.1);
+      const kick = Math.sin(this.elapsed * 10.2 + snapshot.player.y * 0.42) * (0.14 + fallRatio * 0.16);
+      const reach = Math.sin(this.elapsed * 7.4 + 0.8) * (0.05 + fallRatio * 0.09);
+
+      // Keep the climber opened toward the route so the face and chest still
+      // read as looking upslope rather than tumbling away from the mountain.
+      this.playerGroup.rotation.x = -0.96 + fallRatio * 0.18 + flail;
+      this.playerGroup.rotation.y = surfaceYaw + twist;
+      this.playerGroup.rotation.z = -0.16 - sway * 0.24 + twist * 0.85;
       this.playerGroup.position.y -= snapshot.player.fallOffset;
-      this.playerGroup.position.z += snapshot.player.fallOffset * 0.42;
-      this.leftArmPivot.rotation.x = 2.2;
-      this.rightArmPivot.rotation.x = 0.4;
-      this.leftLegPivot.rotation.x = 0.8;
-      this.rightLegPivot.rotation.x = -0.2;
+      this.playerGroup.position.z += snapshot.player.fallOffset * (0.34 + fallRatio * 0.08);
+      this.playerGroup.position.x += Math.sin(this.elapsed * 3.7 + snapshot.player.y * 0.14) * 0.12 * fallRatio;
+
+      this.leftArmPivot.rotation.x = 1.94 + fallRatio * 0.5 + reach;
+      this.leftArmPivot.rotation.z = -0.5 - twist * 0.8;
+      this.leftForearmPivot.rotation.x = -0.18 - fallRatio * 0.3 - reach * 0.9;
+
+      this.rightArmPivot.rotation.x = 1.18 + fallRatio * 0.44 - reach * 0.8;
+      this.rightArmPivot.rotation.z = 0.48 + twist * 0.6;
+      this.rightForearmPivot.rotation.x = -0.82 + fallRatio * 0.22 + reach * 0.7;
+
+      this.leftLegPivot.rotation.x = 0.74 + fallRatio * 0.18 - kick;
+      this.leftShinPivot.rotation.x = -0.2 + kick * 0.9;
+      this.rightLegPivot.rotation.x = -0.1 + fallRatio * 0.42 + kick;
+      this.rightShinPivot.rotation.x = -0.56 - kick * 0.82;
+
+      this.headlamp.intensity = 1.95 + Math.sin(this.elapsed * 10.5) * 0.24;
     }
 
-    // Rope with inertia and length constraints. The harness endpoint is
-    // pinned, but the rest of the rope solves as a linked chain with a bit
-    // of slack, so sideways motion travels upward instead of creating a hard
-    // kink in the lowest section.
-    this.harnessAnchor.updateMatrixWorld(true);
-    const harnessPosition = this.harnessAnchor.getWorldPosition(this.tempVecA);
-    this.root.worldToLocal(harnessPosition);
-    const anchorX = this.playerRender.x * 0.38;
-    const anchorY = this.playerRender.y + 7.4;
-    const anchorZ = 1.25;
-    const anchorPosition = this.tempVecB.set(anchorX, anchorY, anchorZ);
-
-    const count = this.tetherSegmentCount;
-    const lateralVx = snapshot.player.vx || 0;
-    const dtClamped = Math.min(dt, 0.05);
-    const directDistance = harnessPosition.distanceTo(anchorPosition);
-    const segmentLength = (directDistance * 1.08 + 0.42) / Math.max(1, count - 1);
-
-    if (!this.tetherInitialized) {
-      for (let i = 0; i < count; i += 1) {
-        const t = i / (count - 1);
-        const sag = Math.sin(Math.PI * t) * 0.42;
-        this.tetherPoints[i].lerpVectors(harnessPosition, anchorPosition, t);
-        this.tetherPoints[i].y -= sag;
-        this.tetherVelocities[i].set(0, 0, 0);
-      }
-      this.tetherInitialized = true;
-    }
-
-    for (let i = 1; i < count - 1; i += 1) {
-      const t = i / (count - 1);
-      const point = this.tetherPoints[i];
-      const vel = this.tetherVelocities[i];
-
-      const lineX = harnessPosition.x * (1 - t) + anchorX * t;
-      const lineY = harnessPosition.y * (1 - t) + anchorY * t;
-      const lineZ = harnessPosition.z * (1 - t) + anchorZ * t;
-      const sag = Math.sin(Math.PI * t) * 0.52;
-      const guidePull = 10 + Math.sin(Math.PI * t) * 8;
-      const whip = Math.sin(Math.PI * t) * lateralVx * 0.0038;
-      const wind = Math.sin(this.elapsed * 0.9 + t * 3.1) * 0.03;
-      const depthPulse = Math.cos(this.elapsed * 0.7 + t * 2.2) * 0.022;
-
-      vel.x += (lineX + whip + wind - point.x) * guidePull * dtClamped;
-      vel.y += ((lineY - sag) - point.y) * (guidePull * 0.9) * dtClamped;
-      vel.z += (lineZ + depthPulse - point.z) * (guidePull * 0.8) * dtClamped;
-      vel.y -= (1.3 + Math.sin(Math.PI * t) * 0.35) * dtClamped;
-      vel.multiplyScalar(Math.exp(-dtClamped * 5.8));
-
-      point.x += vel.x * dtClamped;
-      point.y += vel.y * dtClamped;
-      point.z += vel.z * dtClamped;
-    }
-
-    for (let iteration = 0; iteration < 6; iteration += 1) {
-      this.tetherPoints[0].copy(harnessPosition);
-      this.tetherPoints[count - 1].copy(anchorPosition);
-
-      for (let i = 0; i < count - 1; i += 1) {
-        const left = this.tetherPoints[i];
-        const right = this.tetherPoints[i + 1];
-        const delta = this.tempVecC.copy(right).sub(left);
-        const distance = Math.max(0.0001, delta.length());
-        const stretch = (distance - segmentLength) / distance;
-
-        if (i === 0) {
-          right.addScaledVector(delta, -stretch);
-        } else if (i === count - 2) {
-          left.addScaledVector(delta, stretch);
-        } else {
-          left.addScaledVector(delta, stretch * 0.5);
-          right.addScaledVector(delta, -stretch * 0.5);
-        }
-      }
-
-      for (let i = 1; i < count - 1; i += 1) {
-        const t = i / (count - 1);
-        const guideX = harnessPosition.x * (1 - t) + anchorX * t;
-        const guideY = harnessPosition.y * (1 - t) + anchorY * t - Math.sin(Math.PI * t) * 0.5;
-        const guideZ = harnessPosition.z * (1 - t) + anchorZ * t;
-        const point = this.tetherPoints[i];
-        point.x += (guideX - point.x) * 0.02;
-        point.y += (guideY - point.y) * 0.035;
-        point.z += (guideZ - point.z) * 0.02;
-      }
-    }
-
-    this.tetherPoints[0].copy(harnessPosition);
-    this.tetherPoints[count - 1].copy(anchorPosition);
-    this.tetherVelocities[0].set(0, 0, 0);
-    this.tetherVelocities[count - 1].set(0, 0, 0);
-
-    const tetherAttr = this.tetherGeometry.attributes.position;
-    for (let i = 0; i < count; i += 1) {
-      const p = this.tetherPoints[i];
-      tetherAttr.setXYZ(i, p.x, p.y, p.z);
-    }
-    tetherAttr.needsUpdate = true;
   }
 
-  _updateRope(snapshot) {
+  _updateRope(snapshot, dt) {
     const attr = this.ropeGeometry.attributes.position;
-    const ropeDepth = 1.16;
     const playerPullY = snapshot.player.y + 1.6;
+    const dtClamped = Math.min(dt || 0.016, 0.05);
+    const playerX = snapshot.player.x || 0;
+    const playerVx = snapshot.player.vx || 0;
+    const ropeBottomAnchorX = playerX * 0.28 + playerVx * 0.018;
+    const ropeTopAnchorX = playerX * 0.08;
+    const ropeBottomAnchorZ = this._faceAnchor(ropeBottomAnchorX, this.routeRopeMinY, 0).z +
+      this.ropeSurfaceClearance +
+      Math.abs(playerX) * 0.012;
+    const ropeTopAnchorZ = this._faceAnchor(ropeTopAnchorX, this.routeRopeMaxY, 0).z + this.ropeSurfaceClearance;
+
+    if (!this.routeRopeInitialized) {
+      for (let index = 0; index < this.ropePointCount; index += 1) {
+        const t = index / (this.ropePointCount - 1);
+        const y = this.routeRopeMinY + t * (this.routeRopeMaxY - this.routeRopeMinY);
+        const anchor = this._faceAnchor(0, y, 0);
+        this.ropePoints[index].set(anchor.x, y, anchor.z + this.ropeSurfaceClearance);
+        this.routeRopeVelocities[index].set(0, 0);
+      }
+      this.routeRopeInitialized = true;
+    }
 
     for (let index = 0; index < this.ropePointCount; index += 1) {
       const t = index / (this.ropePointCount - 1);
-      const y = -10 + t * 254;
-      const localPull = Math.exp(-Math.pow((y - playerPullY) / 18, 2));
-      const x =
-        Math.sin(t * Math.PI * 1.18 + this.elapsed * 0.9) * 0.14 +
-        Math.sin(t * Math.PI * 4 + this.elapsed * 1.7) * 0.04 +
-        snapshot.player.x * 0.16 * Math.sin(t * Math.PI) +
-        snapshot.player.vx * 0.004 * localPull;
-      const z =
-        ropeDepth +
-        Math.cos(t * Math.PI + this.elapsed * 0.7) * 0.05 +
-        localPull * 0.18;
+      const y = this.routeRopeMinY + t * (this.routeRopeMaxY - this.routeRopeMinY);
+      const point = this.ropePoints[index];
+      const vel = this.routeRopeVelocities[index];
+      const clipPull = Math.exp(-Math.pow((y - playerPullY) / 6.2, 2));
+      const upperCarry = Math.exp(-Math.pow((y - (playerPullY + 16)) / 18, 2));
+      const lowerCarry = Math.exp(-Math.pow((y - (playerPullY - 14)) / 16, 2));
+      const globalCarry = Math.exp(-Math.pow((y - playerPullY) / 88, 2));
+      const endPin = Math.max(Math.exp(-Math.pow(t / 0.12, 2)), Math.exp(-Math.pow((1 - t) / 0.12, 2)));
+      const motionDamp = 1 - endPin * 0.58;
+      const anchorX = ropeBottomAnchorX * (1 - t) + ropeTopAnchorX * t;
+      const anchorZ = ropeBottomAnchorZ * (1 - t) + ropeTopAnchorZ * t;
 
-      this.ropePoints[index].set(x, y, z);
-      attr.setXYZ(index, x, y, z);
+      const baseSway =
+        Math.sin(t * Math.PI * 0.96 + this.elapsed * 0.82) * 0.045 +
+        Math.sin(t * Math.PI * 2.8 + this.elapsed * 1.16) * 0.018;
+      const travelWave =
+        Math.sin(this.elapsed * 1.34 - t * 5.4) *
+        (playerX * 0.06 + playerVx * 0.022) *
+        (0.18 + clipPull * 0.62 + upperCarry * 0.24);
+      const shoulderWave =
+        Math.sin(Math.PI * t) *
+        playerX *
+        (clipPull * 0.58 + upperCarry * 0.36 + lowerCarry * 0.28 + globalCarry * 0.12);
+      const targetX =
+        anchorX +
+        (
+          baseSway +
+          shoulderWave +
+          travelWave +
+          playerVx * (clipPull * 0.064 + upperCarry * 0.028 + lowerCarry * 0.018)
+        ) *
+          motionDamp;
+      const surfaceZ = this._faceAnchor(targetX, y, 0).z + this.ropeSurfaceClearance;
+      const airborneZ =
+        anchorZ +
+        (
+          Math.cos(t * Math.PI + this.elapsed * 0.58) * 0.016 +
+          clipPull * 0.42 +
+          upperCarry * 0.18 +
+          lowerCarry * 0.06
+        ) *
+          motionDamp;
+      const targetZ = Math.max(surfaceZ, airborneZ);
+
+      vel.x += (targetX - point.x) * (9.2 + clipPull * 36 + upperCarry * 16 + globalCarry * 6) * dtClamped;
+      vel.x *= Math.exp(-dtClamped * (4.8 - clipPull * 0.9));
+      point.x += vel.x * dtClamped;
+
+      vel.y += (targetZ - point.z) * (7.8 + clipPull * 22 + upperCarry * 8) * dtClamped;
+      vel.y *= Math.exp(-dtClamped * 4.9);
+      point.z += vel.y * dtClamped;
+      point.y = y;
+      if (this._constrainPointToMountainSurface(point, this.ropeSurfaceClearance, 0.18)) {
+        vel.y = Math.max(0, vel.y);
+      }
+    }
+
+    for (let iteration = 0; iteration < 5; iteration += 1) {
+      for (let index = 1; index < this.ropePointCount - 1; index += 1) {
+        const prev = this.ropePoints[index - 1];
+        const next = this.ropePoints[index + 1];
+        const point = this.ropePoints[index];
+        point.x += (((prev.x + next.x) * 0.5) - point.x) * 0.24;
+        point.z += (((prev.z + next.z) * 0.5) - point.z) * 0.19;
+        this._constrainPointToMountainSurface(point, this.ropeSurfaceClearance, 0.22);
+      }
+    }
+
+    this.ropePoints[0].x = ropeBottomAnchorX;
+    this.ropePoints[this.ropePointCount - 1].x = ropeTopAnchorX;
+    this.ropePoints[0].z = this._faceAnchor(ropeBottomAnchorX, this.ropePoints[0].y, 0).z + this.ropeSurfaceClearance;
+    this.ropePoints[this.ropePointCount - 1].z = this._faceAnchor(ropeTopAnchorX, this.ropePoints[this.ropePointCount - 1].y, 0).z + this.ropeSurfaceClearance;
+
+    for (let index = 0; index < this.ropePointCount; index += 1) {
+      const point = this.ropePoints[index];
+      attr.setXYZ(index, point.x, point.y, point.z);
     }
     attr.needsUpdate = true;
 
@@ -2235,8 +3290,16 @@ class BergRenderer {
       segment.quaternion.setFromUnitVectors(this.upAxis, this.tempVecA);
     }
 
+    const tetherAnchor = this._sampleRouteRopeAtY(playerPullY + 6.4, this.tempVecB);
+    tetherAnchor.z += 0.08;
+    this._constrainPointToMountainSurface(tetherAnchor, this.ropeSurfaceClearance + 0.08, 0);
+    this._updateTether(playerVx, dtClamped, tetherAnchor);
+
     const playerSceneY = snapshot.player.y;
     this.anchorNodes.forEach((node) => {
+      const anchorSurface = this._surfaceFrame(node.baseX, node.baseY);
+      node.screw.position.copy(anchorSurface.position).addScaledVector(anchorSurface.normal, 0.09);
+      node.screw.quaternion.setFromUnitVectors(this.upAxis, anchorSurface.tangentX);
       // Screws bob softly with altitude-driven noise so the ladder feels alive.
       node.screw.rotation.y = Math.sin(this.elapsed * 0.9 + node.baseY * 0.008) * 0.12;
 
@@ -2257,107 +3320,229 @@ class BergRenderer {
       if (node.ribbon) {
         // Ribbons flutter on wind; amplitude rises with altitude.
         const altFactor = clamp01(node.baseY / 240);
-        node.ribbon.rotation.z += Math.sin(this.elapsed * 3.1 + node.baseY * 0.04) * 0.003 * (0.4 + altFactor);
-        node.ribbon.position.x += Math.sin(this.elapsed * 2.2 + node.baseY * 0.06) * 0.002;
+        const ribbonOffset = Math.sin(this.elapsed * 2.2 + node.baseY * 0.06) * 0.06;
+        node.ribbon.position
+          .copy(anchorSurface.position)
+          .addScaledVector(anchorSurface.normal, 0.76)
+          .addScaledVector(anchorSurface.tangentX, node.sideSign * (0.12 + ribbonOffset));
+        this.tempMatA.makeBasis(anchorSurface.tangentX, anchorSurface.tangentY, anchorSurface.normal);
+        node.ribbon.quaternion.setFromRotationMatrix(this.tempMatA);
+        node.ribbon.rotateZ(node.sideSign * -0.14 + Math.sin(this.elapsed * 3.1 + node.baseY * 0.04) * 0.08 * (0.4 + altFactor));
       }
+
+      node.pulse.position.copy(anchorSurface.position).addScaledVector(anchorSurface.normal, 0.84);
     });
   }
 
-  _updatePerchedBoulders(snapshot, dt) {
-    const nextIds = new Set();
-    snapshot.perchedBoulders.forEach((boulder, index) => {
-      nextIds.add(boulder.id);
-      let node = this.perchedBoulderMeshes.get(boulder.id);
+  _updateCouloirFissures(snapshot, dt) {
+    const liveIds = new Set();
+    const fissures = snapshot.couloirFissures || [];
 
+    fissures.forEach((fissure, index) => {
+      liveIds.add(fissure.id);
+      let node = this.fissureMeshes.get(fissure.id);
       if (!node) {
-        const group = new THREE.Group();
-        const core = new THREE.Mesh(
-          this._buildBoulderGeometry(1.35, 3, 0.16),
-          new THREE.MeshStandardMaterial({
-            map: this.materials.rock.map,
-            color: 0x4c5a64,
-            roughness: 0.95,
-            metalness: 0.06
-          })
-        );
-        core.castShadow = true;
-        core.receiveShadow = true;
-        group.add(core);
-
-        const shell = new THREE.Mesh(
-          new THREE.IcosahedronGeometry(1.55, 1),
-          new THREE.MeshBasicMaterial({
-            color: 0xe4eef5,
-            transparent: true,
-            opacity: 0.12,
-            depthWrite: false,
-            side: THREE.BackSide
-          })
-        );
-        group.add(shell);
-
-        const brace = new THREE.Mesh(
-          new THREE.CircleGeometry(1.05, 24),
-          new THREE.MeshBasicMaterial({
-            color: 0x0c1319,
-            transparent: true,
-            opacity: 0.22,
-            depthWrite: false
-          })
-        );
-        brace.scale.set(1.35, 0.62, 1);
-        brace.position.set(0, -0.72, -0.12);
-        group.add(brace);
-
-        const crack = new THREE.Mesh(
-          new THREE.PlaneGeometry(2.1, 0.34),
-          new THREE.MeshBasicMaterial({
-            color: 0xdde7ee,
-            transparent: true,
-            opacity: 0.14,
-            depthWrite: false
-          })
-        );
-        crack.position.set(0, -0.88, -0.05);
-        group.add(crack);
-
-        this.dynamicHazards.add(group);
-        node = { group, core, shell, brace, crack };
-        this.perchedBoulderMeshes.set(boulder.id, node);
+        node = this._createFissureNode(fissure);
+        this.fissureMeshes.set(fissure.id, node);
       }
 
-      const armedMix = boulder.armed ? 1 : 0.3;
-      const shakeMix = boulder.shaking ? 1 : 0;
-      const bob = Math.sin(this.elapsed * 1.4 + index * 0.7) * 0.05;
-      const jitter = shakeMix ? Math.sin(this.elapsed * 28 + index * 1.9) * 0.08 : 0;
+      const maxTurns = Math.max(1, fissure.maxTurns || 3);
+      const dangerMix = clamp01((fissure.turnsLeft || 0) / maxTurns);
+      const freshness = fissure.freshness || 0;
+      // Spawn "cracks open" from a hairline to full aperture; once freshness
+      // runs out, geometry stays at its full size — a real crevasse doesn't
+      // heal as the climber answers correctly.
+      const openAnim = smoothStep(0, 1, 1 - Math.pow(freshness, 2.2));
+      const pulse = 0.5 + 0.5 * Math.sin(this.elapsed * 3.6 + node.seed * 0.11);
 
-      node.group.position.set(boulder.x + jitter, boulder.y + bob, 1.12 + armedMix * 0.06);
-      node.group.scale.setScalar(boulder.size * 1.26);
-      node.group.rotation.x = -0.08;
-      node.group.rotation.y += (0.01 + armedMix * 0.01) * dt * 60;
-      node.group.rotation.z = -0.16 + Math.sin(this.elapsed * 2.3 + index) * 0.03 + shakeMix * Math.sin(this.elapsed * 24 + index) * 0.04;
+      // Lay the group onto the mountain face with the surface normal as +Z.
+      const surface = this._surfaceFrame(fissure.x, fissure.y);
+      node.group.position.copy(surface.position);
+      node.group.position.addScaledVector(surface.normal, 0.11 + freshness * 0.05);
+      this.tempMatA.makeBasis(surface.tangentX, surface.tangentY, surface.normal);
+      node.group.quaternion.setFromRotationMatrix(this.tempMatA);
+      node.group.rotateZ(node.twist);
 
-      node.core.material.color.setHex(boulder.armed ? 0x748591 : 0x43505a);
-      node.shell.material.opacity = 0.06 + armedMix * 0.08 + shakeMix * 0.14;
-      node.brace.material.opacity = 0.18 + armedMix * 0.08;
-      node.crack.material.opacity = 0.08 + armedMix * 0.12 + shakeMix * 0.12;
-      node.crack.scale.x = 1 + armedMix * 0.28;
-      node.crack.rotation.z = Math.sin(this.elapsed * 3.8 + index * 0.8) * 0.08;
+      // Body breathes gently only during the spawn animation — no permanent
+      // size change tied to turnsLeft.
+      node.body.position.z = 0.028 + openAnim * 0.018;
+      node.body.scale.set(0.94 + openAnim * 0.06, 0.14 + openAnim * 0.86, 1);
+      node.body.rotation.z = Math.sin(this.elapsed * 0.8 + node.seed * 0.12) * 0.006 * freshness;
+      node.shadow.scale.set(0.92 + openAnim * 0.08, 0.18 + openAnim * 0.82, 1);
+      node.shadow.material.opacity = 0.08 + dangerMix * 0.08 + openAnim * 0.1 + freshness * 0.02;
+
+      node.lip.material.emissiveIntensity = 0.05 + dangerMix * 0.09 + freshness * 0.16;
+      node.abyss.material.opacity = 0.88 + dangerMix * 0.08;
+      node.abyss.scale.set(0.96 + openAnim * 0.04, 0.2 + openAnim * 0.8, 1);
+      node.glow.material.opacity = 0.09 + dangerMix * 0.12 + pulse * 0.04 + freshness * 0.08;
+      node.glow.scale.set(0.9 + pulse * 0.05, 0.2 + openAnim * 0.55 + pulse * 0.04, 1);
+      node.mist.material.opacity = 0.03 + dangerMix * 0.05 + freshness * 0.08;
+      node.mist.scale.set(3 + pulse * 0.18, 0.54 + openAnim * 0.26 + pulse * 0.06, 1);
+      node.mist.position.y = Math.sin(this.elapsed * 1.6 + index * 0.8) * 0.025;
+      node.mist.position.z = 0.28 + openAnim * 0.06;
+
+      // Shards are siblings of the body, so they don't stretch with the
+      // spawn animation — only a small z-wobble to sell instability.
+      const shardVisible = openAnim > 0.15;
+      node.shards.forEach((shard, shardIndex) => {
+        shard.visible = shardVisible;
+        if (!shardVisible) {
+          return;
+        }
+        const wobble = Math.sin(this.elapsed * shard.userData.wobble + shard.userData.phase + shardIndex) * 0.018;
+        shard.position.z = shard.userData.baseZ + wobble * (0.25 + dangerMix * 0.28);
+        shard.rotation.z = shard.userData.baseRotZ + wobble * 0.28;
+      });
     });
 
-    Array.from(this.perchedBoulderMeshes.entries()).forEach(([id, node]) => {
-      if (!nextIds.has(id)) {
-        this.dynamicHazards.remove(node.group);
-        node.group.traverse((child) => {
-          if (child.geometry) {
-            child.geometry.dispose();
-          }
-          if (child.material) {
-            child.material.dispose();
-          }
-        });
-        this.perchedBoulderMeshes.delete(id);
+    this._pruneFissures(liveIds);
+  }
+
+  _createFissureNode(fissure) {
+    const seed = this._fissureSeed(fissure.id);
+    const group = new THREE.Group();
+    const body = new THREE.Group();
+
+    // Soft dark pool on the surface around the crack — anchors it to the
+    // slope so the floating ice doesn't read as a decal.
+    const shadow = new THREE.Mesh(
+      this._buildFissureShapeGeometry(6.2, 1.04, seed + 5.3, 0.22, 34),
+      new THREE.MeshBasicMaterial({
+        color: 0x06101a,
+        transparent: true,
+        opacity: 0.18,
+        depthWrite: false,
+        side: THREE.DoubleSide
+      })
+    );
+    shadow.position.z = 0.012;
+    shadow.material.polygonOffset = true;
+    shadow.material.polygonOffsetFactor = -1;
+    shadow.material.polygonOffsetUnits = -1;
+    group.add(shadow);
+    group.add(body);
+
+    // Ice rim + descending walls as a single extruded ring.
+    const lip = new THREE.Mesh(
+      this._buildFissureLipGeometry(5.2, 1.22, 1.72, seed),
+      new THREE.MeshStandardMaterial({
+        emissive: 0x1a3550,
+        emissiveIntensity: 0.08,
+        roughness: 0.88,
+        metalness: 0.02,
+        vertexColors: true
+      })
+    );
+    lip.castShadow = true;
+    lip.receiveShadow = true;
+    // Avoid z-fighting with the mountain face at the crest of the rim.
+    lip.material.polygonOffset = true;
+    lip.material.polygonOffsetFactor = -2;
+    lip.material.polygonOffsetUnits = -2;
+    body.add(lip);
+
+    // The void at the bottom of the crack — slightly wider than the hole so
+    // the walls read as fully enclosed when viewed head-on.
+    const abyss = new THREE.Mesh(
+      this._buildFissureShapeGeometry(3.6, 0.4, seed + 41.7, 0.1, 30),
+      new THREE.MeshBasicMaterial({
+        color: 0x030608,
+        transparent: true,
+        opacity: 0.94,
+        depthWrite: false,
+        side: THREE.DoubleSide
+      })
+    );
+    abyss.position.z = -1.56;
+    body.add(abyss);
+
+    // A single cold glow layered mid-depth: gives the crack its "looking
+    // into deep ice" quality without stacking five overlapping planes.
+    const glow = new THREE.Mesh(
+      this._buildFissureShapeGeometry(2.5, 0.28, seed + 73.9, 0.08, 26),
+      new THREE.MeshBasicMaterial({
+        color: 0x2f78c8,
+        transparent: true,
+        opacity: 0.22,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide
+      })
+    );
+    glow.position.z = -0.78;
+    body.add(glow);
+
+    // Chill vapor rising from the slit.
+    const mist = new THREE.Sprite(this.materials.trail.clone());
+    mist.material.color.setHex(0xd6ecfa);
+    mist.material.opacity = 0.12;
+    mist.position.set(0, 0, 0.3);
+    mist.scale.set(3.05, 0.62, 1);
+    group.add(mist);
+
+    // Ice debris scattered in a ring around the outside of the crack. Kept
+    // at group level so the spawn animation (body scale) never squashes them.
+    const shards = [];
+    const shardCount = 6;
+    for (let i = 0; i < shardCount; i += 1) {
+      const shardSeed = seed + i * 11.7 + 3.1;
+      const side = i % 2 === 0 ? -1 : 1;
+      const x = side * (2.72 + this._seededUnit(shardSeed + 3) * 0.48);
+      const y = (this._seededUnit(shardSeed + 5) - 0.5) * 1.08;
+      const z = 0.04 + this._seededUnit(shardSeed + 7) * 0.1;
+
+      const shard = new THREE.Mesh(
+        this._buildBoulderGeometry(0.16 + this._seededUnit(shardSeed + 9) * 0.08, 1, 0.28, { seed: shardSeed }),
+        this._makeRockMaterial(shardSeed, 'env')
+      );
+      shard.castShadow = true;
+      shard.receiveShadow = true;
+      shard.position.set(x, y, z);
+      shard.rotation.set(
+        (this._seededUnit(shardSeed + 11) - 0.5) * 0.5,
+        this._seededUnit(shardSeed + 13) * Math.PI * 2,
+        (this._seededUnit(shardSeed + 15) - 0.5) * 0.6
+      );
+      shard.userData = {
+        baseZ: z,
+        baseRotZ: shard.rotation.z,
+        wobble: 1.4 + this._seededUnit(shardSeed + 17) * 0.9,
+        phase: this._seededUnit(shardSeed + 19) * Math.PI * 2
+      };
+      group.add(shard);
+      shards.push(shard);
+    }
+
+    this.dynamicHazards.add(group);
+    return {
+      group,
+      body,
+      lip,
+      abyss,
+      glow,
+      mist,
+      shadow,
+      shards,
+      seed,
+      twist: (this._seededUnit(seed + 29) - 0.5) * 0.24
+    };
+  }
+
+  _pruneFissures(liveIds) {
+    Array.from(this.fissureMeshes.entries()).forEach(([id, node]) => {
+      if (liveIds.has(id)) {
+        return;
       }
+      this.dynamicHazards.remove(node.group);
+      node.group.traverse((child) => {
+        if (child.geometry) {
+          child.geometry.dispose();
+        }
+        if (child.material) {
+          child.material.dispose();
+        }
+      });
+      this.fissureMeshes.delete(id);
     });
   }
 
@@ -2369,57 +3554,61 @@ class BergRenderer {
 
       if (!node) {
         const group = new THREE.Group();
-        const coreGeom = this._buildBoulderGeometry(1.55, 3, 0.18);
+        const rockSeed = Math.random() * 1000;
+        const coreGeom = this._buildBoulderGeometry(
+          0.92,
+          this._seededUnit(rockSeed + 1) > 0.62 ? 3 : 2,
+          0.24 + this._seededUnit(rockSeed + 2) * 0.08,
+          { seed: rockSeed }
+        );
+        const coreMaterial = this._makeRockMaterial(rockSeed, 'falling');
         const core = new THREE.Mesh(
           coreGeom,
-          new THREE.MeshStandardMaterial({
-            map: this.materials.rock.map,
-            color: 0x697782,
-            roughness: 0.94,
-            metalness: 0.08
-          })
+          coreMaterial
         );
         core.castShadow = true;
         core.receiveShadow = true;
+        const coreScale = new THREE.Vector3(
+          0.84 + Math.random() * 0.22,
+          0.72 + Math.random() * 0.18,
+          0.76 + Math.random() * 0.2
+        );
+        core.scale.copy(coreScale);
         group.add(core);
 
-        const shell = new THREE.Mesh(
-          new THREE.IcosahedronGeometry(1.75, 2),
-          new THREE.MeshBasicMaterial({
-            color: 0xfff0c6,
-            transparent: true,
-            opacity: 0.18,
-            depthWrite: false,
-            side: THREE.BackSide
-          })
-        );
-        group.add(shell);
-
-        const trail = new THREE.Sprite(this.materials.trail.clone());
-        trail.position.set(0, 1.8, -0.1);
-        trail.scale.set(3.2, 5.6, 1);
-        group.add(trail);
-
-        const ember = new THREE.Sprite(this.materials.emberTrail.clone());
-        ember.position.set(0, 1.0, 0.1);
-        ember.scale.set(2.4, 2.4, 1);
-        group.add(ember);
+        const dust = new THREE.Sprite(this.materials.trail.clone());
+        dust.material.color.setHex(0x96a4ad);
+        dust.material.opacity = 0;
+        dust.position.set(0, 0.28, -0.16);
+        dust.scale.set(0.9, 1.4, 1);
+        group.add(dust);
 
         const chips = [];
-        for (let chipIndex = 0; chipIndex < 4; chipIndex += 1) {
-          const chipRadius = 0.26 + chipIndex * 0.08;
+        for (let chipIndex = 0; chipIndex < 3; chipIndex += 1) {
+          const chipRadius = 0.18 + chipIndex * 0.06;
           const chip = new THREE.Mesh(
-            this._buildBoulderGeometry(chipRadius, 2, 0.24),
-            core.material
+            this._buildBoulderGeometry(chipRadius, 1, 0.3, { seed: rockSeed + chipIndex * 19 + 5 }),
+            coreMaterial
           );
           chip.position.set(
-            (Math.random() - 0.5) * 1.2,
-            (Math.random() - 0.5) * 1.2,
-            (Math.random() - 0.5) * 1.2
+            (Math.random() - 0.5) * 0.95,
+            (Math.random() - 0.5) * 0.95,
+            (Math.random() - 0.5) * 0.95
           );
           group.add(chip);
           chips.push(chip);
         }
+
+        group.rotation.set(
+          (Math.random() - 0.5) * 0.4,
+          Math.random() * Math.PI * 2,
+          (Math.random() - 0.5) * 0.35
+        );
+        const spin = new THREE.Vector3(
+          (Math.random() - 0.5) * 0.008,
+          (Math.random() - 0.5) * 0.01,
+          (Math.random() - 0.5) * 0.006
+        );
 
         // Landing telegraph: a soft dark shadow on the slope instead of
         // the old orange bullseye. Reads as the rock's approaching mass
@@ -2449,25 +3638,34 @@ class BergRenderer {
         this.dynamicHazards.add(targetCore);
 
         this.dynamicHazards.add(group);
-        node = { group, core, shell, trail, ember, chips, target, targetCore };
+        node = {
+          group,
+          core,
+          baseColor: core.material.color.clone(),
+          dust,
+          chips,
+          target,
+          targetCore,
+          spin
+        };
         this.rockMeshes.set(rock.id, node);
       }
 
-      node.group.position.set(rock.x, rock.y, 1.9 + Math.sin(this.elapsed * 12 + index) * 0.2);
-      node.group.scale.setScalar(rock.size * 1.25);
-      node.group.rotation.x += (0.07 + rock.speed * 0.002) * dt * 60;
-      node.group.rotation.y += 0.06 * dt * 60;
-      node.group.rotation.z += 0.04 * dt * 60;
-      node.core.material.color.setHex(rock.warning ? 0xaed6ea : 0x5f6e79);
-      node.shell.material.opacity = rock.warning ? 0.32 + Math.sin(this.elapsed * 9) * 0.08 : 0.12;
-      node.trail.material.opacity = rock.warning ? 0.32 : 0.44;
-      node.trail.scale.set(rock.size * 2.6, rock.size * 4.2, 1);
-      node.ember.material.opacity = snapshot.phaseRatio * 0.22;
-      node.ember.scale.set(rock.size * 1.6, rock.size * 1.6, 1);
+      const rockSurface = this._faceAnchor(rock.x, rock.y, 0);
+      node.group.position.set(rockSurface.x, rock.y, rockSurface.z + 1.12 + Math.sin(this.elapsed * 2.2 + index) * 0.03);
+      node.group.scale.setScalar(rock.size * 0.9);
+      node.group.rotation.x += (node.spin.x + rock.speed * 0.00012) * dt * 60;
+      node.group.rotation.y += (node.spin.y + rock.speed * 0.00016) * dt * 60;
+      node.group.rotation.z += (node.spin.z + rock.speed * 0.00008) * dt * 60;
+      const fallingAlertColor = this.tempColorD || (this.tempColorD = new THREE.Color());
+      fallingAlertColor.setHex(0x99a0a5);
+      node.core.material.color.copy(node.baseColor).lerp(fallingAlertColor, rock.warning ? 0.22 : 0.08);
+      node.dust.material.opacity = rock.warning ? 0.055 : 0.028;
+      node.dust.scale.set(rock.size * 0.9, rock.size * 1.4, 1);
 
       node.chips.forEach((chip, chipIndex) => {
-        chip.rotation.x += 0.03 + chipIndex * 0.02;
-        chip.rotation.y += 0.05 + chipIndex * 0.03;
+        chip.rotation.x += 0.002 + chipIndex * 0.0015;
+        chip.rotation.y += 0.0025 + chipIndex * 0.0015;
       });
 
       // Shadow marker: grows a touch as impact nears, stays a cold dark
@@ -2477,12 +3675,16 @@ class BergRenderer {
       const timeToImpact = dy / Math.max(4, rock.speed);
       const urgency = clamp01(1 - timeToImpact / 2.4);
       const markerY = snapshot.player.y + 0.4;
-      node.target.position.set(rock.x, markerY, 1.44);
-      node.target.scale.setScalar(1.05 + (1 - urgency) * 0.7);
-      node.target.material.opacity = 0.24 + urgency * 0.24;
-      node.targetCore.position.set(rock.x, markerY, 1.43);
-      node.targetCore.scale.setScalar(0.85 + urgency * 0.3);
-      node.targetCore.material.opacity = 0.38 + urgency * 0.22;
+      const markerSurface = this._surfaceFrame(rock.x, markerY);
+      node.target.position.copy(markerSurface.position).addScaledVector(markerSurface.normal, 0.045);
+      node.target.scale.setScalar(0.8 + (1 - urgency) * 0.42);
+      node.target.material.opacity = 0.18 + urgency * 0.18;
+      this.tempMatA.makeBasis(markerSurface.tangentX, markerSurface.tangentY, markerSurface.normal);
+      node.target.quaternion.setFromRotationMatrix(this.tempMatA);
+      node.targetCore.position.copy(markerSurface.position).addScaledVector(markerSurface.normal, 0.055);
+      node.targetCore.scale.setScalar(0.55 + urgency * 0.2);
+      node.targetCore.material.opacity = 0.26 + urgency * 0.16;
+      node.targetCore.quaternion.copy(node.target.quaternion);
     });
 
     Array.from(this.rockMeshes.entries()).forEach(([id, node]) => {
@@ -2732,10 +3934,13 @@ class BergRenderer {
         this.footprints.set(mark.id, mesh);
       }
 
-      mesh.position.set(mark.x, mark.y, 1.17);
+      const surface = this._surfaceFrame(mark.x, mark.y);
+      mesh.position.copy(surface.position).addScaledVector(surface.normal, 0.035);
       mesh.scale.setScalar(1 + mark.strength * 0.22);
       mesh.material.opacity = Math.max(0, 0.34 - mark.age * 0.22);
-      mesh.rotation.z = mark.rotation;
+      this.tempMatA.makeBasis(surface.tangentX, surface.tangentY, surface.normal);
+      mesh.quaternion.setFromRotationMatrix(this.tempMatA);
+      mesh.rotateZ(mark.rotation);
     });
 
     Array.from(this.footprints.entries()).forEach(([id, mesh]) => {
@@ -2752,10 +3957,17 @@ class BergRenderer {
     const phase = snapshot.phaseRatio;
     const storm = snapshot.stormStrength;
 
-    this.materials.snowFar.opacity = 0.18 + storm * 0.24 * (1 - phase * 0.22);
-    this.materials.snowMid.opacity = 0.26 + storm * 0.4 * (1 - phase * 0.12);
-    this.materials.snowNear.opacity = 0.34 + storm * 0.48;
-    this.materials.ash.opacity = phase * (0.08 + storm * 0.22);
+    if (this.isNewYearPreset) {
+      this.materials.snowFar.opacity = 0.06 + storm * 0.16 * (1 - phase * 0.18);
+      this.materials.snowMid.opacity = 0.1 + storm * 0.24 * (1 - phase * 0.1);
+      this.materials.snowNear.opacity = 0.16 + storm * 0.32;
+      this.materials.ash.opacity = 0;
+    } else {
+      this.materials.snowFar.opacity = 0.18 + storm * 0.24 * (1 - phase * 0.22);
+      this.materials.snowMid.opacity = 0.26 + storm * 0.4 * (1 - phase * 0.12);
+      this.materials.snowNear.opacity = 0.34 + storm * 0.48;
+      this.materials.ash.opacity = phase * (0.08 + storm * 0.22);
+    }
 
     this._driftPoints(this.snowFarField, dt, {
       speedY: 7 + storm * 8,
@@ -2821,15 +4033,27 @@ class BergRenderer {
     const danger = snapshot.dangerLevel || 0;
     const shake = snapshot.cameraShake || 0;
     const progressRatio = Math.min(1, snapshot.player.progressY / 100);
+    const summitApproach = smoothStep(0.86, 1, progressRatio);
     const playerWorldY = this._worldY(this.playerRender.y);
     const summitWorldY = this._worldY(this.summitFocusLocal.y);
     const climbing = Boolean(snapshot.player.climbing);
+    const falling = Boolean(snapshot.player.falling);
+    const fallRatio = snapshot.player.fallRatio || 0;
+    const fallOffsetWorld = this._worldY((snapshot.player.fallOffset || 0) * 0.38);
+    const summitView = snapshot.summitView && snapshot.summitView.active ? snapshot.summitView : null;
+    const summitReveal = summitView
+      ? smoothStep(0, 1, (summitView.elapsedMs || 0) / Math.max(1, summitView.durationMs || 1))
+      : 0;
 
     // Over-the-shoulder POV with weight. The camera lags the climber, leans
     // into the slope when they climb, and sways gently against their
     // lateral motion so the rig reads as attached to a body breathing
     // on a rope — not a locked follow-cam.
-    const desiredFov = 74 - progressRatio * 4 + (climbing ? 1.6 : 0);
+    const panoramaIntensityForFov = (snapshot.panorama && snapshot.panorama.intensity) || 0;
+    const serenityForFov = Math.max(0, Math.min(1, snapshot.serenity || 0));
+    const desiredFov = falling
+      ? 81 + fallRatio * 4
+      : 74 - progressRatio * 4 + (climbing ? 1.6 : 0) + panoramaIntensityForFov * 5.5 + serenityForFov * 1.8 + summitReveal * 7;
     if (Math.abs(this.camera.fov - desiredFov) > 0.02) {
       this.camera.fov += (desiredFov - this.camera.fov) * Math.min(1, dt * 2.2);
       this.camera.updateProjectionMatrix();
@@ -2842,33 +4066,82 @@ class BergRenderer {
     // Pull the rig a bit further back when climbing: gives the axe-plant
     // frame room to read. Settles closer when the climber is just hanging.
     const climbOffset = climbing ? 0.35 : 0;
-    const camBackOffset = 2.55 + climbOffset;
-    const camRise = 0.42 + climbOffset * 0.4;
+    const camBackOffset = 2.55 + climbOffset + summitApproach * 1.15;
+    const camRise = 0.42 + climbOffset * 0.4 + summitApproach * 0.28;
 
-    const lookAheadLocal = 24 + progressRatio * 8 + (climbing ? 2.4 : 0);
+    const lookAheadLocal = 24 + progressRatio * 8 + (climbing ? 2.4 : 0) + summitApproach * 4.5;
     const lookWorldY = Math.min(
-      summitWorldY + 0.8,
+      summitWorldY + 1.6,
       playerWorldY + this._worldY(lookAheadLocal)
     );
-    const lookZ = 0.2;
+    const lookZ = 0.2 - summitApproach * 0.35;
 
     // Lateral counter-sway: when the climber swings right, the cam drifts
     // left of his back, so the silhouette cuts through frame instead of
     // being centred and lifeless.
     const lateralX = snapshot.player.x || 0;
+    const baseLane = snapshot.player.baseLane || 0;
+    const activeCouloirX = baseLane * (window.BERG_ROUTE_LANE_SPACING || 6.35);
     const lateralVx = snapshot.player.vx || 0;
     const counterSway = -lateralX * 0.12 - lateralVx * 0.009;
+    const cameraLaneShift = activeCouloirX * (0.26 + danger * 0.04);
+    const lookLaneShift = activeCouloirX * (0.35 + danger * 0.03);
 
-    const targetPosition = this.tempVecA.set(
-      lateralX * 0.42 + counterSway,
-      playerWorldY + shoulderWorldY + camRise,
-      this.playerRender.z + camBackOffset + Math.sin(this.elapsed * 0.42) * 0.04
-    );
-    const targetLook = this.tempVecB.set(
-      lateralX * 0.22,
-      lookWorldY,
-      lookZ
-    );
+    const targetPosition = falling
+      ? this.tempVecA.set(
+        lateralX * 0.26 + counterSway * 0.42 + cameraLaneShift * 0.82,
+        playerWorldY + shoulderWorldY - 0.1 - fallOffsetWorld,
+        this.playerRender.z + 3.18 + summitApproach * 0.8 + fallRatio * 0.7 + Math.sin(this.elapsed * 0.68) * 0.03
+      )
+      : this.tempVecA.set(
+        lateralX * 0.42 + counterSway + cameraLaneShift,
+        playerWorldY + shoulderWorldY + camRise,
+        this.playerRender.z + camBackOffset + Math.sin(this.elapsed * 0.42) * 0.04
+      );
+    const targetLook = falling
+      ? this.tempVecB.set(
+        lateralX * 0.1 + lookLaneShift * 0.72,
+        Math.min(
+          summitWorldY + 1.2,
+          playerWorldY + this._worldY(32 + fallRatio * 14) - fallOffsetWorld * 0.22
+        ),
+        0.14
+      )
+      : this.tempVecB.set(
+        lateralX * 0.22 + lookLaneShift,
+        lookWorldY,
+        lookZ
+      );
+
+    if (summitReveal > 0 && !falling) {
+      const reveal = smoothStep(0.04, 0.82, summitReveal);
+      const headHeight = shoulderWorldY + this._worldY(0.2);
+      targetPosition.set(
+        lateralX * 0.16 + cameraLaneShift * 0.32 + reveal * 4.8,
+        playerWorldY + headHeight + 0.72 + reveal * 1.65,
+        this.playerRender.z + 3.0 + reveal * 4.8
+      );
+      targetLook.set(
+        lateralX * 0.06 + lookLaneShift * 0.18 - reveal * 1.1,
+        playerWorldY + headHeight + 0.38 + reveal * 0.72,
+        -4.5 - reveal * 23
+      );
+    }
+
+    // Panorama pull-back. The game freezes the world at a phase change and
+    // asks the rig to widen: the camera drifts back + up, the look-target
+    // lifts toward the summit so the distant peak enters frame, and the
+    // roll/shake bleed off. Intensity is 0..1 eased in game.js.
+    const panoramaIntensity = (snapshot.panorama && snapshot.panorama.intensity) || 0;
+    if (panoramaIntensity > 0 && !falling && summitReveal <= 0) {
+      const lift = this._worldY(panoramaIntensity * 1.8);
+      targetPosition.y += lift;
+      targetPosition.z += panoramaIntensity * 2.6;
+      targetPosition.x *= 1 - panoramaIntensity * 0.35;
+      const liftedLook = summitWorldY + 1.4;
+      targetLook.y += (liftedLook - targetLook.y) * panoramaIntensity * 0.55;
+      targetLook.x *= 1 - panoramaIntensity * 0.55;
+    }
 
     // Heavier damping — exp(-dt*3.2) lags ~0.3s vs the old ~0.15s.
     // Gives the rig real mass and turns the old "whip to target" feel
@@ -2878,20 +4151,21 @@ class BergRenderer {
 
     // Breathing: deeper amplitude under load, syncopated X so it's not a
     // simple bob. Extra pulse when actively climbing — the axe/foot
-    // cadence bleeds into the rig.
-    const load = (climbing ? 0.5 : 0) + danger * 0.4;
-    const breathAmp = 0.06 + progressRatio * 0.09 + load * 0.08;
+    // cadence bleeds into the rig. Panorama slows breath toward stillness.
+    const load = (climbing ? 0.5 : 0) + danger * 0.4 + (falling ? 0.18 : 0);
+    const breathDamp = 1 - panoramaIntensity * 0.85;
+    const breathAmp = (0.06 + progressRatio * 0.09 + load * 0.08) * breathDamp;
     const breath = Math.sin(this.elapsed * (0.9 + load * 0.4)) * breathAmp;
     const breathSway = Math.sin(this.elapsed * 0.6 + 0.4) * breathAmp * 0.55;
-    this.camera.position.y += breath;
-    this.camera.position.x += breathSway;
+    this.camera.position.y += falling ? breath * 0.26 : breath;
+    this.camera.position.x += falling ? breathSway * 0.32 : breathSway;
 
     // Axe-plant micro-dolly: a short forward bump timed to the climb
     // stroke phase, then a settle. Gives the rig a living, reactive feel.
-    if (climbing) {
+    if (climbing && !falling && panoramaIntensity < 0.98) {
       const stroke = (snapshot.player.climbStrokePhase || 0);
       const phaseOffset = stroke * Math.PI;
-      const kick = Math.max(0, Math.sin(this.elapsed * 4.8 + phaseOffset));
+      const kick = Math.max(0, Math.sin(this.elapsed * 4.8 + phaseOffset)) * (1 - panoramaIntensity);
       this.camera.position.z -= kick * kick * 0.08;
       this.camera.position.y += kick * kick * 0.04;
     }
@@ -2904,11 +4178,14 @@ class BergRenderer {
 
     // Roll responds to tether tension (up-vector pulling the climber
     // tight) plus lateral swing. A touch of idle breath keeps it alive
-    // even when the climber is still.
-    const rollBreath = Math.sin(this.elapsed * 0.7 + 1.2) * (0.003 + progressRatio * 0.004);
-    const tensionRoll = climbing ? Math.sin(this.elapsed * 2.1) * 0.012 : 0;
+    // even when the climber is still. Panorama calms the roll too.
+    const rollDamp = 1 - panoramaIntensity * 0.92;
+    const rollBreath = Math.sin(this.elapsed * 0.7 + 1.2) * (0.003 + progressRatio * 0.004) * rollDamp;
+    const tensionRoll = climbing ? Math.sin(this.elapsed * 2.1) * 0.012 * rollDamp : 0;
     this.camera.rotation.z =
-      -lateralX * 0.022 - lateralVx * 0.0028 + rollBreath + tensionRoll;
+      falling
+        ? -lateralX * 0.01 - lateralVx * 0.0016 + Math.sin(this.elapsed * 1.2) * 0.006
+        : (-lateralX * 0.022 - lateralVx * 0.0028) * rollDamp + rollBreath + tensionRoll;
   }
 
   resize() {
