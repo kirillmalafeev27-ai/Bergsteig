@@ -1076,6 +1076,85 @@ class BergRenderer {
     };
   }
 
+  // Injects a procedural fbm-noise bump into MeshStandardMaterial via
+  // onBeforeCompile. Uses Mikkelsen's surface-gradient formulation so the
+  // perturbation only needs world position derivatives — no UVs, no tangents,
+  // no texture files. Adds rocky micro-relief that hides the low-poly facet
+  // look at close camera distances.
+  _mountainProceduralNoiseInjector() {
+    const cacheKey = 'bergsteig-mountain-procnoise-v1';
+    return (material) => {
+      const previous = material.onBeforeCompile;
+      material.onBeforeCompile = (shader) => {
+        if (typeof previous === 'function') {
+          previous(shader);
+        }
+
+        shader.vertexShader = shader.vertexShader
+          .replace(
+            '#include <common>',
+            '#include <common>\nvarying vec3 vBergWorldPos;'
+          )
+          .replace(
+            '#include <fog_vertex>',
+            '#include <fog_vertex>\nvBergWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;'
+          );
+
+        const noisePars = `
+varying vec3 vBergWorldPos;
+float bergHash(vec3 p) {
+  p = fract(p * 0.3183099 + vec3(0.71, 0.113, 0.419));
+  p *= 17.0;
+  return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+}
+float bergValueNoise(vec3 p) {
+  vec3 i = floor(p);
+  vec3 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(
+    mix(mix(bergHash(i + vec3(0.0,0.0,0.0)), bergHash(i + vec3(1.0,0.0,0.0)), f.x),
+        mix(bergHash(i + vec3(0.0,1.0,0.0)), bergHash(i + vec3(1.0,1.0,0.0)), f.x), f.y),
+    mix(mix(bergHash(i + vec3(0.0,0.0,1.0)), bergHash(i + vec3(1.0,0.0,1.0)), f.x),
+        mix(bergHash(i + vec3(0.0,1.0,1.0)), bergHash(i + vec3(1.0,1.0,1.0)), f.x), f.y),
+    f.z
+  );
+}
+float bergFbm(vec3 p) {
+  float v = 0.0;
+  float a = 0.5;
+  for (int i = 0; i < 4; i++) {
+    v += a * bergValueNoise(p);
+    p *= 2.13;
+    a *= 0.5;
+  }
+  return v;
+}`;
+
+        const perturb = `
+#include <normal_fragment_maps>
+{
+  float h = bergFbm(vBergWorldPos * 0.55) + 0.45 * bergFbm(vBergWorldPos * 2.7);
+  float hx = dFdx(h);
+  float hy = dFdy(h);
+  vec3 dPdx = dFdx(vBergWorldPos);
+  vec3 dPdy = dFdy(vBergWorldPos);
+  vec3 R1 = cross(dPdy, normal);
+  vec3 R2 = cross(normal, dPdx);
+  float det = dot(dPdx, R1);
+  float bumpScale = 1.4;
+  vec3 grad = sign(det) * bumpScale * (hx * R1 + hy * R2);
+  normal = normalize(abs(det) * normal - grad);
+}`;
+
+        shader.fragmentShader = shader.fragmentShader
+          .replace('#include <common>', `#include <common>\n${noisePars}`)
+          .replace('#include <normal_fragment_maps>', perturb);
+      };
+      material.customProgramCacheKey = () => cacheKey;
+      material.needsUpdate = true;
+    };
+  }
+
   _loadMountainAsset(meta) {
     if (!THREE.GLTFLoader) {
       console.warn('GLTFLoader is unavailable; falling back to procedural mountain surface.');
@@ -1089,6 +1168,7 @@ class BergRenderer {
         const mountain = gltf.scene;
         mountain.name = 'SnowyMountainAsset';
 
+        const noiseInjector = this._mountainProceduralNoiseInjector();
         mountain.traverse((child) => {
           if (!child.isMesh) {
             return;
@@ -1105,6 +1185,7 @@ class BergRenderer {
             if (material.map) {
               material.map.encoding = THREE.sRGBEncoding;
             }
+            noiseInjector(material);
           });
         });
 
