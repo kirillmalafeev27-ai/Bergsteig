@@ -18,6 +18,11 @@ const SUMMIT_ROCK_STOP_DISTANCE = 10;
 const ROCK_SPAWN_MIN_AHEAD = 62;
 const ROCK_SPAWN_MAX_AHEAD = 82;
 const ROCK_HIT_GRACE_MS = 1400;
+// Older Macs (Intel iGPU) and Android run at lower frame rates which
+// shortens the player's reaction window. Clamp the rock cadence so
+// waves cannot land closer than 15 seconds apart on those devices.
+const LOW_TIER_ROCK_MIN_CADENCE_MS = 15000;
+const HIGH_TIER_ROCK_MIN_CADENCE_MS = 3400;
 const LANE_SWITCH_PROTECTION_MS = 10000;
 const ROCK_POST_AVALANCHE_LOCK_MS = 5200;
 const AVALANCHE_POST_ROCK_LOCK_MS = 2600;
@@ -921,7 +926,9 @@ class Game {
     }
 
     const cadence = randomRange(5200, 7800) - phaseRatio * 440 - rampUp * 800;
-    this.nextRockSpawnAt = now + Math.max(3400, cadence);
+    const tier = (typeof window !== 'undefined' && window.BERG_DEVICE_TIER) || 'high';
+    const minCadence = tier === 'low' ? LOW_TIER_ROCK_MIN_CADENCE_MS : HIGH_TIER_ROCK_MIN_CADENCE_MS;
+    this.nextRockSpawnAt = now + Math.max(minCadence, cadence);
     this.avalancheSpawnBlockedUntil = Math.max(this.avalancheSpawnBlockedUntil, now + AVALANCHE_POST_ROCK_LOCK_MS);
   }
 
