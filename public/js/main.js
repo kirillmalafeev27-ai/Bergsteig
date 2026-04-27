@@ -57,6 +57,105 @@ function detectTouchDevice() {
   return Boolean(coarse || touch);
 }
 
+// Splits browsers into "high" and "low" graphics tiers. Windows always stays
+// high. Android always drops to low (mainstream phones cannot sustain the
+// full pipeline). Macs are inspected via the WebGL renderer string: Apple
+// Silicon stays high, Intel iGPUs (HD 3000-Iris Plus, 2012-2017) drop to low.
+function detectDeviceTier() {
+  if (typeof navigator === 'undefined') {
+    return 'high';
+  }
+  const ua = navigator.userAgent || '';
+  if (/Windows/i.test(ua)) {
+    return 'high';
+  }
+  if (/Android/i.test(ua)) {
+    return 'low';
+  }
+  const isMac = /Macintosh|Mac OS X/i.test(ua) && !/iPhone|iPad|iPod/i.test(ua);
+  if (!isMac) {
+    return 'high';
+  }
+  try {
+    const canvas = document.createElement('canvas');
+    const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+    if (!gl) {
+      return 'low';
+    }
+    const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+    if (debugInfo) {
+      const renderer = String(gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) || '');
+      if (/Intel/i.test(renderer)) {
+        return 'low';
+      }
+      return 'high';
+    }
+    // Safari blocks WEBGL_debug_renderer_info on newer versions; fall back to
+    // the macOS version string. macOS 10.x (Catalina and earlier) is treated
+    // as low because such hardware is universally Intel by then.
+    const versionMatch = ua.match(/Mac OS X (10)[._](\d+)/);
+    if (versionMatch) {
+      const minor = parseInt(versionMatch[2], 10);
+      if (minor <= 15) {
+        return 'low';
+      }
+    }
+    return 'high';
+  } catch (error) {
+    console.warn('Device-tier detection failed:', error);
+    return 'low';
+  }
+}
+
+// Older Safari (<15.4) does not support `:has()`, which CSS uses to react to
+// modal panels opening on mobile. Mirror the relevant `.hidden` toggles into
+// `data-modal-open` on `#game-screen` so a sibling-selector fallback works.
+function installModalAttrFallback() {
+  if (typeof window === 'undefined' || typeof document === 'undefined') {
+    return;
+  }
+  try {
+    if (window.CSS && typeof window.CSS.supports === 'function' && window.CSS.supports('selector(:has(*))')) {
+      return;
+    }
+  } catch (error) {
+    // Older browsers throw on the `selector()` form; treat as unsupported.
+  }
+  const gameScreen = document.getElementById('game-screen');
+  if (!gameScreen) {
+    return;
+  }
+  const sources = [
+    { id: 'direction-panel', token: 'direction' },
+    { id: 'question-panel', token: 'question' },
+    { id: 'pause-overlay', token: 'pause' }
+  ];
+  const refresh = () => {
+    const open = sources
+      .map((entry) => {
+        const element = document.getElementById(entry.id);
+        if (!element || element.classList.contains('hidden')) {
+          return null;
+        }
+        return entry.token;
+      })
+      .filter(Boolean);
+    if (open.length === 0) {
+      gameScreen.removeAttribute('data-modal-open');
+    } else {
+      gameScreen.setAttribute('data-modal-open', open.join(' '));
+    }
+  };
+  sources.forEach((entry) => {
+    const element = document.getElementById(entry.id);
+    if (!element || typeof MutationObserver === 'undefined') {
+      return;
+    }
+    new MutationObserver(refresh).observe(element, { attributes: true, attributeFilter: ['class'] });
+  });
+  refresh();
+}
+
 function normalizeAtmospherePreset(preset) {
   return ATMOSPHERE_PRESETS.some((option) => option.id === preset)
     ? preset
@@ -67,6 +166,11 @@ document.addEventListener('DOMContentLoaded', () => {
   if (detectTouchDevice()) {
     document.body.classList.add('touch');
   }
+
+  const deviceTier = detectDeviceTier();
+  window.BERG_DEVICE_TIER = deviceTier;
+  document.body.classList.add(`tier-${deviceTier}`);
+  installModalAttrFallback();
 
   const game = new Game();
   const ui = {
@@ -218,7 +322,10 @@ document.addEventListener('DOMContentLoaded', () => {
       console.error('Game init failed:', error);
       game.destroy(false);
       setScreen('menu-screen');
-      window.alert('Не удалось запустить подъём. Перезагрузи страницу и попробуй снова.');
+      const message = /webgl|context|gpu|three/i.test(String(error && error.message || error))
+        ? 'Не удалось запустить 3D-движок. Похоже, видеокарта не поддерживается (возможно, старый Mac или браузер). Попробуй обновить браузер или открыть игру на другом устройстве.'
+        : 'Не удалось запустить подъём. Перезагрузи страницу и попробуй снова.';
+      window.alert(message);
     }
   });
 

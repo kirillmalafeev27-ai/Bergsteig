@@ -28,21 +28,29 @@ class BergRenderer {
     this.camera.position.set(0, 2, 4.2);
     this.camera.lookAt(0, 12, 0);
 
+    // `low` tier covers Intel Macs (2012-2017) and Android: drop antialiasing
+    // and pick the integrated GPU to avoid driver crashes and thermal
+    // throttling.
+    const tier = options.qualityTier || (typeof window !== 'undefined' && window.BERG_DEVICE_TIER) || 'high';
+    this.qualityTier = tier === 'low' ? 'low' : 'high';
+    const isLow = this.qualityTier === 'low';
+
     this.renderer = new THREE.WebGLRenderer({
       canvas: this.canvas,
-      antialias: true,
+      antialias: !isLow,
       alpha: false,
-      powerPreference: 'high-performance'
+      powerPreference: isLow ? 'default' : 'high-performance'
     });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    const pixelCap = isLow ? 1.5 : 2;
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, pixelCap));
     this.renderer.outputEncoding = THREE.sRGBEncoding;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     // Lower exposure + the denser fog give the frame the cold, silvery
     // quality of north-face stills in alpine documentaries.
     this.renderer.toneMappingExposure = 0.86;
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.type = isLow ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
     this.renderer.physicallyCorrectLights = true;
 
     this.elapsed = 0;
@@ -779,7 +787,8 @@ float bergFbm(vec3 p) {
     this.keyLight = new THREE.DirectionalLight(0xdaf0ff, 2.3);
     this.keyLight.position.set(18, 26, 22);
     this.keyLight.castShadow = true;
-    this.keyLight.shadow.mapSize.set(2048, 2048);
+    const shadowMapSize = this.qualityTier === 'low' ? 1024 : 2048;
+    this.keyLight.shadow.mapSize.set(shadowMapSize, shadowMapSize);
     this.keyLight.shadow.camera.near = 0.5;
     this.keyLight.shadow.camera.far = 220;
     this.keyLight.shadow.camera.left = -45;
@@ -2498,28 +2507,33 @@ float bergFbm(vec3 p) {
   }
 
   _buildParticles() {
-    this.snowFarField = this._createParticleField(760, this.materials.snowFar, {
+    // Halve particle counts on low-tier devices: roughly 960 particles instead
+    // of 1920 keeps the falling-snow look while restoring 30+ FPS on Intel
+    // iGPUs and mid-range Android.
+    const scale = this.qualityTier === 'low' ? 0.5 : 1;
+    const count = (n) => Math.max(1, Math.round(n * scale));
+    this.snowFarField = this._createParticleField(count(760), this.materials.snowFar, {
       x: 44,
       yMin: -24,
       yMax: 244,
       zMin: -20,
       zMax: 24
     });
-    this.snowMidField = this._createParticleField(560, this.materials.snowMid, {
+    this.snowMidField = this._createParticleField(count(560), this.materials.snowMid, {
       x: 34,
       yMin: -12,
       yMax: 230,
       zMin: -6,
       zMax: 22
     });
-    this.snowNearField = this._createParticleField(340, this.materials.snowNear, {
+    this.snowNearField = this._createParticleField(count(340), this.materials.snowNear, {
       x: 18,
       yMin: -6,
       yMax: 226,
       zMin: 7,
       zMax: 26
     });
-    this.ashField = this._createParticleField(260, this.materials.ash, {
+    this.ashField = this._createParticleField(count(260), this.materials.ash, {
       x: 48,
       yMin: -12,
       yMax: 240,
@@ -3647,7 +3661,7 @@ float bergFbm(vec3 p) {
     // Ice-crystal spray: point particles launched from the leading edge
     // that drift downward and recycle. Additive blending so they pop
     // brightly against the cliff without over-whitening the mass behind.
-    const sprayCount = 160;
+    const sprayCount = this.qualityTier === 'low' ? 80 : 160;
     const sprayGeom = new THREE.BufferGeometry();
     const sprayPos = new Float32Array(sprayCount * 3);
     const sprayState = new Array(sprayCount);
