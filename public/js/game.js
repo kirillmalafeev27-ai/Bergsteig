@@ -1070,6 +1070,7 @@ class Game {
       this.serenityTarget = clamp(this.correctStreak / SERENITY_SATURATION, 0, 1);
       this.coldSeconds = Math.max(0, this.coldSeconds - NUMB_CORRECT_RELIEF_SEC);
       this._updateNumbLevel();
+      this._protectLane(this.player.baseLane, this.currentTime);
       if (this.questionManager) {
         this.questionManager.onCorrectAnswer(resolvedSlotId);
       }
