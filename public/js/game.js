@@ -26,10 +26,6 @@ const AVALANCHE_INTERVAL_MULTIPLIER = 4;
 const AVALANCHE_INITIAL_DELAY_MS = 18000 * AVALANCHE_INTERVAL_MULTIPLIER;
 const AVALANCHE_CADENCE_MIN = 14000 * AVALANCHE_INTERVAL_MULTIPLIER;
 const AVALANCHE_CADENCE_MAX = 19000 * AVALANCHE_INTERVAL_MULTIPLIER;
-const COULOIR_FISSURE_CHANCE = 0.5;
-const COULOIR_FISSURE_TURNS = 3;
-const COULOIR_FISSURE_MIN_AHEAD = 12;
-const COULOIR_FISSURE_MAX_AHEAD = 18;
 const LENS_DIRT_BASE_RATE = 0.0045;
 const LENS_DIRT_PHASE_RATE = 0.0035;
 const LENS_DIRT_DANGER_RATE = 0.0025;
@@ -307,16 +303,6 @@ class Game {
       return false;
     }
 
-    if (this._isCouloirBlocked(nextLane)) {
-      this.player.vx += dir * 4.8;
-      this.cameraShake = Math.max(this.cameraShake, 0.12);
-      this._showMessage(
-        `Кулуар ${laneLabel(nextLane).toLowerCase()} разорван расщелиной ещё на ${formatTurnCount(this.couloirFissure.turnsLeft)}.`,
-        1300
-      );
-      return false;
-    }
-
     this.player.baseLane = nextLane;
     this.player.vx += dir * 15.2;
     this.cameraShake = Math.max(this.cameraShake, 0.18);
@@ -424,7 +410,6 @@ class Game {
     this.footprintCounter = 0;
     this.hazardCounter = 0;
     this.cameraShake = 0;
-    this.couloirFissure = null;
     this.rockImpactGraceUntil = 0;
     this.rockSpawnBlockedUntil = 0;
     this.laneSafeUntil = { '-1': 0, '0': 0, '1': 0 };
@@ -1105,7 +1090,6 @@ class Game {
       }
       this._schedule(() => {
         this._applyBonus(resolvedSlotId, resolvedDirection);
-        this._consumeCouloirFissureTurn();
       }, 260);
     } else {
       this.ui.questionFeedback.classList.add('error');
@@ -1113,14 +1097,10 @@ class Game {
       this.ui.questionFeedback.textContent =
         `Ошибка. Правильный ответ: ${this.currentQuestion.options.options[this.currentQuestion.options.correctIndex]}`;
       this.player.lens = clamp(this.player.lens + 0.015, 0, 1);
-      const fissureSpawned = this._spawnCouloirFissureOnMistake();
       if (this.audio) {
         this.audio.playWrongAnswer();
       }
       this._schedule(() => {
-        if (!fissureSpawned) {
-          this._consumeCouloirFissureTurn();
-        }
         this.currentQuestion = null;
         this._closeQuestionPanel();
         this._renderTopicButtons();
@@ -1139,17 +1119,6 @@ class Game {
 
     switch (slotId) {
       case 'climb':
-        if (this._isCouloirBlocked(this.player.baseLane)) {
-          this.cameraShake = Math.max(this.cameraShake, 0.15);
-          this._showMessage(
-            `Расщелина перекрыла ${laneLabel(this.player.baseLane).toLowerCase()} кулуар. Нужен уход в сторону.`,
-            1400
-          );
-          this.currentQuestion = null;
-          this._closeQuestionPanel();
-          this._renderTopicButtons();
-          break;
-        }
         // Queue altitude instead of snapping — _updatePlayerPhysics eases the
         // actual progress so the camera, rope, and limbs have time to sell
         // the pull. Chaining is fine: if another climb lands mid-ascent, the
@@ -1497,50 +1466,7 @@ class Game {
   }
 
   _questionMetaText() {
-    if (!this.couloirFissure) {
-      return '1-4 / ошибка = расщелина 50%';
-    }
-    return `Расщелина: ${laneLabel(this.couloirFissure.lane)} · ${formatTurnCount(this.couloirFissure.turnsLeft)}`;
-  }
-
-  _isCouloirBlocked(lane) {
-    return Boolean(this.couloirFissure && this.couloirFissure.lane === lane && this.couloirFissure.turnsLeft > 0);
-  }
-
-  _spawnCouloirFissureOnMistake() {
-    if (Math.random() >= COULOIR_FISSURE_CHANCE) {
-      return false;
-    }
-
-    const lane = shuffleArray([-1, 0, 1])[0];
-    const y = this.player.progress + randomRange(COULOIR_FISSURE_MIN_AHEAD, COULOIR_FISSURE_MAX_AHEAD);
-    this.couloirFissure = {
-      id: `fissure-${this.hazardCounter += 1}`,
-      lane,
-      y,
-      maxTurns: COULOIR_FISSURE_TURNS,
-      turnsLeft: COULOIR_FISSURE_TURNS,
-      spawnedAt: this.currentTime
-    };
-    this.cameraShake = Math.max(this.cameraShake, 0.18);
-    this._showMessage(
-      `В ${laneLabel(lane).toLowerCase()} кулуаре раскрылась расщелина. Он закрыт на ${formatTurnCount(COULOIR_FISSURE_TURNS)}.`,
-      1800
-    );
-    this._refreshQuestionMeta();
-    return true;
-  }
-
-  _consumeCouloirFissureTurn() {
-    if (!this.couloirFissure) {
-      return;
-    }
-
-    this.couloirFissure.turnsLeft -= 1;
-    if (this.couloirFissure.turnsLeft <= 0) {
-      this.couloirFissure = null;
-    }
-    this._refreshQuestionMeta();
+    return 'Выбери ответ 1-4';
   }
 
   _updateHud() {
@@ -1619,15 +1545,6 @@ class Game {
       return;
     }
 
-    if (this.couloirFissure) {
-      const laneName = laneLabel(this.couloirFissure.lane).toLowerCase();
-      const turnsText = formatTurnCount(this.couloirFissure.turnsLeft);
-      this.ui.hazardText.textContent = this.player.baseLane === this.couloirFissure.lane
-        ? `Текущий кулуар вскрыла расщелина. Подъём по нему закрыт ещё на ${turnsText}.`
-        : `Расщелина держит ${laneName} кулуар закрытым ещё на ${turnsText}.`;
-      return;
-    }
-
     if (this._rocksShouldStopSpawning()) {
       this.ui.hazardText.textContent = 'До вершины меньше 10 метров. Новые камни больше не сходят, но лавина ещё возможна.';
       return;
@@ -1692,17 +1609,7 @@ class Game {
         intensity: avalanche.intensity,
         heightScale: avalanche.heightScale
       })),
-      couloirFissures: this.couloirFissure
-        ? [{
-          id: this.couloirFissure.id,
-          lane: this.couloirFissure.lane,
-          x: laneToX(this.couloirFissure.lane),
-          y: this.couloirFissure.y ?? this.player.progress + this.couloirFissure.offsetY,
-          maxTurns: this.couloirFissure.maxTurns || COULOIR_FISSURE_TURNS,
-          turnsLeft: this.couloirFissure.turnsLeft,
-          freshness: clamp(1 - (this.currentTime - this.couloirFissure.spawnedAt) / 1200, 0, 1)
-        }]
-        : [],
+      couloirFissures: [],
       footprints: this.footprintMarks.map((mark) => ({
         id: mark.id,
         x: mark.x,
@@ -1840,9 +1747,9 @@ class Game {
     }
     const pausedDelta = Math.max(0, now - this.panorama.startedAt);
     // Hazards were frozen during panorama but their absolute-time fields
-    // (spawn schedules, shield/burst deadlines, armed-warning windows,
-    // fissure spawn stamp) kept ticking. Shift them forward the same way
-    // togglePause does so nothing expires in the silent beat.
+    // (spawn schedules, shield/burst deadlines, armed-warning windows)
+    // kept ticking. Shift them forward the same way togglePause does so
+    // nothing expires in the silent beat.
     this.startedAt += pausedDelta;
     this.nextRockSpawnAt += pausedDelta;
     this.nextAvalancheSpawnAt += pausedDelta;
@@ -1857,9 +1764,6 @@ class Game {
     }
     if (this.player.shieldCooldownUntil) {
       this.player.shieldCooldownUntil += pausedDelta;
-    }
-    if (this.couloirFissure) {
-      this.couloirFissure.spawnedAt += pausedDelta;
     }
     this.hazards.rocks.forEach((rock) => {
       rock.armedUntil += pausedDelta;
@@ -1923,9 +1827,8 @@ class Game {
   _dangerLevel() {
     const dangerFromRocks = this.hazards.rocks.length * 0.08;
     const dangerFromAvalanches = this.hazards.avalanches.length * 0.22;
-    const dangerFromFissure = this.couloirFissure ? 0.12 + this.couloirFissure.turnsLeft * 0.03 : 0;
     const lensDanger = typeof this.player.lensVisual === 'number' ? this.player.lensVisual : this.player.lens;
-    return clamp(dangerFromRocks + dangerFromAvalanches + dangerFromFissure + lensDanger * 0.18, 0, 1);
+    return clamp(dangerFromRocks + dangerFromAvalanches + lensDanger * 0.18, 0, 1);
   }
 
   _showMessage(text, duration = 1400) {
