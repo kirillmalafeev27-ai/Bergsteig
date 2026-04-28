@@ -1840,15 +1840,15 @@ body[data-atmosphere-preset="newyear"] #control-hint {
   #topic-panel,
   #question-panel,
   #direction-panel {
-    left: 8px;
-    right: 8px;
+    left: 6px;
+    right: 6px;
     width: auto;
-    bottom: 8px;
+    bottom: 6px;
     top: auto;
     transform: none;
-    padding: 10px 10px max(10px, env(safe-area-inset-bottom));
-    border-radius: 18px;
-    max-height: calc(100vh - 20px);
+    padding: 8px 9px max(8px, env(safe-area-inset-bottom));
+    border-radius: 16px;
+    max-height: calc(100vh - 16px);
     overflow-y: auto;
   }
 
@@ -1860,9 +1860,9 @@ body[data-atmosphere-preset="newyear"] #control-hint {
   }
 
   #game-screen:has(#question-panel:not(.hidden)) #topic-panel {
-    top: 12px;
+    top: 10px;
     bottom: auto;
-    max-height: 34vh;
+    max-height: 28vh;
     overflow-y: auto;
   }
 
@@ -1875,74 +1875,147 @@ body[data-atmosphere-preset="newyear"] #control-hint {
     opacity: 0;
   }
 
-  /* Thumb-friendly type and hit-areas for the task panels. */
+  /* Compact type and hit-areas for the task panels. Touch targets stay at
+     or above 44px so they remain comfortable while the visual surfaces
+     reclaim screen real estate for the climb itself. */
   .panel-topline {
-    margin-bottom: 8px;
+    margin-bottom: 6px;
   }
 
   .panel-title {
-    font-size: 0.98rem;
+    font-size: 0.86rem;
   }
 
   .panel-kicker {
-    font-size: 0.64rem;
-    letter-spacing: 0.14em;
+    font-size: 0.58rem;
+    letter-spacing: 0.13em;
   }
 
-  .topic-btn {
-    min-height: 46px;
-    padding: 8px;
-    grid-template-columns: 28px minmax(0, 1fr) auto;
-    gap: 8px;
-  }
-
-  .topic-index {
-    width: 28px;
-    height: 28px;
-    border-radius: 10px;
-    font-size: 0.88rem;
-  }
-
-  .topic-name {
-    font-size: 0.92rem;
-  }
-
-  .topic-bonus {
-    font-size: 0.74rem;
-  }
-
-  .topic-status {
+  .panel-meta {
     font-size: 0.7rem;
   }
 
+  .topic-buttons,
+  .question-options {
+    gap: 5px;
+  }
+
+  .topic-btn {
+    min-height: 40px;
+    padding: 6px 8px;
+    grid-template-columns: 24px minmax(0, 1fr) auto;
+    gap: 7px;
+  }
+
+  .topic-index {
+    width: 24px;
+    height: 24px;
+    border-radius: 9px;
+    font-size: 0.8rem;
+  }
+
+  .topic-name {
+    font-size: 0.84rem;
+  }
+
+  .topic-bonus {
+    font-size: 0.68rem;
+  }
+
+  .topic-status {
+    font-size: 0.64rem;
+  }
+
   .question-text {
-    font-size: 0.94rem;
-    line-height: 1.45;
+    font-size: 0.84rem;
+    line-height: 1.4;
   }
 
   .question-display {
-    padding: 10px;
-    border-radius: 14px;
-    font-size: 0.96rem;
+    padding: 8px;
+    border-radius: 12px;
+    font-size: 0.86rem;
   }
 
   .option-btn {
-    min-height: 44px;
-    padding: 10px;
-    border-radius: 14px;
-    font-size: 0.92rem;
+    min-height: 40px;
+    padding: 7px 9px;
+    border-radius: 12px;
+    font-size: 0.84rem;
   }
 
   .direction-btn {
-    min-height: 54px;
-    border-radius: 16px;
-    font-size: 0.98rem;
+    min-height: 46px;
+    border-radius: 14px;
+    font-size: 0.9rem;
   }
 
   .question-feedback {
-    font-size: 0.9rem;
-    padding: 10px 12px;
+    font-size: 0.8rem;
+    padding: 7px 10px;
+    border-radius: 12px;
+  }
+}
+
+/* Very small phones (iPhone SE, older Android, narrow Galaxy). Squeeze a
+   touch more so the bottom sheet does not eat the climbing scene. */
+@media (max-width: 380px) {
+  #topic-panel,
+  #question-panel,
+  #direction-panel {
+    padding: 6px 7px max(6px, env(safe-area-inset-bottom));
     border-radius: 14px;
+  }
+
+  .panel-title {
+    font-size: 0.8rem;
+  }
+
+  .panel-kicker {
+    font-size: 0.54rem;
+  }
+
+  .topic-btn {
+    min-height: 38px;
+    padding: 5px 7px;
+  }
+
+  .topic-name {
+    font-size: 0.8rem;
+  }
+
+  .question-text {
+    font-size: 0.8rem;
+  }
+
+  .option-btn {
+    min-height: 38px;
+    font-size: 0.8rem;
+    padding: 6px 8px;
+  }
+
+  .direction-btn {
+    min-height: 44px;
+    font-size: 0.86rem;
+  }
+}
+
+/* Landscape phones: when vertical room is scarce, cap the bottom sheet
+   so the climber and the lane indicators still read. */
+@media (max-height: 520px) and (orientation: landscape) {
+  #topic-panel,
+  #question-panel,
+  #direction-panel {
+    max-height: calc(100vh - 12px);
+  }
+
+  #game-screen:has(#question-panel:not(.hidden)) #topic-panel,
+  #game-screen[data-modal-open~="question"] #topic-panel {
+    max-height: 22vh;
+  }
+
+  .panel-topline {
+    margin-bottom: 4px;
   }
 }
 
@@ -1962,9 +2035,9 @@ body[data-atmosphere-preset="newyear"] #control-hint {
   }
 
   #game-screen[data-modal-open~="question"] #topic-panel {
-    top: 12px;
+    top: 10px;
     bottom: auto;
-    max-height: 34vh;
+    max-height: 28vh;
     overflow-y: auto;
   }
 
