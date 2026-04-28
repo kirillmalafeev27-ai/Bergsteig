@@ -1836,7 +1836,9 @@ body[data-atmosphere-preset="newyear"] #control-hint {
   }
 
   /* Full-width bottom sheets honouring the safe-area inset on notched
-     devices; scroll when the content would otherwise overflow. */
+     devices; scroll when the content would otherwise overflow. The
+     translucent background + heavier blur let the climbing scene read
+     through the panel instead of being walled off. */
   #topic-panel,
   #question-panel,
   #direction-panel {
@@ -1846,24 +1848,65 @@ body[data-atmosphere-preset="newyear"] #control-hint {
     bottom: 6px;
     top: auto;
     transform: none;
-    padding: 8px 9px max(8px, env(safe-area-inset-bottom));
-    border-radius: 16px;
+    padding: 6px 7px max(6px, env(safe-area-inset-bottom));
+    border-radius: 14px;
     max-height: calc(100vh - 16px);
     overflow-y: auto;
+    background:
+      linear-gradient(180deg, rgba(8, 15, 23, 0.46), rgba(6, 11, 18, 0.32)),
+      rgba(5, 10, 15, 0.18);
+    -webkit-backdrop-filter: blur(18px);
+    backdrop-filter: blur(18px);
+    border-color: rgba(255, 255, 255, 0.06);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
   }
 
-  /* Single-focus flow: the topic grid collapses only for the explicit
-     direction picker. During questions it stays available for emergency
-     sidestep and power-swing choices. */
-  #game-screen:has(#direction-panel:not(.hidden)) #topic-panel {
-    display: none !important;
+  /* Topic panel becomes a slim chip bar so the climb stays visible. The
+     panel topline collapses since only the numbered chips matter at a
+     glance while playing. */
+  #topic-panel {
+    padding: 5px 6px max(5px, env(safe-area-inset-bottom));
   }
 
+  #topic-panel .panel-topline {
+    display: none;
+  }
+
+  #topic-panel .topic-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 4px;
+  }
+
+  #topic-panel .topic-btn {
+    min-height: 38px;
+    padding: 4px 8px;
+    grid-template-columns: auto;
+    grid-auto-flow: column;
+    gap: 4px;
+    flex: 0 1 auto;
+  }
+
+  #topic-panel .topic-copy {
+    display: none;
+  }
+
+  #topic-panel .topic-status {
+    font-size: 0.6rem;
+    color: #c8dde8;
+  }
+
+  #topic-panel .topic-btn:not(.cooldown):not(.locked) .topic-status {
+    display: none;
+  }
+
+  /* Single-focus flow: with the topic panel reduced to a chip bar, the
+     simplest way to keep the view clean is to hide it entirely whenever a
+     question or direction picker is up. */
+  #game-screen:has(#direction-panel:not(.hidden)) #topic-panel,
   #game-screen:has(#question-panel:not(.hidden)) #topic-panel {
-    top: 10px;
-    bottom: auto;
-    max-height: 28vh;
-    overflow-y: auto;
+    display: none !important;
   }
 
   /* Tap-through prevention: while a modal surface is open, lane tap
@@ -1898,6 +1941,12 @@ body[data-atmosphere-preset="newyear"] #control-hint {
   .topic-buttons,
   .question-options {
     gap: 5px;
+  }
+
+  /* Two-by-two answer grid keeps the panel half as tall so more of the
+     mountain is visible while answering. */
+  .question-options {
+    grid-template-columns: 1fr 1fr;
   }
 
   .topic-btn {
@@ -2030,15 +2079,9 @@ body[data-atmosphere-preset="newyear"] #control-hint {
 /* Fallback for Safari < 15.4: `data-modal-open` is set by main.js when one
    of the modal panels is visible. Mirrors the `:has()` rules above. */
 @media (max-width: 640px) {
-  #game-screen[data-modal-open~="direction"] #topic-panel {
-    display: none !important;
-  }
-
+  #game-screen[data-modal-open~="direction"] #topic-panel,
   #game-screen[data-modal-open~="question"] #topic-panel {
-    top: 10px;
-    bottom: auto;
-    max-height: 28vh;
-    overflow-y: auto;
+    display: none !important;
   }
 
   #game-screen[data-modal-open~="question"] #touch-zones,
