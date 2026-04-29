@@ -55,15 +55,24 @@ const SERENITY_RISE_RATE = 1.15;
 const SERENITY_FALL_RATE = 6.4;
 
 // Numb fingers. Time without a correct answer accumulates "cold seconds".
-// Two thresholds gate a 200ms and 400ms lag on sidesteps — the lane move
-// still executes, just with a felt delay. Each correct answer refunds
-// NUMB_CORRECT_RELIEF_SEC of cold time, so three rights in a row fully
-// thaw even from the deepest numb.
+// Two thresholds gate a 200ms and 400ms lag on sidesteps and climbs — the
+// action still executes, just with a felt delay. Each correct answer
+// refunds NUMB_CORRECT_RELIEF_SEC of cold time, so three rights in a row
+// fully thaw even from the deepest numb. Wrong answers add cold so the
+// numbness reads as a direct consequence of mistakes.
 const NUMB_LEVEL_1_SEC = 15;
 const NUMB_LEVEL_2_SEC = 30;
 const NUMB_DELAYS_MS = [0, 200, 400];
 const NUMB_CORRECT_RELIEF_SEC = 20;
+const NUMB_WRONG_PENALTY_SEC = 8;
 const NUMB_COLD_MAX_SEC = NUMB_LEVEL_2_SEC + 20;
+
+// Oxygen drives the upward climb speed: thin air slows the rope-pull,
+// fresh air speeds it up. The window 0..1 of oxygen ratio maps to the
+// CLIMB_OXYGEN_MIN..CLIMB_OXYGEN_MAX multiplier on CLIMB_SPEED_UP. Falling
+// (CLIMB_SPEED_DOWN) is unaffected — gravity does not care about lungs.
+const CLIMB_OXYGEN_MIN = 0.45;
+const CLIMB_OXYGEN_MAX = 1.3;
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -136,6 +145,8 @@ class Game {
 
     this.state = 'idle';
     this.atmospherePreset = 'classic';
+    this.climbTempoFactor = 1;
+    this.coldGrowthFactor = 1;
     this.lastSettings = null;
     this.slotConfigs = [];
     this.topicButtonNodes = [];
@@ -294,6 +305,32 @@ class Game {
       return;
     }
     this.openQuestion('sidestep', dir);
+  }
+
+  _invokeWithNumbDelay(fn) {
+    const numbDelay = NUMB_DELAYS_MS[this.numbLevel] || 0;
+    if (numbDelay > 0) {
+      this._schedule(fn, numbDelay);
+    } else {
+      fn();
+    }
+  }
+
+  _performClimbBonus() {
+    // Queue altitude instead of snapping — _updatePlayerPhysics eases the
+    // actual progress so the camera, rope, and limbs have time to sell the
+    // pull. Chaining is fine: if another climb lands mid-ascent, the
+    // target just extends.
+    this.player.climbTarget = clamp(
+      Math.max(this.player.climbTarget, this.player.progress) + CLIMB_STEP * 2,
+      0,
+      SUMMIT_HEIGHT
+    );
+    this.cameraShake = Math.max(this.cameraShake, 0.08);
+    if (this.audio) {
+      this.audio.playClimb();
+    }
+    this._showMessage('Рывок на трос: пара метров вверх.', 1100);
   }
 
   _performSidestep(dir) {
@@ -643,8 +680,9 @@ class Game {
     this.serenity += (this.serenityTarget - this.serenity) * (1 - Math.exp(-serenityRate * dt));
 
     // Cold clock. Numbness level transitions produce one-shot narrative
-    // messages so the player learns why their sidestep suddenly lags.
-    this.coldSeconds = clamp(this.coldSeconds + dt, 0, NUMB_COLD_MAX_SEC);
+    // messages so the player learns why their sidestep and climb suddenly
+    // lag. Relics may slow accumulation via coldGrowthFactor.
+    this.coldSeconds = clamp(this.coldSeconds + dt * (this.coldGrowthFactor || 1), 0, NUMB_COLD_MAX_SEC);
     this._updateNumbLevel();
 
     // Kick off a deferred panorama once the climber is free of question/direction
@@ -723,7 +761,12 @@ class Game {
     const delta = this.player.climbTarget - this.player.progress;
     if (Math.abs(delta) > 0.001) {
       const ascending = delta > 0;
-      const rate = ascending ? CLIMB_SPEED_UP : CLIMB_SPEED_DOWN;
+      const oxygenRatio = this.oxygen ? clamp(this.oxygen.value / 100, 0, 1) : 1;
+      const oxygenFactor = ascending
+        ? CLIMB_OXYGEN_MIN + (CLIMB_OXYGEN_MAX - CLIMB_OXYGEN_MIN) * oxygenRatio
+        : 1;
+      const tempoFactor = ascending ? (this.climbTempoFactor || 1) : 1;
+      const rate = (ascending ? CLIMB_SPEED_UP : CLIMB_SPEED_DOWN) * oxygenFactor * tempoFactor;
       const easing = ascending
         ? 0.55 + 0.45 * clamp(Math.abs(delta) / 2.5, 0, 1)
         : 1;
@@ -1065,9 +1108,13 @@ class Game {
     } else {
       // Mistake snaps the storm back. Streak and serenity target drop
       // instantly; the mountain should close back in on the same beat.
+      // The cold also bites a little harder so wrong answers map to
+      // tangibly slower hands a beat later.
       this.correctStreak = 0;
       this.serenity = 0;
       this.serenityTarget = 0;
+      this.coldSeconds = clamp(this.coldSeconds + NUMB_WRONG_PENALTY_SEC, 0, NUMB_COLD_MAX_SEC);
+      this._updateNumbLevel();
       if (this.questionManager) {
         this.questionManager.onWrongAnswer(resolvedSlotId);
       }
@@ -1122,40 +1169,21 @@ class Game {
 
     switch (slotId) {
       case 'climb':
-        // Queue altitude instead of snapping — _updatePlayerPhysics eases the
-        // actual progress so the camera, rope, and limbs have time to sell
-        // the pull. Chaining is fine: if another climb lands mid-ascent, the
-        // target just extends.
-        this.player.climbTarget = clamp(
-          Math.max(this.player.climbTarget, this.player.progress) + CLIMB_STEP * 2,
-          0,
-          SUMMIT_HEIGHT
-        );
-        this.cameraShake = Math.max(this.cameraShake, 0.08);
-        if (this.audio) {
-          this.audio.playClimb();
-        }
-        this._showMessage('Рывок на трос: пара метров вверх.', 1100);
         this.currentQuestion = null;
         this._closeQuestionPanel();
+        // Cold hands drag both the lane move AND the climb. Players see
+        // a felt lag between the answer landing and the rope-pull
+        // happening, which makes the numbness mechanic legible.
+        this._invokeWithNumbDelay(() => this._performClimbBonus());
         this._renderTopicButtons();
         break;
 
-      case 'sidestep': {
+      case 'sidestep':
         this.currentQuestion = null;
         this._closeQuestionPanel();
-        const numbDelay = NUMB_DELAYS_MS[this.numbLevel] || 0;
-        if (numbDelay > 0) {
-          // Lane still changes on the answered direction — just with a felt
-          // lag. Hazards keep closing in during the delay, which is the
-          // whole point of the numb-fingers mechanic.
-          this._schedule(() => this._performSidestep(direction), numbDelay);
-        } else {
-          this._performSidestep(direction);
-        }
+        this._invokeWithNumbDelay(() => this._performSidestep(direction));
         this._renderTopicButtons();
         break;
-      }
 
       case 'powerSwing':
         this.currentQuestion = null;
@@ -1819,11 +1847,11 @@ class Game {
     this.numbLevel = nextLevel;
     if (nextLevel > previous) {
       const msg = nextLevel === 1
-        ? 'Пальцы начинают неметь. Ответ — и руки отогреются.'
-        : 'Пальцы почти не гнутся. Рывок запаздывает.';
+        ? 'Пальцы начинают неметь. Рывок и подъём идут с запозданием.'
+        : 'Пальцы почти не гнутся. Рывок и подъём запаздывают сильнее.';
       this._showMessage(msg, 1800);
     } else if (nextLevel === 0) {
-      this._showMessage('Руки снова гибкие.', 1400);
+      this._showMessage('Руки снова гибкие. Рывок и подъём — без задержки.', 1400);
     }
   }
 

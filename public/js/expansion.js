@@ -243,6 +243,11 @@
     this.relic = settings.relic || BERG_MEMORY.getSelectedRelic();
     this.sessionProfile = settings.memoryProfile || BERG_MEMORY.loadProfile();
     this.oxygen = { value: 100 };
+    // Map the chosen relic onto the climb-tempo and cold-growth multipliers
+    // that game.js reads each frame. Чётки = calmer climb tempo, Ледоруб =
+    // hands freeze slower. Defaults stay 1 for the other relics.
+    this.climbTempoFactor = this.relic.id === 'rosary' ? 0.92 : 1;
+    this.coldGrowthFactor = this.relic.id === 'iceaxe' ? 0.6 : 1;
     this.bestStreak = 0;
     this.bestMoment = null;
     this.routeLog = [];
@@ -633,16 +638,19 @@
     this.nextAvalancheSpawnAt = now + Math.max(4000, (this.nextAvalancheSpawnAt - now) / hazardFactor);
   };
 
-  const originalApplyBonus = Game.prototype._applyBonus;
-  Game.prototype._applyBonus = function patchedApplyBonus(slotId, direction = 0) {
-    if (slotId === 'climb' && this.relic.id === 'iceaxe') {
+  const originalPerformClimbBonus = Game.prototype._performClimbBonus;
+  Game.prototype._performClimbBonus = function patchedPerformClimbBonus() {
+    originalPerformClimbBonus.call(this);
+    // Iceaxe adds an extra rope-pull on top of the regular climb bonus.
+    // Wrapping _performClimbBonus (instead of _applyBonus) means the extra
+    // step lands inside the same numb-delay envelope as the base climb.
+    if (this.relic.id === 'iceaxe') {
       this.player.climbTarget = extClamp(
-        Math.max(this.player.climbTarget, this.player.progress) + CLIMB_STEP,
+        this.player.climbTarget + CLIMB_STEP,
         0,
         SUMMIT_HEIGHT
       );
     }
-    originalApplyBonus.call(this, slotId, direction);
   };
 
   const originalStartPanorama = Game.prototype._startPanorama;
@@ -728,16 +736,16 @@
 
     if (oxygenRatio > 0.7) {
       this.ui.oxygenText.textContent = `${Math.round(this.oxygen.value)}%`;
-      this.ui.oxygenSubtext.textContent = 'Воздух ещё держит дыхание ровным.';
+      this.ui.oxygenSubtext.textContent = 'Воздух плотный, подъём идёт быстро.';
     } else if (oxygenRatio > 0.4) {
       this.ui.oxygenText.textContent = `${Math.round(this.oxygen.value)}%`;
-      this.ui.oxygenSubtext.textContent = 'Воздух редеет. Каждый верный ответ становится вдохом.';
+      this.ui.oxygenSubtext.textContent = 'Воздух редеет. Подъём заметно медленнее, верный ответ — вдох.';
     } else if (oxygenRatio > 0.15) {
       this.ui.oxygenText.textContent = `${Math.round(this.oxygen.value)}%`;
-      this.ui.oxygenSubtext.textContent = 'Цвет выцветает, кадр сужается, пульс идёт в уши.';
+      this.ui.oxygenSubtext.textContent = 'Кадр сужается, пульс в ушах. Тело ползёт вверх.';
     } else {
       this.ui.oxygenText.textContent = `${Math.round(this.oxygen.value)}%`;
-      this.ui.oxygenSubtext.textContent = 'Почти пусто. Дышать помогает только правильный ответ.';
+      this.ui.oxygenSubtext.textContent = 'Почти пусто. Подъём почти стоит. Дышит только правильный ответ.';
     }
 
     if (!this.companion || !this.ui.companionText) {
