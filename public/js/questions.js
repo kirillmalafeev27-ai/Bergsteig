@@ -1519,16 +1519,29 @@ const AI_FETCH_RETRY_LIMIT = 1;
 const AI_FETCH_RETRY_BASE_MS = 1500;
 
 function isValidRemoteQuestion(question) {
-  return Boolean(
-    question &&
-      typeof question.text === 'string' &&
-      typeof question.display === 'string' &&
-      Array.isArray(question.options) &&
-      question.options.length === 4 &&
-      typeof question.correct === 'number' &&
-      question.correct >= 0 &&
-      question.correct <= 3
-  );
+  if (
+    !question ||
+    typeof question.text !== 'string' ||
+    typeof question.display !== 'string' ||
+    !Array.isArray(question.options) ||
+    question.options.length !== 4 ||
+    typeof question.correct !== 'number' ||
+    question.correct < 0 ||
+    question.correct > 3
+  ) {
+    return false;
+  }
+  // Drop questions with empty or duplicate options. A duplicate confuses
+  // the answer mapping (the player sees two identical choices and gets
+  // told their pick was wrong because the model meant the other one).
+  const trimmed = question.options.map((option) => String(option || '').trim());
+  if (trimmed.some((option) => option.length === 0)) {
+    return false;
+  }
+  if (new Set(trimmed.map((option) => option.toLowerCase())).size !== trimmed.length) {
+    return false;
+  }
+  return true;
 }
 
 function isWordOrderTopic(topic) {
@@ -1794,8 +1807,16 @@ class QuestionManager {
   }
 
   _formatQuestion(rawQuestion, slotConfig) {
-    const correctAnswer = rawQuestion.options[rawQuestion.correct];
-    const shuffledOptions = shuffleArray(rawQuestion.options);
+    // Tag each option with its correctness flag before shuffling. The
+    // previous version recovered the correct index via `indexOf`, which
+    // returns the first match — if the model ever emits duplicate option
+    // strings the wrong button ended up flagged correct.
+    const tagged = rawQuestion.options.map((option, optionIndex) => ({
+      option,
+      isCorrect: optionIndex === rawQuestion.correct
+    }));
+    const shuffled = shuffleArray(tagged);
+    const correctIndex = shuffled.findIndex((entry) => entry.isCorrect);
 
     return {
       slotId: slotConfig.slotDef.id,
@@ -1806,8 +1827,8 @@ class QuestionManager {
       text: rawQuestion.text,
       display: rawQuestion.display,
       options: {
-        options: shuffledOptions,
-        correctIndex: shuffledOptions.indexOf(correctAnswer)
+        options: shuffled.map((entry) => entry.option),
+        correctIndex: correctIndex >= 0 ? correctIndex : 0
       }
     };
   }

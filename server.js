@@ -186,16 +186,29 @@ function canonicalGermanTopic(topic) {
 }
 
 function isValidQuestion(question) {
-  return Boolean(
-    question &&
-      typeof question.text === 'string' &&
-      typeof question.display === 'string' &&
-      Array.isArray(question.options) &&
-      question.options.length === 4 &&
-      typeof question.correct === 'number' &&
-      question.correct >= 0 &&
-      question.correct <= 3
-  );
+  if (
+    !question ||
+    typeof question.text !== 'string' ||
+    typeof question.display !== 'string' ||
+    !Array.isArray(question.options) ||
+    question.options.length !== 4 ||
+    typeof question.correct !== 'number' ||
+    question.correct < 0 ||
+    question.correct > 3
+  ) {
+    return false;
+  }
+  // Reject duplicate or empty options. A duplicate makes the answer
+  // ambiguous; the player can pick a "correct"-looking match and be told
+  // they were wrong because the model meant the other instance.
+  const trimmed = question.options.map((option) => String(option || '').trim());
+  if (trimmed.some((option) => option.length === 0)) {
+    return false;
+  }
+  if (new Set(trimmed.map((option) => option.toLowerCase())).size !== trimmed.length) {
+    return false;
+  }
+  return true;
 }
 
 function sanitizeQuestion(question) {
