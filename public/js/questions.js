@@ -1513,8 +1513,8 @@ function makeFrenchDefaultQuestion(grammarTopic, lexicalTopic) {
   };
 }
 
-const AI_QUESTION_BATCH_SIZE = 5;
-const AI_FETCH_TIMEOUT_MS = 12000;
+const AI_QUESTION_BATCH_SIZE = 10;
+const AI_FETCH_TIMEOUT_MS = 45000;
 const AI_FETCH_RETRY_LIMIT = 1;
 const AI_FETCH_RETRY_BASE_MS = 1500;
 
