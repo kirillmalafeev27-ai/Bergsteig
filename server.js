@@ -11,7 +11,7 @@ const AITUNNEL_MODEL = process.env.AITUNNEL_MODEL || 'gpt-5.4';
 const AITUNNEL_QUESTION_MODEL = process.env.AITUNNEL_QUESTION_MODEL || 'gpt-5.4';
 const AITUNNEL_REQUEST_TIMEOUT_MS = Math.max(10000, Number(process.env.AITUNNEL_TIMEOUT_MS) || 45000);
 const MAX_JSON_BODY_BYTES = 1024 * 1024;
-const DEFAULT_QUESTION_COUNT = 5;
+const DEFAULT_QUESTION_COUNT = 10;
 const MAX_QUESTION_COUNT = 50;
 const QUESTION_MAX_COMPLETION_TOKENS = 8192;
 const QUESTION_GENERATION_ATTEMPTS = 1;
@@ -223,6 +223,131 @@ function sanitizeQuestion(question) {
   };
 }
 
+function normalizeAnswerText(value) {
+  return String(value || '')
+    .replace(/\s+/g, ' ')
+    .replace(/[„“"]/g, '')
+    .trim()
+    .toLowerCase();
+}
+
+function answerLetterToIndex(letter) {
+  const value = String(letter || '').trim().toUpperCase();
+  return ['A', 'B', 'C', 'D'].indexOf(value);
+}
+
+function parseSyntheticQuestions(rawText, expectedCount) {
+  const text = String(rawText || '').replace(/\r/g, '').trim();
+  const solutionMarker = text.match(/\n\s*(?:={2,}\s*)?(?:LOESUNGEN|LÖSUNGEN|ANTWORTEN|SCHLUESSEL|SCHLÜSSEL|KEYS)(?:\s*={2,})?\s*\n/i);
+  if (!solutionMarker) {
+    return [];
+  }
+
+  const tasksText = text
+    .slice(0, solutionMarker.index)
+    .replace(/^\s*(?:={2,}\s*)?AUFGABEN(?:\s*={2,})?\s*/i, '')
+    .trim();
+  const keysText = text.slice(solutionMarker.index + solutionMarker[0].length).trim();
+  const keyMap = new Map();
+  const keyRegex = /(?:^|\n)\s*(\d{1,2})\s*[\.\):=-]\s*([ABCD])(?:\s*=\s*(.+?))?\s*(?=\n|$)/gi;
+  let keyMatch;
+
+  while ((keyMatch = keyRegex.exec(keysText))) {
+    const number = Number(keyMatch[1]);
+    const index = answerLetterToIndex(keyMatch[2]);
+    if (number > 0 && index >= 0) {
+      keyMap.set(number, {
+        index,
+        answerText: keyMatch[3] ? keyMatch[3].trim() : ''
+      });
+    }
+  }
+
+  const blocks = tasksText
+    .split(/\n(?=\s*\d{1,2}\.\s+)/)
+    .map((block) => block.trim())
+    .filter(Boolean);
+
+  const parsed = [];
+  for (const block of blocks) {
+    const numberMatch = block.match(/^\s*(\d{1,2})\.\s*(.*)$/m);
+    if (!numberMatch) {
+      continue;
+    }
+
+    const number = Number(numberMatch[1]);
+    const key = keyMap.get(number);
+    if (!key) {
+      continue;
+    }
+
+    const lines = block.split('\n').map((line) => line.trim()).filter(Boolean);
+    const optionLines = [];
+    const bodyLines = [];
+    for (const line of lines) {
+      const optionMatch = line.match(/^([ABCD])[\)\.:]\s*(.+)$/i);
+      if (optionMatch) {
+        optionLines.push({
+          label: optionMatch[1].toUpperCase(),
+          value: optionMatch[2].trim()
+        });
+      } else if (!/^\d{1,2}\.\s*$/.test(line)) {
+        bodyLines.push(line.replace(/^\d{1,2}\.\s*/, '').trim());
+      }
+    }
+
+    if (optionLines.length !== 4) {
+      continue;
+    }
+
+    const orderedOptions = ['A', 'B', 'C', 'D'].map((label) => (
+      optionLines.find((option) => option.label === label)?.value || ''
+    ));
+    if (orderedOptions.some((option) => !option)) {
+      continue;
+    }
+
+    const uniqueOptions = new Set(orderedOptions.map(normalizeAnswerText));
+    if (uniqueOptions.size !== 4) {
+      continue;
+    }
+
+    if (!key.answerText) {
+      continue;
+    }
+    const keyText = normalizeAnswerText(key.answerText);
+    const optionText = normalizeAnswerText(orderedOptions[key.index]);
+    if (!keyText || keyText !== optionText) {
+      continue;
+    }
+
+    const instructionLine = bodyLines.find((line) => /^Anweisung\s*:/i.test(line));
+    const displayLine = bodyLines.find((line) => /^(Satz|Aufgabe|Woerter|Wörter)\s*:/i.test(line));
+    const instruction = instructionLine
+      ? instructionLine.replace(/^Anweisung\s*:\s*/i, '').trim()
+      : 'Waehle die richtige Option.';
+    const display = displayLine
+      ? displayLine.replace(/^(Satz|Aufgabe|Woerter|Wörter)\s*:\s*/i, '').trim()
+      : bodyLines.filter((line) => !/^Anweisung\s*:/i.test(line))[0];
+
+    const question = {
+      text: instruction,
+      display,
+      options: orderedOptions,
+      correct: key.index
+    };
+
+    if (isValidQuestion(question)) {
+      parsed.push(question);
+    }
+    if (parsed.length >= expectedCount) {
+      break;
+    }
+  }
+
+  return parsed;
+}
+
 function isWortstellungTopic(topic) {
   return /wortstellung/i.test(stripDiacritics(topic));
 }
@@ -247,72 +372,59 @@ function buildQuestionPrompt({
     ? 'Du erstellst Uebungen auf dem Qualitaetsniveau moderner FLE-Lehrwerke.'
     : 'Du erstellst Uebungen auf dem Qualitaetsniveau von Schritte International, Menschen und Aspekte.';
 
-  let excludeNote = '';
-  if (Array.isArray(exclude) && exclude.length > 0) {
-    const short = exclude.slice(-10).map((item) => `"${String(item).replace(/"/g, "'")}"`).join(', ');
-    excludeNote = `\nVerwende diese Saetze NICHT: ${short}`;
-  }
-
-  let taskDescription;
-  if (isWortstellung) {
-    taskDescription = `Erstelle ${questionsCount} Wortstellungsuebungen fuer ${targetLanguage} (Niveau ${level}).
-Grammatikthema: ${grammarTopic}.
-${lexicalTopic ? `Lexikalisches Thema: ${lexicalTopic}. Alle Saetze muessen Woerter aus diesem Thema verwenden.` : ''}
-
-Format:
-- "display": Woerter/Phrasen durch " / " getrennt in ZUFAELLIGER Reihenfolge (NICHT in der korrekten Reihenfolge!)
-- "options": 4 vollstaendige Saetze in ${targetLanguage} - NUR EINER ist grammatisch korrekt
-- "correct": Index der korrekten Option (0-3), GLEICHMAESSIG verteilt
-- "text": Kurze Anweisung auf Russisch (z.B. "Расставь слова в правильном порядке:")
-
-Regeln fuer Wortstellungsuebungen:
-- Die Woerter in "display" MUESSEN durcheinander sein - NICHT in der korrekten Reihenfolge!
-- NUR EIN Satz darf korrekt sein. Andere korrekte Wortstellungen duerfen NICHT als falsche Option erscheinen.
-- Falsche Optionen: klare Wortstellungsfehler.
-- Jeder Satz ANDERS (verschiedene Subjekte, Verben, Situationen)`;
-  } else {
-    taskDescription = `Erstelle ${questionsCount} Grammatikuebungen (Lueckenuebungen) fuer ${targetLanguage} (Niveau ${level}).
-Grammatikthema: ${grammarTopic}.
-${lexicalTopic ? `Lexikalisches Thema: ${lexicalTopic}. Alle Saetze muessen Woerter aus diesem Thema verwenden.` : ''}
-
-Format:
-- "display": Satz in ${targetLanguage} mit Luecke ___ an der relevanten Stelle
-- "options": 4 Optionen in ${targetLanguage} - NUR EINE ist grammatisch korrekt
-- "correct": Index der korrekten Option (0-3), GLEICHMAESSIG verteilt
-- "text": Kurze Anweisung auf Russisch (z.B. "Выбери правильный вариант:")
-
-Regeln fuer Lueckenuebungen:
-- Falsche Optionen: EINE klare Fehlerart (falscher Kasus, falscher Artikel, falsche Endung, falsche Konjugation, falsche Wortstellung)
-- Keine absurden oder offensichtlich falschen Optionen - sie muessen plausibel aussehen
-- Jeder Satz ANDERS (verschiedene Subjekte, Verben, Situationen)`;
-  }
+  const topicPart = topicRule
+    ? `\nSpezifische Regel nur fuer "${grammarTopic}":\n${topicRule}\n`
+    : '';
+  const excludePart = Array.isArray(exclude) && exclude.length
+    ? `\nVerwende diese Saetze nicht erneut: ${exclude.slice(-10).map((item) => `"${String(item).replace(/"/g, "'")}"`).join(', ')}\n`
+    : '';
+  const taskKind = isWortstellung
+    ? `Wortstellungsuebungen. Die Aufgabe-Zeile enthaelt durcheinander gebrachte Woerter oder Satzteile in ${targetLanguage}.`
+    : `Lueckenuebungen. Die Aufgabe-Zeile enthaelt einen Satz in ${targetLanguage} mit genau einer Luecke ___.`;
+  const displayLabel = isWortstellung ? 'Woerter' : 'Satz';
+  const displayExample = isWortstellung ? 'morgen / ich / fahre / in die Berge' : 'Ich fahre morgen ___ Berge.';
+  const optionExample = isWortstellung ? 'Ich fahre morgen in die Berge.' : 'in die';
 
   return `${teacherRole} ${bookStyle}
 
-${topicRule ? `GRAMMATIKREGELN fuer "${grammarTopic}" - halte dich STRIKT daran:\n${topicRule}\n` : ''}
-${taskDescription}
+Erstelle genau ${questionsCount} Multiple-Choice-Grammatikuebungen.
+Sprache der Aufgaben und Optionen: ${targetLanguage}.
+Niveau: ${level}. Verwende keine Grammatik und keinen Wortschatz ueber ${level}.
+Grammatikthema: ${grammarTopic}.
+Lexikalisches Thema: ${lexicalTopic || 'frei'}.
+Uebungstyp: ${taskKind}
+${topicPart}${excludePart}
+Qualitaetsregeln:
+1. Jede Aufgabe hat genau vier Antwortmoeglichkeiten A, B, C, D.
+2. Genau eine Antwort ist grammatisch korrekt.
+3. Die falschen Antworten sind plausibel, aber eindeutig falsch.
+4. Die richtige Antwort muss absolut korrekt sein. Wenn du unsicher bist, formuliere die Aufgabe neu.
+5. Pruefe jede Aufgabe selbst, bevor du die Loesungen schreibst.
+6. In den Loesungen muss der Buchstabe und der exakte Text der richtigen Option stehen.
+7. Keine abgeschnittenen Saetze. Keine Erklaerungen. Kein JSON. Kein Markdown.
+8. Der ganze Output muss ein zusammenhaengender Block sein: erst alle Aufgaben, danach alle Loesungen.
 
-GER-Niveau: ${level}. Halte dich STRIKT an dieses Niveau! Verwende KEINE Grammatik und KEINEN Wortschatz ueber ${level}.
-${excludeNote}
+Ausgabeformat, exakt so:
+AUFGABEN
+1. Anweisung: Waehle die richtige Option.
+${displayLabel}: ${displayExample}
+A) ${optionExample}
+B) ...
+C) ...
+D) ...
 
-KRITISCHE REGELN (Verstoss = Ausschuss):
-1. Die korrekte Antwort MUSS grammatisch EINWANDFREI sein. Pruefe vor der Ausgabe jeden Satz: Subjekt, Praedikat, Kasus, Genus, Numerus, Wortstellung.
-2. Jeder Satz MUSS VOLLSTAENDIG und SINNVOLL abgeschlossen sein. Kein Satz darf abgeschnitten werden! Wenn ein grammatisch korrekter Satz lang sein muss - schreibe ihn lang. Die Laenge ist NICHT begrenzt.
-3. Falsche Optionen muessen EINEN KLAREN Fehler enthalten. Keine absurden Optionen.
-4. GENAU EINE korrekte Antwort. Wenn zwei Optionen grammatisch korrekt sind - ist die Uebung Ausschuss.
-5. "correct" - Index der korrekten Antwort (0-3). GLEICHMAESSIG ueber die Positionen verteilen.
-6. Alle ${questionsCount} Saetze EINZIGARTIG: verschiedene Subjekte, Verben, Situationen. Keine Eintoenigkeit.
-7. Verwende lebendige, natuerliche Saetze wie in modernen Lehrbuechern.
+2. Anweisung: Waehle die richtige Option.
+${displayLabel}: ...
+A) ...
+B) ...
+C) ...
+D) ...
 
-QUALITAETSKONTROLLE - pruefe JEDE Uebung BEVOR du sie ausgibst:
-1. Setze die korrekte Option in den Satz ein -> ist er grammatisch PERFEKT?
-2. Setze JEDE falsche Option ein -> enthaelt der Satz einen KLAREN grammatischen Fehler?
-3. Gibt es GENAU EINE korrekte Antwort? Wenn zwei Optionen korrekt sein koennten -> Uebung neu formulieren!
-4. Passt die Uebung zum Thema "${grammarTopic}" und zum Niveau ${level}?
-5. Sind die Saetze natuerlich und vollstaendig?
+LOESUNGEN
+1: A = ${optionExample}
+2: C = exakter Text der Option C
 
-Antworte NUR mit einem validen JSON-Objekt nach dem vorgegebenen Schema, KEIN Markdown, KEINE Erklaerungen:
-{"questions":[{"text":"Anweisung auf Russisch","display":"Text","options":["A","B","C","D"],"correct":0}]}`;
+Schreibe jetzt den vollstaendigen Block mit ${questionsCount} Aufgaben und danach den Loesungen.`;
 }
 
 async function readJsonBody(req) {
@@ -369,61 +481,7 @@ async function requestAiText(messages, maxCompletionTokens = 512, model = AITUNN
 
 function buildQuestionSystemPrompt(language = 'de') {
   const targetLanguage = language === 'fr' ? 'Franzoesisch' : 'Deutsch';
-  return `Du bist ein sehr genauer Autor fuer ${targetLanguage}-Uebungen. Befolge alle Regeln strikt, schreibe natuerliche Saetze und liefere nur Inhalte, die exakt zur geforderten JSON-Struktur passen.`;
-}
-
-function buildQuestionSchema({ isWortstellung, questionsCount, language }) {
-  const targetLanguage = language === 'fr' ? 'franzoesische' : 'deutsche';
-  const displayDescription = isWortstellung
-    ? `${targetLanguage} Woerter oder Satzteile, getrennt durch " / ", in zufaelliger Reihenfolge. Darf nicht der korrekten Reihenfolge entsprechen.`
-    : `Ein ${targetLanguage}r Satz oder ein Satzfragment mit genau einer Luecke ___.`;
-
-  return {
-    name: isWortstellung ? 'word_order_questions' : 'grammar_questions',
-    strict: true,
-    schema: {
-      type: 'object',
-      additionalProperties: false,
-      required: ['questions'],
-      properties: {
-        questions: {
-          type: 'array',
-          minItems: questionsCount,
-          maxItems: questionsCount,
-          items: {
-            type: 'object',
-            additionalProperties: false,
-            required: ['text', 'display', 'options', 'correct'],
-            properties: {
-              text: {
-                type: 'string',
-                description: 'Kurze Anweisung auf Russisch.'
-              },
-              display: {
-                type: 'string',
-                description: displayDescription
-              },
-              options: {
-                type: 'array',
-                minItems: 4,
-                maxItems: 4,
-                items: {
-                  type: 'string'
-                },
-                description: `Vier ${targetLanguage} Antwortoptionen. Genau eine ist korrekt.`
-              },
-              correct: {
-                type: 'integer',
-                minimum: 0,
-                maximum: 3,
-                description: 'Index der einzig richtigen Antwort.'
-              }
-            }
-          }
-        }
-      }
-    }
-  };
+  return `Du bist ein sehr genauer Autor fuer ${targetLanguage}-Uebungen. Befolge alle Regeln strikt, schreibe natuerliche Saetze und liefere nur den geforderten AUFGABEN/LOESUNGEN-Block.`;
 }
 
 function extractMessageText(content) {
@@ -453,7 +511,7 @@ function extractMessageText(content) {
   return '';
 }
 
-function parseGeneratedQuestions(payload) {
+function parseGeneratedQuestions(payload, expectedCount) {
   const message = payload && payload.choices && payload.choices[0] && payload.choices[0].message;
   if (!message) {
     throw new Error('AITunnel returned no message content');
@@ -468,12 +526,9 @@ function parseGeneratedQuestions(payload) {
     throw new Error('AITunnel returned an empty completion');
   }
 
-  const jsonText = rawText.replace(/^```json\s*|\s*```$/g, '').trim();
-  const parsed = JSON.parse(jsonText);
-  const questions = Array.isArray(parsed) ? parsed : parsed.questions;
-
-  if (!Array.isArray(questions)) {
-    throw new Error('Model response does not contain a questions array');
+  const questions = parseSyntheticQuestions(rawText, expectedCount);
+  if (!questions.length) {
+    throw new Error('Model response does not contain valid AUFGABEN/LOESUNGEN questions');
   }
 
   return questions;
@@ -497,12 +552,7 @@ async function requestQuestionsFromAitunnel({ prompt, isWortstellung, questionsC
         messages: [
           { role: 'system', content: buildQuestionSystemPrompt(language) },
           { role: 'user', content: prompt }
-        ],
-        structured_outputs: true,
-        response_format: {
-          type: 'json_schema',
-          json_schema: buildQuestionSchema({ isWortstellung, questionsCount, language })
-        }
+        ]
       })
     });
 
@@ -535,7 +585,7 @@ async function requestAiQuestions({ prompt, isWortstellung, questionsCount, lang
         questionsCount,
         language
       });
-      return parseGeneratedQuestions(payload);
+      return parseGeneratedQuestions(payload, questionsCount);
     } catch (error) {
       lastError = error;
     }
